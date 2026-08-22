@@ -39,7 +39,9 @@ conclusions that survive.
 - **Security / deterrence:** brinkmanship (Chicken — mutual crash is worst) vs coordination (Stag Hunt — mutual C is best) — wrong game = wrong advice.
 - **Trust & noise:** will a misread fuel shock or closed stats tip you into mutual defect? Test `noise`/`drift`/`values`.
 
-If your story has “we meet again next quarter” — it fits. You describe in 2 sentences, you get in 60 seconds: who likely wins, does cooperation hold, what breaks it, and the one check to do first — plain words, no metrics in the verdict.
+**When to use it:** if your story keeps repeating — “we meet again next quarter / next round” — it fits.
+
+**What you get in 60 seconds:** you describe it in 2 sentences, Claude returns a plain 2–3 sentence verdict — who likely comes out ahead, whether cooperation holds, what makes it break, and the single real-world fact to check first. No tables, no metrics in the verdict — those are in the appendix.
 
 **Prompts that trigger it:** `run this through game theory` · `war-game this` · `what happens if` · `who wins` · `should I cooperate`
 
