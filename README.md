@@ -12,6 +12,17 @@ simulator hundreds of times and tells you, in plain language:
 It never reports a single lucky run. It jiggles every guess and keeps only the
 conclusions that survive.
 
+### The game in 30 seconds (IPD)
+
+Two sides meet again and again. Each round each picks **C** (cooperate — hold price, keep pact, swerve) or **D** (defect — undercut, poach, hold firm). Payoffs per round:
+
+- `R` — both C (the deal holds)
+- `T` — you D, they C (you steal the upside)
+- `P` — both D (mutual grind)
+- `S` — you C, they D (you get suckered)
+
+Different games = different orders: Prisoner's Dilemma `T>R>P>S` (defection tempting, mutual defect survivable), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual cooperation is best). The *shadow of the future* `w` is the chance you meet again; `noise` is the chance a move is misread. Temperaments (TFT, Grim, Generous, Adaptive…) are just rules for “what to do given what they just did”. The engine replays the same story 600 times with all guesses jiggled — only a conclusion that wins in most worlds is reported.
+
 ---
 
 ## Install
@@ -82,7 +93,11 @@ pnpm demo        # plain-words demo run
 |------|-----------|
 | `SKILL.md` | Instructions Claude follows (how to model and interpret honestly) |
 | `scenario` | Shim to `src/cli.ts` (`./scenario example_model.json 600`) |
-| `example_model.json` | Worked example: two startups with a fragile pact |
+| `example_model.json` | Fragile pact — Prisoner's Dilemma (default) |
+| `example_chicken.json` | Brinkmanship — Chicken (mutual escalation is worst) |
+| `example_stag_hunt.json` | Coordination — Stag Hunt (mutual C is best) |
+| `example_team.json` | Fixed coalition — 2 colluders vs 2 solos (total vs per-capita) |
+| `example_drift.json` | Lean & drift — forgiving vs prober with `values`/`drift` |
 | `reference_axelrod.md` | Background: the game-theory methods and code it's built on |
 | `src/` | `teob-ts` engine: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts`, `spatial.ts` |
 | `README.md` | This file |
