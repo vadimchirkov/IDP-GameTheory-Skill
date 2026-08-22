@@ -1,8 +1,8 @@
 # Game-Theory Scenarios — a Claude skill
 
-Describe a situation where two sides keep dealing with each other — a rivalry, a
-partnership, a price war, a standoff — and this skill runs it through a game-theory
-simulator hundreds of times and tells you, in plain language:
+Describe a situation where **2–10 sides** keep dealing with each other — a rivalry,
+partnership, price war, standoff, or **coalition vs coalition** — and this skill runs it
+through a game-theory simulator hundreds of times and tells you, in plain language:
 
 - who is likely to come out ahead (and how sure we can be),
 - whether cooperation holds or falls apart,
@@ -14,14 +14,16 @@ conclusions that survive.
 
 ### The game in 30 seconds (IPD)
 
-Two sides meet again and again. Each round each picks **C** (cooperate — hold price, keep pact, swerve) or **D** (defect — undercut, poach, hold firm). Payoffs per round:
+**2–10 sides** meet again and again. Each pair plays each round: each picks **C** (cooperate — hold price, keep pact, swerve) or **D** (defect — undercut, poach, hold firm). Payoffs per round (pairwise):
 
 - `R` — both C (the deal holds)
 - `T` — you D, they C (you steal the upside)
 - `P` — both D (mutual grind)
 - `S` — you C, they D (you get suckered)
 
-Different games = different orders: Prisoner's Dilemma `T>R>P>S` (defection tempting, mutual defect survivable), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual cooperation is best). The *shadow of the future* `w` is the chance you meet again; `noise` is the chance a move is misread. Temperaments (TFT, Grim, Generous, Adaptive…) are just rules for “what to do given what they just did”. The engine replays the same story 600 times with all guesses jiggled — only a conclusion that wins in most worlds is reported.
+Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (16: TFT/GTFT/WSLS/Grim/Adaptive/ZD/Southampton…) are rules for “what to do given history”. Engine replays the story 600 times with all ranges jiggled — only a conclusion that wins in most worlds is reported.
+
+**IPD features:** 3 games • 16 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
 
 ---
 
@@ -56,12 +58,11 @@ the folder into `~/.claude/skills/`.
 
 ## How to use it
 
-Just describe your situation to Claude in plain words. The skill triggers on things
-like *"run this through game theory"*, *"war-game this"*, *"what happens if"*,
-*"who wins"*, *"should I cooperate or not"*. Example:
+Just describe your situation to Claude in plain words — **2 to 10 sides, with or without coalitions**. The skill triggers on things like *"run this through game theory"*, *"war-game this"*, *"what happens if"*, *"who wins"*, *"should I cooperate or not"*. Example:
 
 > Two suppliers have an unspoken deal not to undercut each other. One is under
 > pressure to grow. Run this through game theory — what happens?
+> — or — Four firms: two incumbents in a pact vs two entrants — who holds the market?
 
 Claude will build the model, run it, and give you a plain-language read-out.
 
@@ -106,9 +107,12 @@ pnpm demo        # plain-words demo run
 
 ## What it covers
 
-- Three game types: prisoner's dilemma, chicken/brinkmanship, and stag hunt
-- 16 temperaments: TFT/GTFT/WSLS/grim/exploitative/ALLC/gradual/erratic/prober/contrite/detective/ZD-generous/ZD-extort/colluder/adaptive/southampton, per-side stakes, teams (`team`+`colluder` → `winPctTeam` total vs `winPctPerCapita`), values/drift (`values`+`drift`), spatial lattice (`src/spatial.ts` imitate-best/Fermi)
-- Reproducible runs (`--seed`), sensitivity includes `drift` + `value_<player>`
+- **N-player IPD (2–10):** round-robin pairwise, 3 games, 16 temperaments, `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
+- **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
+- **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
+- **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)
+- **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
+- **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
 ## Development (teob-ts)
 
