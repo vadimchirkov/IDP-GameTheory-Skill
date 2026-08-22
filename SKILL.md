@@ -161,10 +161,10 @@ top one as the recommended play, in plain words. (List every tactic the user cou
 realistically adopt in that player's `dispositions` so there's something to choose
 among.)
 
-**Scope.** This skill covers only **анализ сценария** (Monte-Carlo in
-`src/analysis.ts`). **Лаборатория эволюции** (`src/run.ts` `Run` aggregate,
+**Scope.** This skill covers only **scenario analysis** (Monte-Carlo in
+`src/analysis.ts`). **Evolution lab** (`src/run.ts` `Run` aggregate,
 `src/kernel.ts:tournament/evolve`, `src/projections.ts`, `pnpm demo`/`pnpm test`)
-— separate product, not invoked by the skill.
+and **spatial lattice** (`src/spatial.ts`) — separate kernels, not invoked by the skill.
 
 ## Stage 2b — Confirm only the pivots (don't bug the user about everything)
 
@@ -199,7 +199,7 @@ Report, in plain language:
   This phase transition is more actionable than any point prediction.
 - **What to verify first.** Restate the top sensitivity as a real-world question
   ("go find out how likely each side is to misread the other's moves").
-- **State the limits.** Round-robin pairwise; fixed teams via `team`+`colluder` are now supported (`winPctTeam` total vs `winPctPerCapita` for different-size blocs, `champion` = best individual). If `colluder` not used, coalitions are still pairwise — flag it (see `reference_axelrod.md` §9). Spatial/lattice (`src/spatial.ts` grid `imitate-best`/`fermi`, `b/c>k`) is a separate kernel, not Monte-Carlo. Payoffs can be asymmetric per player, so use that rather than apologizing for shared stakes.
+- **State the limits.** Fixed teams only (`team`+`colluder`, no mid-game betrayal or handshake spoofing); `values`/`drift` is a single lean per player, not communication; spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`, `b/c>k`) and evolution lab are separate kernels with different update rules. Payoffs can be asymmetric per player — use that rather than apologizing for shared stakes. If your situation needs dynamic coalitions, LLM agents, or memory-n>2, flag it (see `reference_axelrod.md` §9).
 
 ## What NOT to do
 

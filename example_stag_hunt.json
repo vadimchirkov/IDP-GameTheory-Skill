@@ -1,0 +1,34 @@
+{
+  "situation": "Two firms deciding whether to jointly build a shared standard or defect to proprietary stacks — mutual cooperation is clearly best",
+  "game": "stag_hunt",
+  "players": [
+    {
+      "name": "PlatformX",
+      "dispositions": ["provocable", "trusting", "pavlov"],
+      "note": "Wants to coordinate but will revert if burned"
+    },
+    {
+      "name": "PlatformY",
+      "dispositions": ["provocable", "gradual", "trusting"],
+      "note": "Conditional cooperator, slow to trust"
+    }
+  ],
+  "payoffs": {
+    "T": [3, 4],
+    "R": [4, 6],
+    "P": [1, 2],
+    "S": [0, 1]
+  },
+  "structure": {
+    "w": [0.75, 0.95],
+    "noise": [0.0, 0.08]
+  },
+  "rationale": {
+    "R": "both hunt stag = shared standard wins market, best",
+    "T": "defect while they cooperate = short-term proprietary gain but smaller than shared win",
+    "P": "both defect = fragmented market, mediocre",
+    "S": "cooperate while they defect = wasted investment, worst cooperative",
+    "w": "standard window: partnership horizon 1-2 years",
+    "noise": "spec misread or delayed commit looks like defection"
+  }
+}

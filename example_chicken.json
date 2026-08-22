@@ -1,0 +1,34 @@
+{
+  "situation": "Two nuclear-armed blocs in a brinkmanship standoff over a strait — mutual escalation is the worst outcome, backing down is survivable",
+  "game": "chicken",
+  "players": [
+    {
+      "name": "BlocA",
+      "dispositions": ["provocable", "gradual", "contrite"],
+      "note": "Signals resolve but fears misread, escalates gradually"
+    },
+    {
+      "name": "BlocB",
+      "dispositions": ["provocable", "detective", "grim"],
+      "note": "Tests opponent early, then mirrors or locks in"
+    }
+  ],
+  "payoffs": {
+    "T": [4, 6],
+    "R": [3, 4],
+    "S": [2, 3],
+    "P": [-1, 1]
+  },
+  "structure": {
+    "w": [0.8, 0.97],
+    "noise": [0.0, 0.12]
+  },
+  "rationale": {
+    "R": "both swerve = face-saving de-escalation, steady",
+    "T": "swerve while they hold firm = political win without war",
+    "S": "swerve? actually hold firm while they swerve? No — S is swerving while they swerve? In chicken S> P: mutual defect (both hold firm) is catastrophe",
+    "P": "both hold firm = crash, worst — negative to low",
+    "w": "standoff could last months or snap to talks, wide",
+    "noise": "radar glitch or rhetoric misread as escalation"
+  }
+}

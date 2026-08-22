@@ -1,0 +1,37 @@
+{
+  "situation": "A forgiving incumbent vs a probing entrant — initial lean and drift matter as trust erodes or builds after each observed move",
+  "players": [
+    {
+      "name": "Incumbent",
+      "dispositions": ["forgiving", "provocable", "gradual"],
+      "values": [-0.2, 0.3],
+      "note": "Starts slightly cynical to slightly hopeful, then drifts with experience"
+    },
+    {
+      "name": "Entrant",
+      "dispositions": ["prober", "exploitative", "adaptive"],
+      "values": [0, 0],
+      "note": "Tests early, neutral lean"
+    }
+  ],
+  "payoffs": {
+    "T": [4, 6],
+    "R": [3, 4],
+    "P": [1, 2],
+    "S": [-1, 1]
+  },
+  "structure": {
+    "w": [0.6, 0.95],
+    "noise": [0.02, 0.12],
+    "drift": [0.0, 0.05]
+  },
+  "rationale": {
+    "R": "sustained cooperation = partnership value",
+    "T": "probe success while they cooperate = quick gain",
+    "P": "mutual probe = friction",
+    "S": "be duped while forgiving = reputation cost",
+    "w": "relationship may be short pilot or long contract",
+    "noise": "intent vs observed move gap",
+    "drift": "how fast trust erodes/builds after observed D/C"
+  }
+}

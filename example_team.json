@@ -1,0 +1,45 @@
+{
+  "situation": "Two colluding incumbents vs two independent entrants — colluders share spoils, team win is total, per-capita shows free-rider tension",
+  "players": [
+    {
+      "name": "IncumbentA",
+      "team": "incumbents",
+      "dispositions": ["colluder", "provocable"],
+      "note": "Fixed coalition, plays C vs teammate / TFT vs outsider"
+    },
+    {
+      "name": "IncumbentB",
+      "team": "incumbents",
+      "dispositions": ["colluder"],
+      "note": "Loyal colluder"
+    },
+    {
+      "name": "EntrantC",
+      "dispositions": ["provocable", "exploitative", "adaptive"],
+      "note": "Opportunistic, tests cooperation"
+    },
+    {
+      "name": "EntrantD",
+      "dispositions": ["gradual", "contrite"],
+      "note": "Forgiving escalator"
+    }
+  ],
+  "payoffs": {
+    "T": [4, 6],
+    "R": [3, 4],
+    "P": [1, 2],
+    "S": [-1, 1]
+  },
+  "structure": {
+    "w": [0.7, 0.95],
+    "noise": [0.0, 0.1]
+  },
+  "rationale": {
+    "R": "mutual cooperation = stable market shares",
+    "T": "undercut while they hold price = steal share",
+    "P": "mutual undercut = price war",
+    "S": "hold price while undercut = lose share",
+    "w": "oligopoly horizon, regulatory shift could end it",
+    "noise": "price signal misread"
+  }
+}

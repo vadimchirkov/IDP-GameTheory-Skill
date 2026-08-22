@@ -104,8 +104,6 @@ pnpm demo                 # evolution demo
 pnpm scenario example_model.json 600 --seed 42
 ```
 
-Docs: `PROJECT_ARCHITECTURE.md` (вертикаль teob-ts, фазы), `RESEARCH_SYNTHESIS.md` (роадмап), `case_A_*` (evolution/spatial), `more-things.md` (исследования).
-
 ## The one honest limitation
 
-Spatial/lattice (`src/spatial.ts`) is a separate kernel (grid `imitate-best`/`fermi`, `b/c>k`), not part of Monte-Carlo scenario analysis. Best-play `--advise` is planned (use `analyzeScenario` API directly).
+Fixed teams only (`team` + `colluder`): no mid-game betrayal, no handshake spoofing, no dynamic coalitions. `values`/`drift` is a single lean per player, not emotion or cheap talk. Spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`, `b/c>k`) and evolution lab (`src/run.ts`) run on separate kernels — not mixed into the scenario Monte-Carlo. No LLM or memory-n>2 in default runs. If your situation hinges on those, the skill will flag it rather than fake it.
