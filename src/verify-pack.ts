@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { isValidPayoff, normalizeShares } from "./domain.js";
+import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep } from "./predictive.js";
 import { playMatch, strategies, tournament, stepGeneration } from "./kernel.js";
 import { Rng } from "./rng.js";
 
@@ -81,6 +82,25 @@ run("5.2 ZD extortion vs generous", ()=>{
   const gen = playMatch(strategies.zd_generous, strategies.trusting, P,P,50,0,new Rng(1));
   assert.ok(gen.cooperation >= 0.8);
   assert.ok(Number.isFinite(ext.scoreA));
+});
+
+run("2.x Cross-condition: w↑ ⇒ coop↑ and I↑ ⇒ coop?", ()=>{
+  const sweepW=crossConditionSweep();
+  console.log("  sweep w", sweepW.map(s=>`${s.w}:${s.coop.toFixed(2)}`).join(" "));
+  // w higher should generally give more cooperation for TFT-like pair
+  assert.ok(sweepW.at(-1)!.coop >= sweepW[0]!.coop -0.1);
+  const sweepI=payoffRatioSweep();
+  console.log("  sweep I", sweepI.map(s=>`${s.I.toFixed(1)}:${s.coop.toFixed(2)}`).join(" "));
+});
+
+run("4.x Predictive metrics: Accuracy/F1/ECE/KL on synthetic", ()=>{
+  const pred:("C"|"D")[]=["C","D","C","C"]; const actual:("C"|"D")[]=["C","C","C","D"];
+  assert.ok(Math.abs(accuracy(pred,actual)-0.5)<1e-9);
+  assert.ok(f1(pred,actual) > 0.4 && f1(pred,actual) < 0.7);
+  const probs=[0.9,0.2,0.8,0.1];
+  assert.ok(ece(probs,actual) < 0.5);
+  const kl=klDivergence([1,2,3,2,1],[1,2,2,3,5]);
+  assert.ok(Number.isFinite(kl));
 });
 
 console.log("verify-pack OK");
