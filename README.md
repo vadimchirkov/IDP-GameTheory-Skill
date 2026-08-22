@@ -13,6 +13,8 @@ It never reports a single lucky run. It jiggles every guess and keeps only the
 conclusions that survive.
 
 > **The classic story — [Prisoner's dilemma on Wikipedia](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma):** *Two members of a gang are arrested and held in solitary with no contact. Police lack evidence for the main charge — both face 1 year on a lesser count — and offer each a Faustian bargain: testify against the partner → go free while the other gets 3 years; if both testify → 2 years each; if both stay silent → 1 year each.* → `T = free, R = 1y, P = 2y, S = 3y` (`T>R>P>S`, `2R>T+S` prevents alternating C/D from beating steady `R`).
+>
+> The same 2×2 table shows up everywhere — price wars and cartels, climate pacts and overfishing, doping in sports, trench warfare and arms races, bacteria and academic co-authorship — only the stakes change.
 
 <details>
 <summary><strong>Learn more — Wikipedia</strong></summary>
