@@ -10,19 +10,21 @@ async function humanBench(){
   try{
     const text=await readFile("/tmp/human-data/dilemmaRL/data/all_data.csv","utf8");
     const lines=text.trim().split("\n"); const h=lines[0].split(",").map(s=>s.replace(/"/g,"").trim());
-    const iMy=h.indexOf("my.decision"), iMy1=h.indexOf("my.decision1"), iOpp1=h.indexOf("other.decision1");
+    const iMy=h.indexOf("my.decision"), iOpp1=h.indexOf("other.decision1");
     let y=[], correctTFT=0, total=0;
     for(let i=1;i<lines.length;i++){
       const c=lines[i].split(",").map(s=>s.replace(/"/g,"").trim());
       const cur=c[iMy]; if(cur!=="coop"&&cur!=="defect") continue;
       const per=Number(c[h.indexOf("period")]||0); if(per<=3) continue;
-      const pred=c[iOpp1] ?? "NA"; // TFT predicts opp last
+      const raw=c[iOpp1] ?? "NA";
+      const pred = raw==="1" ? "coop" : raw==="0" ? "defect" : "NA";
       const actual=cur;
       total++; if(pred===actual || (pred==="NA"&&actual==="coop")) correctTFT++;
       y.push(actual==="coop"?1:0);
     }
     const baseD=y.filter(v=>v===0).length / y.length;
-    console.log(`[human] dilemmaRL ${y.length} moves base ALL D ${(baseD*100).toFixed(1)}% TFT ~${(correctTFT/total*100).toFixed(1)}%`);
+    const baseC=1-baseD;
+    console.log(`[human] dilemmaRL ${y.length} moves base ALL D ${(baseD*100).toFixed(1)}% ALL C ${(baseC*100).toFixed(1)}% TFT ${(correctTFT/total*100).toFixed(1)}%`);
   }catch(e){ console.log("[human] skip — no data, run synthetic only"); }
 }
 async function midBench(){
