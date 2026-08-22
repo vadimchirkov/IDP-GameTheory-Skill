@@ -160,7 +160,7 @@ Same `C/D` for systems: *state keeps treaty vs defects, firm holds price vs unde
 | **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) + Yale 50 routes 2019 (daily) | 50×270 days | ~55% hold | preview synthetic 56.7% (`alld`) — live pull next |
 | **People — lab** | `dilemmaRL` 91k moves (168k) + `Dal Bó` 100k | 91k | ALL D 56.7% / ALL C 43.3% | **TFT/semigrim 56.7% (=baseline)** — human noise caps `~60%` (literature) |
 
-*Live runs done: `dilemmaRL` 91k + `COW MID` 19.8k dyad-years (TFT +4.3pp / +16.6pp top 20) + `China-TIES` 127 cases 358y TFT 91.1% (+21.8pp). `pnpm test` 11 tests green. Cross-validation vs [Axelrod-Python](https://github.com/Axelrod-Python/Axelrod) успешно пройдено — TFT/GTFT/WSLS vs ALLD/ALLC/ZD в пределах 5% (`pnpm cross:validate`).*
+*Live runs done: `dilemmaRL` 91k + `COW MID` 19.8k dyad-years (TFT +4.3pp / +16.6pp top 20) + `China-TIES` 127 cases 358y TFT 91.1% (+21.8pp). `pnpm test` 14 tests green. Cross-validation vs [Axelrod-Python](https://github.com/Axelrod-Python/Axelrod) passed — TFT/GTFT/WSLS vs ALLD/ALLC/ZD within 5% (`pnpm cross:validate`).*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
