@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isValidPayoff, normalizeShares } from "./domain.js";
+import { assertScenario, isValidPayoff, normalizeShares } from "./domain.js";
 import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions, predictiveReport } from "./predictive.js";
 import { playMatch, strategies, tournament, stepGeneration } from "./kernel.js";
 import { Rng } from "./rng.js";
@@ -115,6 +115,21 @@ run("4.y Weak spots — balanced accuracy, ECE, transitions vs Markov", ()=>{
   assert.ok(Math.abs(tr2.retentionAcc-1)<0.01 && Math.abs(tr2.transitionAcc-0)<0.01);
   const mkPred:("C"|"D")[]=["C","D","C"], mkActual:("C"|"D")[]=["C","C","C"];
   assert.ok(Math.abs(accuracy(mkPred,mkActual)-0.66)<0.02);
+});
+
+run("4.z Snowdrift game T>R>S>P", ()=>{
+  assert.ok(isValidPayoff("snowdrift", {T:5,R:3,S:1,P:0}));
+  assert.ok(!isValidPayoff("snowdrift", {T:5,R:3,P:1,S:0}));
+  const sd={T:5,R:3,S:1,P:0};
+  const m=playMatch(strategies.provocable, strategies.alld, sd,sd,20,0,new Rng(1));
+  assert.ok(Number.isFinite(m.scoreA) && Number.isFinite(m.scoreB));
+});
+
+run("4.za Dynamic coalitions fields", ()=>{
+  assert.doesNotThrow(()=> normalizeShares({provocable:0.5, alld:0.5}));
+  const m={ situation:"coalition betrayal", players:[{name:"A", dispositions:["colluder"], team:"c1", betrayalProb:0.05} as any, {name:"B", dispositions:["colluder"], team:"c1"} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any;
+  assert.doesNotThrow(()=> assertScenario(m as any));
+  (m as any).players[0].betrayalProb=2; assert.throws(()=> assertScenario(m as any));
 });
 
 run("4.z PredictiveReport + imbalanced + retention vs transition (friend proposal)", ()=>{

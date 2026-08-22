@@ -9,7 +9,8 @@
     "scenario": "tsx src/cli.ts",
     "scenario:build": "tsx src/cli.ts --build",
     "verify": "tsx src/verify-pack.ts",
-    "bench:predictive": "tsx src/bench-predictive.ts"
+    "bench:predictive": "tsx src/bench-predictive.ts",
+    "cross:validate": "tsx src/cross_validate.ts && python3 scripts/cross_validate.py"
   },
   "dependencies": {
     "@lambda-house/teob-ts": "0.2.2"

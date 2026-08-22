@@ -1,5 +1,5 @@
 export type Move = "C" | "D";
-export type GameType = "prisoners_dilemma" | "chicken" | "stag_hunt";
+export type GameType = "prisoners_dilemma" | "chicken" | "stag_hunt" | "snowdrift";
 export type Range = readonly [number, number];
 
 export interface Payoff {
@@ -21,6 +21,8 @@ export interface ScenarioPlayer {
   dispositions: readonly StrategyId[];
   team?: string;
   values?: Range;
+  betrayalProb?: number;
+  handshakeSpoof?: number;
 }
 
 export interface ScenarioModel {
@@ -58,6 +60,7 @@ export interface RunConfig {
 export function isValidPayoff(game: GameType, p: Payoff): boolean {
   if (game === "chicken") return p.T > p.R && p.R > p.S && p.S > p.P;
   if (game === "stag_hunt") return p.R > p.T && p.T > p.P && p.P > p.S;
+  if (game === "snowdrift") return p.T > p.R && p.R > p.S && p.S > p.P;
   return p.T > p.R && p.R > p.P && p.P > p.S && 2 * p.R > p.T + p.S;
 }
 
@@ -82,6 +85,8 @@ export function assertScenario(model: ScenarioModel): void {
       const v = player.values;
       if (!Number.isFinite(v[0]) || !Number.isFinite(v[1]) || v[0] > v[1] || v[0] < -1 || v[1] > 1) throw new Error(`values for ${player.name} must be an ordered range within -1..1`);
     }
+    if (player.betrayalProb !== undefined && (!Number.isFinite(player.betrayalProb) || player.betrayalProb < 0 || player.betrayalProb > 1)) throw new Error(`betrayalProb for ${player.name} must be 0..1`);
+    if (player.handshakeSpoof !== undefined && (!Number.isInteger(player.handshakeSpoof) || player.handshakeSpoof < 0)) throw new Error(`handshakeSpoof for ${player.name} must be integer >=0`);
   }
   assertRange(model.structure.w, "w", 0.9995);
   assertRange(model.structure.noise, "noise", 1);
