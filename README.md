@@ -37,6 +37,10 @@ Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` �
 
 **IPD features:** 3 games • 19 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
 
+> **Classic story (from [Prisoner's dilemma — Wikipedia](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma)):** *Two members of a gang are arrested. If both stay silent — 1 year each. If one testifies and the other stays silent — free vs 3 years. If both testify — 2 years each.* The engine uses the same `T=go free, R=1y, P=2y, S=3y` ordering `T>R>P>S` and `2R>T+S`.
+
+Learn more: [Prisoner's dilemma](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma) • [Iterated PD](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#The_iterated_prisoner%27s_dilemma) • [Chicken](https://en.wikipedia.org/wiki/Chicken_(game)) • [Stag hunt](https://en.wikipedia.org/wiki/Stag_hunt) • [Axelrod's tournament / Tit for tat](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Axelrod's_tournament_and_successful_strategy_conditions) • [Zero-determinant](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Zero-determinant_strategies) • Real-life: [economics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Economics) / [international politics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#International_politics)
+
 ---
 
 ## Install
