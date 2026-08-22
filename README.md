@@ -37,6 +37,11 @@ Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` �
 
 **IPD features:** 3 games • 19 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
 
+![Cooperation cliff — w vs noise](assets/coop-cliff.svg)
+![Team total vs per-capita — who really wins](assets/win-pct.svg)
+
+*Plain SVG, no build — GitHub renders natively. Alternatives for richer charts: Mermaid (` ```mermaid` in README), [QuickChart](https://quickchart.io) URL charts, or Vega-Lite — but for README, static SVG is fastest and ponytail-clean.*
+
 ---
 
 ## Install
@@ -119,7 +124,7 @@ pnpm demo        # plain-words demo run
 
 ## What it covers
 
-- **N-player IPD (2–10):** round-robin pairwise, 3 games, 16 temperaments, `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
+- **N-player IPD (2–10):** round-robin pairwise, 3 games, 19 temperaments, `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
 - **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
 - **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
 - **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)

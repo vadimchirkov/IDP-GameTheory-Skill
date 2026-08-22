@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="220" viewBox="0 0 640 220">
+  <rect width="640" height="220" fill="white" stroke="#e5e7eb" rx="12"/>
+  <text x="320" y="24" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" fill="#111827" font-weight="600">Cooperation cliff — shadow (w) vs noise</text>
+  <line x1="60" y1="180" x2="600" y2="180" stroke="#9ca3af"/><line x1="60" y1="180" x2="60" y2="40" stroke="#9ca3af"/>
+  <text x="60" y="200" font-size="11" fill="#6b7280">low w / high noise</text><text x="480" y="200" font-size="11" fill="#6b7280">high w / low noise → holds</text>
+  <text x="20" y="50" font-size="11" fill="#6b7280">coop</text><text x="20" y="185" font-size="11" fill="#6b7280">0</text>
+  <path d="M 70 160 C 180 155, 260 140, 340 90 S 500 45, 590 42" fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="340" cy="90" r="5" fill="#2563eb"/><text x="348" y="85" font-size="11" fill="#2563eb">cliff ~ w 0.7 / noise 10%</text>
+  <text x="320" y="215" text-anchor="middle" font-size="10" fill="#9ca3af">600 worlds jiggle — only conclusions past the cliff are reported</text>
+</svg>
