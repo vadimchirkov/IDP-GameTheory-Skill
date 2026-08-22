@@ -120,6 +120,12 @@ export const strategies: Record<StrategyId, Strategy> = {
     if (handOk) return "C";
     return "D";
   },
+  alld: () => "D",
+  allc: () => "C",
+  tf2t: (_mine, theirs) => {
+    if (theirs.length < 2) return "C";
+    return theirs.at(-1) === "D" && theirs.at(-2) === "D" ? "D" : "C";
+  },
 };
 
 export { makeMemoryOne as memoryOne, makeMemoryN as memoryN };

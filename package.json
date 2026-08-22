@@ -4,10 +4,11 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "tsx src/selfcheck.ts",
+    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts",
     "demo": "tsx src/demo.ts",
     "scenario": "tsx src/cli.ts",
-    "scenario:build": "tsx src/cli.ts --build"
+    "scenario:build": "tsx src/cli.ts --build",
+    "verify": "tsx src/verify-pack.ts"
   },
   "dependencies": {
     "@lambda-house/teob-ts": "0.2.2"

@@ -35,7 +35,7 @@ export const strategyIds = [
   "provocable", "forgiving", "pavlov", "grim", "exploitative",
   "trusting", "gradual", "erratic", "prober",
   "contrite", "detective", "zd_generous", "zd_extort", "colluder",
-  "adaptive", "southampton",
+  "adaptive", "southampton", "alld", "allc", "tf2t",
 ] as const;
 export type StrategyId = (typeof strategyIds)[number];
 
