@@ -15,7 +15,7 @@ description: >
 
 Turn a prose situation into a repeated-game model, Monte-Carlo it, and report
 **only what survives the uncertainty**. The engine is `src/cli.ts` on the
-`teob-ts` kernel (`src/kernel.ts` + `src/analysis.ts` + `src/rng.ts`,
+[`teob-ts`](https://github.com/lambda-house/teob-ts) kernel (`src/kernel.ts` + `src/analysis.ts` + `src/rng.ts`,
 background in `reference_axelrod.md`). Your job is the two ends
 the engine can't do: honest elicitation (stage 1) and honest interpretation
 (stage 3).

@@ -52,7 +52,7 @@ git -C ~/.claude/skills/game-theory-scenarios pull
 No git? Download the ZIP from the GitHub page ("Code → Download ZIP") and unzip
 the folder into `~/.claude/skills/`.
 
-**Requirements:** Node 20+, pnpm. Engine is `teob-ts` (`src/`). Check with `node --version && pnpm --version`.
+**Requirements:** Node 20+, pnpm. Engine is [`teob-ts`](https://github.com/lambda-house/teob-ts) (`src/`). Check with `node --version && pnpm --version`.
 
 ---
 
@@ -100,7 +100,7 @@ pnpm demo        # plain-words demo run
 | `example_team.json` | Fixed coalition — 2 colluders vs 2 solos (total vs per-capita) |
 | `example_drift.json` | Lean & drift — forgiving vs prober with `values`/`drift` |
 | `reference_axelrod.md` | Background: the game-theory methods and code it's built on |
-| `src/` | `teob-ts` engine: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts`, `spatial.ts` |
+| `src/` | [`teob-ts`](https://github.com/lambda-house/teob-ts) engine: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts`, `spatial.ts` |
 | `README.md` | This file |
 
 ---
@@ -114,7 +114,7 @@ pnpm demo        # plain-words demo run
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Development (teob-ts)
+## Development ([teob-ts](https://github.com/lambda-house/teob-ts))
 
 ```bash
 pnpm install
