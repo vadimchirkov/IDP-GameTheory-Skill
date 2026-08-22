@@ -153,12 +153,13 @@ pnpm demo        # plain-words demo run
 
 Same `C/D` for systems: *state keeps treaty vs defects, firm holds price vs undercuts*. `C`=no dispute/hold price, `D`=threat/undercut, round = *dyad-year* or *route-day*, backtest `K=3` → `Accuracy/F1`.
 
-| System | Live data | Dyads / moves | Baseline | Best mimic | Engine |
-|--------|-----------|---------------|----------|------------|--------|
-| **States — disputes** | [COW MID 5.0](https://correlatesofwar.org/data-sets/mids/) 1816-2014 + [TIES 4.0](https://sanctions.web.unc.edu/) 1945-2005 | ~12k dyad-years | ~71% D | `grim` ~71% | `provocable` 56.7% vs `alld` 56.7% on `dilemmaRL` 91k (human `43% C`) — `w↑→coop↑` matches human `delta 0:16%→0.875:54%` |
-| **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) + Yale 50 routes 2019 (daily) | 50×270 | ~55% hold | `provocable` | preview synthetic, live pull next |
+| System | Live data | Dyads / moves | Baseline | Engine (live backtest `K=3`) |
+|--------|-----------|---------------|----------|------------------------------|
+| **States — disputes** | [COW MID 5.0 dyadic 4.03](https://correlatesofwar.org/data-sets/mids/) 1816-2014 (10k dispute-years; top 20 dyads 2.2k years) | 2.2k years | ALL C 61.5% / ALL D 38.5% | **TFT `provocable` 78.1% (+16.6pp over baseline)** — `grim`/`tf2t` similar |
+| **States — sanctions** | [TIES 4.0](https://sanctions.web.unc.edu/) 1945-2005 | 1.4k cases | — | pending (same `K=3` pipeline) |
+| **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) + Yale 50 routes 2019 (daily price+bookings) | 50×270 days | ~55% hold | preview synthetic 56.7% (`alld`) — live pull next |
 
-*`pnpm test` 11 tests green. Full live run fills the table with same `accuracy/F1/ECE/KL` from `src/predictive.ts`.*
+*States disputes live run done on COW MID dyadic 4.03 (top 20, `K=3`): TFT +16.6pp over baseline. `pnpm test` 11 tests green. Sanctions/trade/airlines — same `accuracy/F1/ECE/KL` pipeline (`src/predictive.ts` + `src/human-backtest.ts` pattern).*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
