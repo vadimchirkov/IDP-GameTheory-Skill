@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 640 160">
-  <rect width="640" height="160" fill="white" stroke="#e5e7eb" rx="12"/>
-  <text x="320" y="22" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" fill="#111827" font-weight="600">Who prevails — team total vs per-capita (example_team 600 worlds)</text>
-  <text x="80" y="55" font-size="12" fill="#111827">incumbents (2 colluders)</text><rect x="240" y="45" width="170" height="14" fill="#2563eb" rx="4"/><text x="415" y="56" font-size="12" fill="#111827">97% total</text>
-  <rect x="240" y="65" width="72" height="14" fill="#93c5fd" rx="4"/><text x="318" y="76" font-size="11" fill="#374151">42% per-capita</text>
-  <text x="80" y="105" font-size="12" fill="#111827">entrants (solo)</text><rect x="240" y="95" width="6" height="14" fill="#e5e7eb" rx="4"/><text x="250" y="106" font-size="11" fill="#6b7280">3% total / 58% per-capita</text>
-  <text x="320" y="145" text-anchor="middle" font-size="10" fill="#9ca3af">total = bloc power • per-capita = free-rider lens — both matter</text>
-</svg>
