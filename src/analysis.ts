@@ -57,6 +57,7 @@ function spatialTrial(model: ScenarioModel, rng: Rng, payoff: import("./domain.j
   let coopSum=0;
   for(let g=0;g<gens;g++){ if(rng.unit()<noise) grid[ri(size)]![ri(size)]= grid[ri(size)]![ri(size)]==="C"?"D":"C"; grid=stepSpatial(grid, payoff, "fermi", rng, K); coopSum+=coopRate(grid); }
   const finalCoop=coopRate(grid);
+  // Synthetic: lattice is C/D field, not per-player strategies — all players share global coop score (placeholder). Real per-player payoff requires mapping players→grid clusters (TODO spatial branch).
   const scores=new Map(model.players.map(p=>[p.name, finalCoop>0.5? finalCoop*10 : (1-finalCoop)*10]));
   return { cooperation: coopSum/gens, scores: scores as Map<string,number> };
 }

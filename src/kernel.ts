@@ -33,6 +33,7 @@ function makeMemoryN(probs: Record<string, number>, n: number): Strategy {
   };
 }
 
+/** Simplified ZD parameterization (chi/phi fixed). TODO: align with canonical Press-Dyson/Stewart-Plotkin; p3/p4 are placeholders identical for both variants. */
 function zdGenerousStrategy(): Strategy {
   const chi = 0.5; const phi = 0.15; const R = 3; const S = 0; const T = 5; const P = 1;
   const p1 = clamp(1 - phi * (1 - chi) * (R - P) / (P - S));
@@ -42,6 +43,7 @@ function zdGenerousStrategy(): Strategy {
   return makeMemoryOne(p1, p2, p3, p4);
 }
 
+/** Simplified ZD extortion — see note above. */
 function zdExtortStrategy(): Strategy {
   const chi = 2.0; const phi = 0.15; const R = 3; const S = 0; const T = 5; const P = 1;
   const p1 = clamp(1 - phi * (1 - chi) * (R - P) / (P - S));
@@ -64,7 +66,6 @@ function gradualPure(mine: readonly Move[], theirs: readonly Move[]): Move {
   return "C";
 }
 
-const llmCache = new Map<string, Move>();
 function memory2Hilbe(): Strategy {
   const probs: Record<string, number> = {
     "CC|CC": 1, "CC|CD": 1, "CC|DC": 0, "CC|DD": 0.3,
@@ -74,6 +75,7 @@ function memory2Hilbe(): Strategy {
   };
   return makeMemoryN(probs, 2);
 }
+/** Stub approximating LOLA intuition (retaliate + coop shaping). Not true Foerster LOLA (requires gradient ETA); keep as heuristic until RL branch. */
 function lolaStrategy(): Strategy {
   return (mine, theirs, rng) => {
     if (theirs.length === 0) return "C";
@@ -156,8 +158,8 @@ export const strategies: Record<StrategyId, Strategy> = {
     return theirs.at(-1) === "D" && theirs.at(-2) === "D" ? "D" : "C";
   },
   memory2: memory2Hilbe(),
-  lola: lolaStrategy(),
-  llm_agent: (_mine, theirs) => (theirs.length===0 ? "C" : theirs[theirs.length-1] ?? "C"),
+  lola: lolaStrategy(), // stub — see lolaStrategy() note
+  llm_agent: (_mine, theirs) => (theirs.length===0 ? "C" : theirs[theirs.length-1] ?? "C"), // stub TFT until teob-ai agentFlowAggregate
 };
 
 export { makeMemoryOne as memoryOne, makeMemoryN as memoryN };

@@ -16,17 +16,23 @@ export function runEvolution(model: ScenarioModel, generations=500, seed=42): { 
   return { trajectory: traj, fixation };
 }
 
-export function estimateFixation(mutant:string, resident:string, trials=200, N=50): number {
-  let wins=0;
-  for(let t=0;t<trials;t++){
-    const rng=new Rng(t*997);
-    let m=1, r=N-1;
-    for(let s=0;s<1000 && m>0 && m<N; s++){
-      const fm = rng.unit()>0.5? m+1 : m-1;
-      if(fm<0||fm>N) continue;
-      m = Math.max(0, Math.min(N, fm));
+/**
+ * Neutral-drift fixation placeholder — selection is ignored.
+ * Returns ≈1/N for any (mutant,resident) pair. Selective (payoff-aware)
+ * Moran is TODO and should reuse kernel.tournament fitness; kept as stub
+ * to avoid misleading selective claims.
+ */
+export function estimateFixation(_mutant: string, _resident: string, trials = 200, N = 50): number {
+  let wins = 0;
+  for (let t = 0; t < trials; t++) {
+    const rng = new Rng(t * 997);
+    let m = 1;
+    for (let s = 0; s < 1000 && m > 0 && m < N; s++) {
+      const next = rng.unit() > 0.5 ? m + 1 : m - 1;
+      if (next < 0 || next > N) continue;
+      m = next;
     }
-    if(m===N) wins++;
+    if (m === N) wins++;
   }
-  return wins/trials;
+  return wins / trials;
 }

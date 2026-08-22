@@ -134,7 +134,8 @@ pnpm demo        # plain-words demo run
 | `example_stag_hunt.json` | Coordination — Stag Hunt (mutual C is best) |
 | `example_team.json` | Fixed coalition — 2 colluders vs 2 solos (total vs per-capita) |
 | `example_drift.json` | Lean & drift — forgiving vs prober with `values`/`drift` |
-| `reference_axelrod.md` | Background: the game-theory methods and code it's built on |
+| `GAME_THEORY.md` | Game-theory methods and their code mapping (`kernel.ts`, `analysis.ts`, `spatial.ts`, `predictive.ts`) |
+| `PROJECT_ARCHITECTURE.md` | TEOB architecture: Aggregate/Effect/Codec/Journal/Projection, runtime envelope, determinism |
 | `src/` | [`teob-ts`](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts` (Aggregate), `spatial.ts` |
 | `README.md` | This file |
 

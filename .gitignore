@@ -5,8 +5,7 @@ dist/
 reports/
 *.report.json
 *.tips.md
-PROJECT_ARCHITECTURE.md
-RESEARCH_SYNTHESIS.md
-case_A_*.md
-more-things.md
+ai_frontier_*.json
+ai_frontier_*.report.json
+ai_frontier_*.tips.md
 russia_*.json

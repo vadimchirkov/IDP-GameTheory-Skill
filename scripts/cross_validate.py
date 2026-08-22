@@ -31,7 +31,7 @@ if HAS_AXL:
     assert results.ranked_names[0] != "Defector" or True
     print("Axelrod cross-check OK (qualitative)")
 else:
-    # Literature fallback: reference_axelrod.md expectations
+    # Literature fallback: GAME_THEORY.md §8 expectations
     print(
         "Fallback: TFT vs ALLD: TFT loses, ALLC vs ALLD: ALLD 500 in 100 rounds, etc. — checked in pnpm test"
     )
