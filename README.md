@@ -1,4 +1,4 @@
-# Game-Theory Scenarios — a Claude skill
+# IPD (Game-Theory Scenarios) — a Claude skill
 
 Describe a situation where **2–10 sides** keep dealing with each other — a rivalry,
 partnership, price war, standoff, or **coalition vs coalition** — and this skill runs it

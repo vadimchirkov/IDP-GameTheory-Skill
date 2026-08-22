@@ -11,14 +11,14 @@ description: >
   "model these players", "should I cooperate/defect", "war-game this".
 ---
 
-# Game-theory scenario simulator
+# IPD (Game-Theory Scenarios) — scenario simulator
 
 Turn a prose situation into a repeated-game model, Monte-Carlo it, and report
 **only what survives the uncertainty**. The engine is `src/cli.ts` on the
 [`teob-ts`](https://github.com/lambda-house/teob-ts) kernel — **Type-safe Event-sourcing Over Behaviours** (pure `Aggregate`/`Effect`/`Codec`/`Projection`, TEOB: DDD + Event Sourcing + CQRS + Actor) — (`src/kernel.ts` + `src/analysis.ts` + `src/rng.ts`, background in `reference_axelrod.md`). Your job is the two ends the engine can't do: honest elicitation (stage 1) and honest interpretation (stage 3).
 
-Plain version of what this does: someone describes a situation where two sides
-keep dealing with each other (a rivalry, a partnership, a standoff). You guess the
+Plain version of what this does: someone describes a situation where 2–10 sides
+keep dealing with each other (a rivalry, partnership, standoff, or coalition vs coalition). You guess the
 stakes as ranges, run the situation hundreds of times with those guesses jiggled,
 and report only the conclusions that hold up no matter how the guesses land.
 
