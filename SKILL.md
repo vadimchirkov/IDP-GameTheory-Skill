@@ -174,6 +174,25 @@ ask about the one or two that actually swing the outcome, then narrow *those*
 ranges and re-run. Numbers that don't move the conclusion stay wide; that's the
 whole point.
 
+## Build mode — let the runs improve the model
+
+When you iterate on the same JSON, run with the build flag:
+
+```bash
+pnpm scenario example_model.json 600 --build   # or --suggest / --improve
+./scenario example_model.json 600 --build
+```
+
+The CLI adds `buildTips` (from `src/feedback.ts`) and writes `example_model.report.json` + `example_model.tips.md` (gitignored). Tips point to the next edit:
+
+- `maxWin <60%` → widen `dispositions` SET, add asymmetric payoffs or `team`+`colluder`
+- `coop <35%` → lower `T` or add `forgiving`/`contrite`/`gradual`
+- `top sensitivity = noise/w/drift/value_<player>` → narrow that one range next (Stage 2b)
+- `3+ players without team and maxWin <55%` → add fixed coalition
+- `coopStd >30% without values/drift` → add `values`+`drift`
+
+In build mode, **apply one tip, re-run, check the delta** — the tips file is your changelog. Keep the loop tight: one hypothesis per run, green `pnpm test` each time.
+
 ## Stage 3 — Interpret honestly
 
 **Write for someone who has never heard of game theory.** No jargon in the

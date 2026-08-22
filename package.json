@@ -6,7 +6,8 @@
     "build": "tsc --noEmit",
     "test": "tsx src/selfcheck.ts",
     "demo": "tsx src/demo.ts",
-    "scenario": "tsx src/cli.ts"
+    "scenario": "tsx src/cli.ts",
+    "scenario:build": "tsx src/cli.ts --build"
   },
   "dependencies": {
     "@lambda-house/teob-ts": "0.2.2"

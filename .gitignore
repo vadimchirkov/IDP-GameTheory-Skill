@@ -2,6 +2,9 @@ node_modules/
 dist/
 .DS_Store
 .claude/
+reports/
+*.report.json
+*.tips.md
 PROJECT_ARCHITECTURE.md
 RESEARCH_SYNTHESIS.md
 case_A_*.md
