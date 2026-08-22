@@ -129,18 +129,13 @@ export const strategies: Record<StrategyId, Strategy> = {
     const target = Math.max(0, Math.min(1, 0.5 + (pOppC - 0.3)));
     return rng.unit() < target ? "C" : "D";
   },
-  southampton: (mine, theirs) => {
+  southampton: (_mine, theirs) => {
     const HANDSHAKE: Move[] = ["D","D","C","C","D"];
     const n = theirs.length;
-    if (n < HANDSHAKE.length) {
-      const prefix = HANDSHAKE.slice(0, n);
-      const minePrefix = mine.slice(0, n);
-      const matches = prefix.every((v,i) => minePrefix[i] === v);
-      return matches ? HANDSHAKE[n] ?? "C" : "D";
-    }
-    const mineHead = mine.slice(0, HANDSHAKE.length);
-    const handOk = HANDSHAKE.every((v,i) => mineHead[i] === v);
-    if (handOk) return "C";
+    if (n < HANDSHAKE.length) return HANDSHAKE[n] ?? "C";
+    const oppHead = theirs.slice(0, HANDSHAKE.length);
+    const isKin = HANDSHAKE.every((v,i) => oppHead[i] === v);
+    if (isKin) return "C";
     return "D";
   },
   alld: () => "D",

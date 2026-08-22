@@ -21,11 +21,11 @@ export interface ScenarioPlayer {
   dispositions: readonly StrategyId[];
   team?: string;
   values?: Range;
-  /** Forward-compat: validated but not yet wired to kernel (dynamic coalition MVP). */
+  /** Wired: colluder intra-team defect with prob (effectiveStrategy). */
   betrayalProb?: number;
   /** Forward-compat: validated but not yet wired (handshake spoof). */
   handshakeSpoof?: number;
-  /** Forward-compat: generic memory-n map, used only via memory2 stub. */
+  /** Wired: custom memory-n table overrides picked disposition (strategyForPlayer). */
   memory?: Record<string, number>;
   /** Forward-compat: LLM model id for llm_agent stub. */
   llmModel?: string;

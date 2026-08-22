@@ -2,7 +2,7 @@ import {
   assertScenario, isValidPayoff, type GameType, type Payoff, type PayoffRanges,
   type ScenarioModel, type Shares, type StrategyId,
 } from "./domain.js";
-import { playMatch, strategies } from "./kernel.js";
+import { memoryN, playMatch, strategies } from "./kernel.js";
 import { Rng } from "./rng.js";
 import { coopRate, createGrid, stepSpatial } from "./spatial.js";
 
@@ -40,10 +40,29 @@ function geometricHorizon(w: number, rng: Rng): number {
 
 function teamOf(p: { name: string; team?: string }): string { return p.team ?? p.name; }
 
-function effectiveStrategy(id: StrategyId, myTeam: string, oppTeam: string): import("./kernel.js").Strategy {
+function effectiveStrategy(
+  id: StrategyId,
+  myTeam: string,
+  oppTeam: string,
+  betrayalProb?: number,
+): import("./kernel.js").Strategy {
   if (id !== "colluder") return strategies[id];
-  if (myTeam === oppTeam) return () => "C";
+  if (myTeam === oppTeam) {
+    if (betrayalProb !== undefined && betrayalProb > 0) {
+      return (_mine, _theirs, rng) => (rng.unit() < betrayalProb ? "D" : "C");
+    }
+    return () => "C";
+  }
   return (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C");
+}
+
+function strategyForPlayer(player: import("./domain.js").ScenarioPlayer, pickedId: StrategyId): import("./kernel.js").Strategy {
+  if (player.memory && Object.keys(player.memory).length > 0) {
+    const keys = Object.keys(player.memory);
+    const n = keys[0]?.includes("|") ? keys[0].split("|").length : 1;
+    return memoryN(player.memory as Record<string, number>, n);
+  }
+  return strategies[pickedId];
 }
 
 function spatialTrial(model: ScenarioModel, rng: Rng, payoff: import("./domain.js").Payoff, noise: number, w:number, drift:number): { cooperation:number; scores: Map<string,number> } {
@@ -104,7 +123,9 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
       const bLean = leanByName.get(b.name) ?? 0;
       if (!aPayoff || !bPayoff || !aId || !bId) throw new Error("Incomplete trial");
       const aTeam = teamOf(a); const bTeam = teamOf(b);
-      const match = playMatch(effectiveStrategy(aId, aTeam, bTeam), effectiveStrategy(bId, bTeam, aTeam), aPayoff, bPayoff, rounds, noise, rng, aLean, bLean, drift);
+      const aStrat = a.memory ? strategyForPlayer(a, aId) : effectiveStrategy(aId, aTeam, bTeam, a.betrayalProb);
+      const bStrat = b.memory ? strategyForPlayer(b, bId) : effectiveStrategy(bId, bTeam, aTeam, b.betrayalProb);
+      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noise, rng, aLean, bLean, drift);
       scores.set(a.name, (scores.get(a.name) ?? 0) + match.scoreA);
       scores.set(b.name, (scores.get(b.name) ?? 0) + match.scoreB);
       cooperation += match.cooperation;
