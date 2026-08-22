@@ -12,6 +12,16 @@ through a game-theory simulator hundreds of times and tells you, in plain langua
 It never reports a single lucky run. It jiggles every guess and keeps only the
 conclusions that survive.
 
+### What you can do with it
+
+- **Founders / PMs:** will a tacit pact to not poach hold, or does one side have too much upside to defect?
+- **Procurement / sales:** price war vs hold-price — who blinks when everyone watches everyone?
+- **Regulation / policy:** subsidy, cartel or standard — will joint cooperation survive misreads?
+- **Negotiations / partnerships:** should *you* be the forgiving one or the firm one?
+- **Security / deterrence:** brinkmanship (Chicken) vs coordination (Stag Hunt) — wrong game = wrong advice.
+
+If your story has “we meet again next quarter” — it fits.
+
 ### The game in 30 seconds (IPD)
 
 **2–10 sides** meet again and again. Each pair plays each round: each picks **C** (cooperate — hold price, keep pact, swerve) or **D** (defect — undercut, poach, hold firm). Payoffs per round (pairwise):
@@ -21,9 +31,11 @@ conclusions that survive.
 - `P` — both D (mutual grind)
 - `S` — you C, they D (you get suckered)
 
-Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (16: TFT/GTFT/WSLS/Grim/Adaptive/ZD/Southampton…) are rules for “what to do given history”. Engine replays the story 600 times with all ranges jiggled — only a conclusion that wins in most worlds is reported.
+Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (19: TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history”.
 
-**IPD features:** 3 games • 16 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
+Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → horizon 4–25 rounds, cap 2000). Only a conclusion that wins in most sessions is reported.
+
+**IPD features:** 3 games • 19 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
 
 ---
 
