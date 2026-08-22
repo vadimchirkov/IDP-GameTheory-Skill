@@ -31,13 +31,13 @@ conclusions that survive.
 
 ### What you can do with it
 
-- **Founders / PMs:** will a tacit pact to not poach hold, or does one side have too much upside to defect?
-- **Procurement / sales:** price war vs hold-price — who blinks when everyone watches everyone?
-- **Regulation / policy:** subsidy, cartel or standard — will joint cooperation survive misreads?
-- **Negotiations / partnerships:** should *you* be the forgiving one or the firm one? What if the other side is `gradual` or `grim`?
-- **Teams / coalitions:** 2 colluders vs 2 solos — does the pact beat the free-riders (total vs per-capita)?
-- **Security / deterrence:** brinkmanship (Chicken — mutual crash is worst) vs coordination (Stag Hunt — mutual C is best) — wrong game = wrong advice.
-- **Trust & noise:** will a misread fuel shock or closed stats tip you into mutual defect? Test `noise`/`drift`/`values`.
+- **A handshake between founders:** “we don’t poach each other’s people” — will it hold when one of you needs to grow fast, or does the upside to defect quietly win?
+- **Two shops on the same street:** keep prices steady together or undercut to steal the client — who blinks first when you meet again next month?
+- **A partnership where you do the extra work:** keep being generous or get firm? Test if being forgiving invites free-riding or keeps trust alive.
+- **A team with a pact vs solo players:** two colleagues cover for each other while two others play solo — does loyalty beat hustle, or does it get exploited?
+- **A subsidy, cartel or shared standard:** will everyone play along, or will a single misread (“they cheated!”) unravel it?
+- **A tense standoff:** both can escalate, but if both do — everyone loses. How to avoid the crash without looking weak?
+- **When a rumor or delay gets misread:** a late reply, a fuel price spike, a closed stat — will one mistake spiral into mutual distrust?
 
 **When to use it:** if your story keeps repeating — “we meet again next quarter / next round” — it fits.
 
