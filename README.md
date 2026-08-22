@@ -156,11 +156,11 @@ Same `C/D` for systems: *state keeps treaty vs defects, firm holds price vs unde
 | System | Live data | Dyads / moves | Baseline | Engine (live backtest `K=3`) |
 |--------|-----------|---------------|----------|------------------------------|
 | **States — disputes** | [COW MID 5.0 dyadic 4.03](https://correlatesofwar.org/data-sets/mids/) 1816-2014 (10k dispute-years; 932 dyads 19.8k years; top 20 2.2k years) | 19.8k years (all) / 2.2k (top 20) | ALL C 81.3% / 61.5% | **TFT `provocable` 85.6% (+4.3pp) / 78.1% (+16.6pp top 20)** — live |
-| **States — sanctions** | [China-TIES](https://github.com/Trade-War-Lab/China-TIES) 195 China cases (proxy for [TIES 4.0](https://sanctions.web.unc.edu/) 1.4k) | 195 cases | — | pipeline ready, same `K=3` |
+| **States — sanctions** | [China-TIES](https://github.com/Trade-War-Lab/China-TIES) 127 cases, 50 dyads, 358 years (proxy for [TIES 4.0](https://sanctions.web.unc.edu/) 1.4k) | 358 years | ALL D 69.3% | **TFT 91.1% (+21.8pp)** — sanctions sticky, last year predicts next |
 | **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) + Yale 50 routes 2019 (daily) | 50×270 days | ~55% hold | preview synthetic 56.7% (`alld`) — live pull next |
 | **People — lab** | `dilemmaRL` 91k moves (168k) + `Dal Bó` 100k | 91k | ALL D 56.7% / ALL C 43.3% | **TFT/semigrim 56.7% (=baseline)** — human noise caps `~60%` (literature) |
 
-*Live runs done: `dilemmaRL` 91k human moves + `COW MID` 19.8k dyad-years (TFT +4.3pp all / +16.6pp top 20). `pnpm test` 11 tests green. Same `src/predictive.ts` pipeline for sanctions/trade/airlines.*
+*Live runs done: `dilemmaRL` 91k + `COW MID` 19.8k dyad-years (TFT +4.3pp / +16.6pp top 20) + `China-TIES` 127 cases 358y TFT 91.1% (+21.8pp). `pnpm test` 11 tests green.*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
