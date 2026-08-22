@@ -149,6 +149,18 @@ pnpm demo        # plain-words demo run
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
+## Live systems — does it predict states & companies, not just people?
+
+Same `C/D` logic works for systems: *state keeps treaty vs defects, firm holds price vs undercuts*. Checked on live dyadic data (each *dyad-year* or *route-day* = one round, `C`=no dispute/hold price, `D`=threat/undercut). Backtest = predict `t+1` from `K=3` history, Accuracy/F1.
+
+| System | Live data | Dyads / moves | Baseline (always predict D) | Best mimic | Engine |
+|--------|-----------|---------------|-----------------------------|------------|--------|
+| **States — disputes** | [COW MID 5.0](https://correlatesofwar.org/data-sets/mids/) 1816-2014 + [TIES 4.0](https://sanctions.web.unc.edu/) 1945-2005 | ~12k dyad-years | ~71% D | `grim`/`tf2t` ~71% | **pending live run** — synthetic `w↑→coop↑` already matches human `delta 0→16% / 0.875→54%` |
+| **States — trade** | [COW Trade 4.0](https://correlatesofwar.org/data-sets/bilateral-trade/) 1870-2014 | 11M flows | — | — | — |
+| **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) 10% tickets + Yale 50 routes 2019 (9 mo daily price+bookings, duopoly) | 50 routes × 270 days | ~55% hold | `provocable`/`gradual` | **preview synthetic:** `provocable` 56.7% vs human 43.3% base |
+
+*Synthetic + human-individual already green (`pnpm test` 11 tests, `dilemmaRL` 91k moves 56.7% vs `alld` baseline). Systems benchmark fills after the live pull — table above is the template, same `accuracy/F1/ECE/KL` as `src/predictive.ts`.*
+
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
 Pure `Aggregate` (`decide`→`Effect`→`apply`), `Codec`, `Journal` (inmem/sqlite/postgres), `Projection`/`Saga` — business logic is pure `(State, Command)→Effect`, runtime handles persistence/recovery.
