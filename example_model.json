@@ -1,0 +1,33 @@
+{
+  "situation": "Two startups deciding whether to keep an informal data-sharing pact alive or quietly poach each other's customers",
+  "players": [
+    {
+      "name": "Northwind",
+      "dispositions": ["provocable", "forgiving", "exploitative"],
+      "note": "Founder-led, values reputation but under board pressure to grow fast"
+    },
+    {
+      "name": "Kestrel",
+      "dispositions": ["provocable", "grim"],
+      "note": "Burned before, quick to retaliate and slow to forgive"
+    }
+  ],
+  "payoffs": {
+    "T": [4, 6],
+    "R": [3, 4],
+    "P": [1, 2],
+    "S": [-1, 1]
+  },
+  "structure": {
+    "w": [0.6, 0.97],
+    "noise": [0.0, 0.15]
+  },
+  "rationale": {
+    "R": "keeping the pact ~= steady shared leads, worth roughly a normal quarter",
+    "T": "poaching once while they trust you = a big customer windfall, upper bound if their book is rich",
+    "P": "mutual poaching = costly price war, both bleed but survive",
+    "S": "being poached while cooperating = losing marquee accounts; range spans mild to severe",
+    "w": "unknown how long both stay in market; wide because a funding event could end it abruptly",
+    "noise": "misread signals: a sales rep going off-script can look like a betrayal"
+  }
+}
