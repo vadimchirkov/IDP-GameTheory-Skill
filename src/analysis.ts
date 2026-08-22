@@ -4,6 +4,7 @@ import {
 } from "./domain.js";
 import { playMatch, strategies } from "./kernel.js";
 import { Rng } from "./rng.js";
+import { coopRate, createGrid, stepSpatial } from "./spatial.js";
 
 export interface Trial {
   winners: readonly string[];
@@ -45,6 +46,21 @@ function effectiveStrategy(id: StrategyId, myTeam: string, oppTeam: string): imp
   return (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C");
 }
 
+function spatialTrial(model: ScenarioModel, rng: Rng, payoff: import("./domain.js").Payoff, noise: number, w:number, drift:number): { cooperation:number; scores: Map<string,number> } {
+  const size = model.topology?.size ?? 10;
+  const K = model.topology?.K ?? 0.1;
+  const gens = Math.max(10, Math.round(geometricHorizon(w, rng)/2));
+  const ri=(n:number)=> Math.floor(rng.unit()*n);
+  let grid = createGrid(size, ()=> rng.unit()<0.5?"C":"D");
+  if (model.topology?.type==="small_world") { for(let r=0;r<size;r++) for(let c=0;c<size;c++) if(rng.unit()<0.1) grid[r]![c]= rng.unit()<0.5?"C":"D"; }
+  if (model.topology?.type==="scale_free") { const hubs=Math.floor(size/3); for(let i=0;i<hubs;i++) grid[ri(size)]![ri(size)]="C"; }
+  let coopSum=0;
+  for(let g=0;g<gens;g++){ if(rng.unit()<noise) grid[ri(size)]![ri(size)]= grid[ri(size)]![ri(size)]==="C"?"D":"C"; grid=stepSpatial(grid, payoff, "fermi", rng, K); coopSum+=coopRate(grid); }
+  const finalCoop=coopRate(grid);
+  const scores=new Map(model.players.map(p=>[p.name, finalCoop>0.5? finalCoop*10 : (1-finalCoop)*10]));
+  return { cooperation: coopSum/gens, scores: scores as Map<string,number> };
+}
+
 export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   assertScenario(model);
   const game = model.game ?? "prisoners_dilemma";
@@ -55,6 +71,22 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   const payoffByName = new Map(model.players.map((player) => [player.name, samplePayoff(payoffRangesFor(model, player.name), game, rng)]));
   const strategyByName = new Map(model.players.map((player) => [player.name, rng.pick(player.dispositions)]));
   const leanByName = new Map(model.players.map((player) => [player.name, player.values ? rng.between(player.values) : 0]));
+  if (model.topology) {
+    const avgPayoff: import("./domain.js").Payoff = { T: [...payoffByName.values()].reduce((s,p)=>s+p.T,0)/payoffByName.size, R: [...payoffByName.values()].reduce((s,p)=>s+p.R,0)/payoffByName.size, P: [...payoffByName.values()].reduce((s,p)=>s+p.P,0)/payoffByName.size, S: [...payoffByName.values()].reduce((s,p)=>s+p.S,0)/payoffByName.size };
+    const sp = spatialTrial(model, rng, avgPayoff, noise, w, drift);
+    const high = Math.max(...sp.scores.values());
+    const winners=[...sp.scores].filter(([,v])=>Math.abs(v-high)<1e-9).map(([n])=>n);
+    const teamScores: Record<string, number> = {}; const teamSizes: Record<string, number> = {};
+    for(const p of model.players){ const t=teamOf(p); teamScores[t]=(teamScores[t]??0)+(sp.scores.get(p.name)??0); teamSizes[t]=(teamSizes[t]??0)+1; }
+    const perCap=Object.fromEntries(Object.entries(teamScores).map(([t,s])=>[t,s/(teamSizes[t]??1)]));
+    const maxT=Math.max(...Object.values(teamScores)); const maxP=Math.max(...Object.values(perCap));
+    const teamWinners=Object.entries(teamScores).filter(([,v])=>Math.abs(v-maxT)<1e-9).map(([t])=>t);
+    const perCapWinners=Object.entries(perCap).filter(([,v])=>Math.abs(v-maxP)<1e-9).map(([t])=>t);
+    const avg=(key: keyof import("./domain.js").Payoff)=> [...payoffByName.values()].reduce((s,p)=>s+p[key],0)/payoffByName.size;
+    const inputs={T:avg("T"),R:avg("R"),P:avg("P"),S:avg("S"),w,noise,drift} as Trial["inputs"];
+    for(const [name,lean] of leanByName) (inputs as Record<string,number>)[`value_${name}`]=lean;
+    return { winners, teamWinners, perCapitaWinners:perCapWinners, teamScores, cooperation: sp.cooperation, inputs };
+  }
   const scores = new Map(model.players.map((player) => [player.name, 0]));
   let cooperation = 0;
   let matches = 0;

@@ -1,5 +1,5 @@
 export type Move = "C" | "D";
-export type GameType = "prisoners_dilemma" | "chicken" | "stag_hunt" | "snowdrift";
+export type GameType = "prisoners_dilemma" | "chicken" | "stag_hunt" | "snowdrift" | "public_goods" | "trust";
 export type Range = readonly [number, number];
 
 export interface Payoff {
@@ -23,6 +23,8 @@ export interface ScenarioPlayer {
   values?: Range;
   betrayalProb?: number;
   handshakeSpoof?: number;
+  memory?: Record<string, number>;
+  llmModel?: string;
 }
 
 export interface ScenarioModel {
@@ -31,6 +33,7 @@ export interface ScenarioModel {
   players: readonly ScenarioPlayer[];
   payoffs: PayoffRanges | Record<string, PayoffRanges>;
   structure: { w: Range; noise: Range; drift?: Range };
+  topology?: { type: "lattice" | "small_world" | "scale_free"; size?: number; K?: number };
 }
 
 export const strategyIds = [
@@ -38,6 +41,7 @@ export const strategyIds = [
   "trusting", "gradual", "erratic", "prober",
   "contrite", "detective", "zd_generous", "zd_extort", "colluder",
   "adaptive", "southampton", "alld", "allc", "tf2t", "semigrim",
+  "memory2", "lola", "llm_agent",
 ] as const;
 export type StrategyId = (typeof strategyIds)[number];
 
@@ -61,6 +65,8 @@ export function isValidPayoff(game: GameType, p: Payoff): boolean {
   if (game === "chicken") return p.T > p.R && p.R > p.S && p.S > p.P;
   if (game === "stag_hunt") return p.R > p.T && p.T > p.P && p.P > p.S;
   if (game === "snowdrift") return p.T > p.R && p.R > p.S && p.S > p.P;
+  if (game === "public_goods") return p.R > p.P && p.T > p.S;
+  if (game === "trust") return p.T > p.R && p.R > p.P;
   return p.T > p.R && p.R > p.P && p.P > p.S && 2 * p.R > p.T + p.S;
 }
 

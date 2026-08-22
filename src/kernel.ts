@@ -64,6 +64,27 @@ function gradualPure(mine: readonly Move[], theirs: readonly Move[]): Move {
   return "C";
 }
 
+const llmCache = new Map<string, Move>();
+function memory2Hilbe(): Strategy {
+  const probs: Record<string, number> = {
+    "CC|CC": 1, "CC|CD": 1, "CC|DC": 0, "CC|DD": 0.3,
+    "CD|CC": 1, "CD|CD": 0, "CD|DC": 1, "CD|DD": 0,
+    "DC|CC": 1, "DC|CD": 0.2, "DC|DC": 1, "DC|DD": 0,
+    "DD|CC": 0.4, "DD|CD": 0, "DD|DC": 0.5, "DD|DD": 0.1,
+  };
+  return makeMemoryN(probs, 2);
+}
+function lolaStrategy(): Strategy {
+  return (mine, theirs, rng) => {
+    if (theirs.length === 0) return "C";
+    const lastOpp = theirs[theirs.length - 1] ?? "C";
+    const coopRate = theirs.filter(m=>m==="C").length / theirs.length;
+    const retaliate = lastOpp === "D" ? 0.8 : 0.2;
+    const shaping = coopRate > 0.6 ? -0.2 : 0.3;
+    const pDefect = Math.max(0, Math.min(1, retaliate + shaping));
+    return rng.unit() < pDefect ? "D" : "C";
+  };
+}
 export const strategies: Record<StrategyId, Strategy> = {
   provocable: (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C"),
   forgiving: (_mine, theirs, rng) => {
@@ -134,6 +155,9 @@ export const strategies: Record<StrategyId, Strategy> = {
     if (theirs.length < 2) return "C";
     return theirs.at(-1) === "D" && theirs.at(-2) === "D" ? "D" : "C";
   },
+  memory2: memory2Hilbe(),
+  lola: lolaStrategy(),
+  llm_agent: (_mine, theirs) => (theirs.length===0 ? "C" : theirs[theirs.length-1] ?? "C"),
 };
 
 export { makeMemoryOne as memoryOne, makeMemoryN as memoryN };

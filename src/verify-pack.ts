@@ -3,6 +3,10 @@ import { assertScenario, isValidPayoff, normalizeShares } from "./domain.js";
 import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions, predictiveReport } from "./predictive.js";
 import { playMatch, strategies, tournament, stepGeneration } from "./kernel.js";
 import { Rng } from "./rng.js";
+import { analyzeScenario } from "./analysis.js";
+import { runEvolution } from "./evolution.js";
+import { runTournament } from "./tournament.js";
+import { generateHeatmap } from "./report.js";
 
 const P={T:5,R:3,P:1,S:0};
 
@@ -130,6 +134,24 @@ run("4.za Dynamic coalitions fields", ()=>{
   const m={ situation:"coalition betrayal", players:[{name:"A", dispositions:["colluder"], team:"c1", betrayalProb:0.05} as any, {name:"B", dispositions:["colluder"], team:"c1"} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any;
   assert.doesNotThrow(()=> assertScenario(m as any));
   (m as any).players[0].betrayalProb=2; assert.throws(()=> assertScenario(m as any));
+});
+
+run("5.x New games + memory2/lola/topology/evolve/tournament/heatmap", ()=>{
+  assert.ok(isValidPayoff("public_goods", {T:5,R:3,P:1,S:0}));
+  assert.ok(isValidPayoff("trust", {T:5,R:3,P:1,S:0}));
+  const mem = strategies.memory2; const lp = strategies.lola;
+  assert.ok(typeof mem==="function" && typeof lp==="function");
+  const mm = playMatch(mem, lp, {T:5,R:3,P:1,S:0}, {T:5,R:3,P:1,S:0}, 20,0,new Rng(1));
+  assert.ok(Number.isFinite(mm.scoreA));
+  const topoModel={ situation:" topo ", players:[{name:"A", dispositions:["provocable"]},{name:"B", dispositions:["alld"]}], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}, topology:{type:"lattice", size:6, K:0.1}} as any;
+  const rTopo=analyzeScenario(topoModel, 20, 1);
+  assert.ok(rTopo.cooperation.mean>=0 && rTopo.cooperation.mean<=1);
+  const evo=runEvolution({ situation:"evo", players:[{name:"A", dispositions:["provocable","alld"]} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any, 5, 1);
+  assert.equal(evo.trajectory.length,5);
+  const tour=runTournament({ situation:"tour", players:[{name:"A", dispositions:["provocable","alld"]} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any, 20);
+  assert.ok(tour.ranking.length>0);
+  const html=generateHeatmap({ situation:"hm", players:[{name:"A", dispositions:["provocable"]},{name:"B", dispositions:["alld"]}], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any, 3, 1);
+  assert.ok(html.includes("Plotly"));
 });
 
 run("4.z PredictiveReport + imbalanced + retention vs transition (friend proposal)", ()=>{
