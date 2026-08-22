@@ -17,10 +17,14 @@ conclusions that survive.
 - **Founders / PMs:** will a tacit pact to not poach hold, or does one side have too much upside to defect?
 - **Procurement / sales:** price war vs hold-price — who blinks when everyone watches everyone?
 - **Regulation / policy:** subsidy, cartel or standard — will joint cooperation survive misreads?
-- **Negotiations / partnerships:** should *you* be the forgiving one or the firm one?
-- **Security / deterrence:** brinkmanship (Chicken) vs coordination (Stag Hunt) — wrong game = wrong advice.
+- **Negotiations / partnerships:** should *you* be the forgiving one or the firm one? What if the other side is `gradual` or `grim`?
+- **Teams / coalitions:** 2 colluders vs 2 solos — does the pact beat the free-riders (total vs per-capita)?
+- **Security / deterrence:** brinkmanship (Chicken — mutual crash is worst) vs coordination (Stag Hunt — mutual C is best) — wrong game = wrong advice.
+- **Trust & noise:** will a misread fuel shock or closed stats tip you into mutual defect? Test `noise`/`drift`/`values`.
 
-If your story has “we meet again next quarter” — it fits.
+If your story has “we meet again next quarter” — it fits. You describe in 2 sentences, you get in 60 seconds: who likely wins, does cooperation hold, what breaks it, and the one check to do first — plain words, no metrics in the verdict.
+
+**Prompts that trigger it:** `run this through game theory` · `war-game this` · `what happens if` · `who wins` · `should I cooperate`
 
 ### The game in 30 seconds (IPD)
 
