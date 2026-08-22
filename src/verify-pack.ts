@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { isValidPayoff, normalizeShares } from "./domain.js";
-import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep } from "./predictive.js";
+import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions } from "./predictive.js";
 import { playMatch, strategies, tournament, stepGeneration } from "./kernel.js";
 import { Rng } from "./rng.js";
 
@@ -101,6 +101,17 @@ run("4.x Predictive metrics: Accuracy/F1/ECE/KL on synthetic", ()=>{
   assert.ok(ece(probs,actual) < 0.5);
   const kl=klDivergence([1,2,3,2,1],[1,2,2,3,5]);
   assert.ok(Number.isFinite(kl));
+});
+
+run("4.y Weak spots — balanced accuracy, ECE, transitions vs Markov", ()=>{
+  const pred:("C"|"D")[]=["C","C","C","D","D","D"], actual:("C"|"D")[]=["C","C","D","D","D","C"];
+  assert.ok(Math.abs(balancedAccuracy(pred,actual)-0.5)<0.2);
+  assert.ok(macroF1(pred,actual) > 0.3 && macroF1(pred,actual) < 0.8);
+  assert.ok(ece([0.9,0.8,0.6,0.2,0.1,0.4], actual) < 0.6);
+  const trans=confusionTransitions(["D","C"],["D","C"], ["C","D"]);
+  assert.ok(trans.c2d_n===1 && trans.d2c_n===1 && trans.c2d===1 && trans.d2c===1);
+  const mkPred:("C"|"D")[]=["C","D","C"], mkActual:("C"|"D")[]=["C","C","C"];
+  assert.ok(Math.abs(accuracy(mkPred,mkActual)-0.66)<0.02);
 });
 
 console.log("verify-pack OK");
