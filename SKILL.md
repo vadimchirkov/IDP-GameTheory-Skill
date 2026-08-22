@@ -190,32 +190,28 @@ The CLI adds `buildTips` (from `src/feedback.ts`) and writes `example_model.repo
 
 In build mode, **apply one tip, re-run, check the delta** — the tips file is your changelog. Keep the loop tight: one hypothesis per run, green `pnpm test` each time.
 
-## Stage 3 — Interpret honestly
+## Stage 3 — Interpret honestly (no metrics in the verdict)
 
-**Write for someone who has never heard of game theory.** No jargon in the
-verdict: not "w", "noise", "corr", "disposition" — say "how long both sides expect
-this to keep going", "chance of a misread", "what the answer hinges on". Translate
-every number into a plain sentence. If you must name a technical term, define it in
-the same breath. Keep the honest caveats — just say them plainly.
+**Write for someone who has never heard of game theory — and has no patience for numbers.** The Bottom line is 2–3 concrete sentences about what will happen and what to do. No `%`, no `w/noise/corr/disposition/R/T/P/S`, no “plausible worlds”. Translate everything to plain actions and consequences. Metrics live only in the appendix (`report.json`), never in the verdict.
 
-**Always lead with the "Bottom line" the script prints — a 2–3 sentence plain-words
-verdict.** That short summary IS the answer for most users; give it first, verbatim
-or lightly polished, before any detail. Then, only if the user wants more, add the
-breakdown below. Never bury the conclusion under tables.
+**Always lead with the script's Bottom line, but rewrite it to plain conclusions:**
 
-Report, in plain language:
+- Bad: `Northwind leads in 47% vs Kestrel 53%, cooperation 66% ±31%, sensitivity noise 0.23`
+- Good: `Пока никто не тянет одеяло на себя — сдержанная линия держится, если сигналы читаются верно. Любой сбой связи может сорвать её.`
 
-- **Who prevails, with the %.** "Wins 76% of plausible worlds", not "wins". If it's
-  50/50, say the outcome is genuinely undetermined.
-- **Whether cooperation is robust or fragile.** The mean±std and the flag tell you.
-  Fragile means the answer flips on small changes — say so.
-- **The regime boundary — the most useful output.** Read the w×noise grid for the
-  cliff: "cooperation holds while both expect the relationship to outlast ~N
-  interactions and misreads stay under ~X%; past that it collapses to a price war."
-  This phase transition is more actionable than any point prediction.
-- **What to verify first.** Restate the top sensitivity as a real-world question
-  ("go find out how likely each side is to misread the other's moves").
-- **State the limits.** Fixed teams only (`team`+`colluder`, no mid-game betrayal or handshake spoofing); `values`/`drift` is a single lean per player, not communication; spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`, `b/c>k`) and evolution lab are separate kernels with different update rules. Payoffs can be asymmetric per player — use that rather than apologizing for shared stakes. If your situation needs dynamic coalitions, LLM agents, or memory-n>2, flag it (see `reference_axelrod.md` §9).
+**Template — 2–3 sentences, concrete, no numbers:**
+
+1. **Кто и что делает:** “Скорее всего, система держит сдержанную координацию — бюджет не разгоняют, ЦБ плавно снижает, бизнес вкладывается.”
+2. **Где ломается:** “Срыв — там, где сигнал могут неверно прочитать (топливный шок, дроны, закрытая статистика, неверное чтение ставки).”
+3. **Что делать:** “Сейчас главное — чтобы сигналы Минфина, ЦБ и бизнеса читались одинаково; сужать именно этот зазор.”
+
+**If the user wants detail, add an appendix after the verdict** (collapsed, not before). There you may show `winPct`/`cooperation`/`sensitivity` in plain words: not “Gov_Fiscal 48%”, but “Минфин чуть чаще оказывается в плюсе, но не доминирует — расклад легко качнётся”.
+
+- **Who prevails:** concrete — “Пока никто не доминирует — расклад качнётся к той стороне, чьи сигналы прочтут верно.”
+- **Whether cooperation holds:** concrete — “Дисциплина держится в большинстве случаев, но хрупка — сбой связи уводит в стагнацию с ростом цен.”
+- **Regime boundary:** plain — “Пока стороны рассчитывают на долгую игру и сигналы не путаются, координация держится; как только ожидание укорачивается или путаница растёт — срывается в взаимный жёсткий курс.”
+- **What to verify first:** one real question derived from top sensitivity, e.g. “Как часто топливный шок или закрытая статистика приводит к неверному чтению шага ЦБ/бюджета?”
+- **State the limits:** same, but plain: fixed teams only, single lean not emotion, spatial/evolution separate kernels.
 
 ## What NOT to do
 
