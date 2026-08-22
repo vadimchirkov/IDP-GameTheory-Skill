@@ -12,6 +12,21 @@ through a game-theory simulator hundreds of times and tells you, in plain langua
 It never reports a single lucky run. It jiggles every guess and keeps only the
 conclusions that survive.
 
+> **The classic story — [Prisoner's dilemma on Wikipedia](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma):** *Two members of a gang are arrested. If both stay silent — 1 year each. If one testifies and the other stays silent — free vs 3 years. If both testify — 2 years each.* → `T = free, R = 1y, P = 2y, S = 3y` (`T>R>P>S`, `2R>T+S`).
+
+<details>
+<summary><strong>Learn more — Wikipedia</strong></summary>
+
+| Topic | Start here |
+|-------|------------|
+| 📖 Prisoner's dilemma | [Article](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma) • [Iterated](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#The_iterated_prisoner%27s_dilemma) |
+| 🐔 Chicken • 🦌 Stag hunt | [Chicken (game)](https://en.wikipedia.org/wiki/Chicken_(game)) • [Stag hunt](https://en.wikipedia.org/wiki/Stag_hunt) |
+| 🏆 Axelrod & TFT | [Tournament & 4 traits](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Axelrod's_tournament_and_successful_strategy_conditions) • [Tit for tat](https://en.wikipedia.org/wiki/Tit_for_tat) |
+| 🎲 Zero-determinant | [ZD strategies](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Zero-determinant_strategies) |
+| 🌍 Real life | [Economics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Economics) • [International politics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#International_politics) • [Biology](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Biology) |
+
+</details>
+
 ### What you can do with it
 
 - **Founders / PMs:** will a tacit pact to not poach hold, or does one side have too much upside to defect?
@@ -40,10 +55,6 @@ Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, surv
 Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → horizon 4–25 rounds, cap 2000). Only a conclusion that wins in most sessions is reported.
 
 **IPD features:** 3 games • 19 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
-
-> **Classic story (from [Prisoner's dilemma — Wikipedia](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma)):** *Two members of a gang are arrested. If both stay silent — 1 year each. If one testifies and the other stays silent — free vs 3 years. If both testify — 2 years each.* The engine uses the same `T=go free, R=1y, P=2y, S=3y` ordering `T>R>P>S` and `2R>T+S`.
-
-Learn more: [Prisoner's dilemma](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma) • [Iterated PD](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#The_iterated_prisoner%27s_dilemma) • [Chicken](https://en.wikipedia.org/wiki/Chicken_(game)) • [Stag hunt](https://en.wikipedia.org/wiki/Stag_hunt) • [Axelrod's tournament / Tit for tat](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Axelrod's_tournament_and_successful_strategy_conditions) • [Zero-determinant](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Zero-determinant_strategies) • Real-life: [economics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Economics) / [international politics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#International_politics)
 
 ---
 
