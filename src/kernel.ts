@@ -122,6 +122,14 @@ export const strategies: Record<StrategyId, Strategy> = {
   },
   alld: () => "D",
   allc: () => "C",
+
+  semigrim: (mine, theirs, rng) => {
+    if (mine.length===0) return "C";
+    const lm=mine[mine.length-1], lt=theirs[theirs.length-1];
+    if (lm==="C" && lt==="C") return "C";
+    if (lm==="D" && lt==="D") return "D";
+    return rng.unit()<0.5?"C":"D";
+  },
   tf2t: (_mine, theirs) => {
     if (theirs.length < 2) return "C";
     return theirs.at(-1) === "D" && theirs.at(-2) === "D" ? "D" : "C";

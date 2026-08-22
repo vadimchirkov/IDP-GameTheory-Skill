@@ -43,12 +43,12 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
 3. **Dispositions as a SET, not a guess.** You rarely know a party is purely one
    type. List every plausible disposition for each player; the simulator samples
    among them, so "what if they're more vindictive than I think" is tested
-   automatically. Available (19): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
+   automatically. Available (20): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
    `pavlov` (WSLS), `grim` (never forgives), `exploitative` (probes, backs off only on 2×D),
    `trusting` (ALLC), `gradual` (Beaufils: n-th defection → n×D then 2×C), `erratic` (50/50),
    `prober` ([D,C,C] probe), `contrite` (forgives own noise-induced D), `detective` ([C,D,C,C]→TFT else ALLD),
    `zd_generous` (Stewart-Plotkin generous ZD χ=0.5, `p=[0.85,0.55,1,0.45]`), `zd_extort` (extortion χ=2),
-   `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats).
+   `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats), `semigrim` (Semi-Grim: C after CC, D after DD, else 50/50 — human baseline).
 4. **Structure = horizon and noise, as ranges.**
    - `w` (0–0.9995, `assertRange` cap): probability the relationship continues each
      period. High w = long shadow of the future. Unknown end date → wide range.
