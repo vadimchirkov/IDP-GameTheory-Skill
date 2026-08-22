@@ -28,10 +28,46 @@ export function macroF1(pred: Move[], actual: Move[]): number {
   const f1d=(()=>{let tp=0,fp=0,fn=0; for(let i=0;i<pred.length;i++){ if(pred[i]==="D"&&actual[i]==="D")tp++; else if(pred[i]==="D"&&actual[i]!=="D")fp++; else if(pred[i]!=="D"&&actual[i]==="D")fn++; } const p=tp/(tp+fp||1), r=tp/(tp+fn||1); return p+r===0?0:2*p*r/(p+r);})();
   return (f1c+f1d)/2;
 }
-export function confusionTransitions(pred: Move[], actual: Move[], prevActual: Move[]): { c2d:number; d2c:number; c2d_n:number; d2c_n:number } {
-  let c2d=0,c2d_n=0,d2c=0,d2c_n=0;
-  for(let i=0;i<pred.length;i++){ const prev=prevActual[i]??"C"; if(prev==="C"&&actual[i]==="D"){ c2d_n++; if(pred[i]==="D")c2d++; } if(prev==="D"&&actual[i]==="C"){ d2c_n++; if(pred[i]==="C")d2c++; } }
-  return { c2d: c2d_n?c2d/c2d_n:0, d2c: d2c_n?d2c/d2c_n:0, c2d_n, d2c_n };
+export function confusionTransitions(pred: Move[], actual: Move[], prevActual: Move[]): {
+  c2d:number; d2c:number; c2d_n:number; d2c_n:number;
+  c2c:number; d2d:number; c2c_n:number; d2d_n:number;
+  retentionAcc:number; retention_n:number;
+  transitionAcc:number; transition_n:number;
+} {
+  let c2d=0,c2d_n=0,d2c=0,d2c_n=0,c2c=0,c2c_n=0,d2d=0,d2d_n=0;
+  for(let i=0;i<pred.length;i++){
+    const prev=prevActual[i]??"C"; const cur=actual[i]; const pr=pred[i];
+    if(prev==="C"&&cur==="D"){ c2d_n++; if(pr==="D")c2d++; }
+    else if(prev==="D"&&cur==="C"){ d2c_n++; if(pr==="C")d2c++; }
+    else if(prev==="C"&&cur==="C"){ c2c_n++; if(pr==="C")c2c++; }
+    else if(prev==="D"&&cur==="D"){ d2d_n++; if(pr==="D")d2d++; }
+  }
+  const retentionHits=c2c+d2d, retention_n=c2c_n+d2d_n;
+  const transitionHits=c2d+d2c, transition_n=c2d_n+d2c_n;
+  return {
+    c2d: c2d_n?c2d/c2d_n:0, d2c: d2c_n?d2c/d2c_n:0, c2d_n, d2c_n,
+    c2c: c2c_n?c2c/c2c_n:0, d2d: d2d_n?d2d/d2d_n:0, c2c_n, d2d_n,
+    retentionAcc: retention_n?retentionHits/retention_n:0, retention_n,
+    transitionAcc: transition_n?transitionHits/transition_n:0, transition_n,
+  };
+}
+
+export function predictiveReport(pred: Move[], actual: Move[], prevActual: Move[], probs?: number[]) {
+  const trans=confusionTransitions(pred, actual, prevActual);
+  let f1C=0,f1D=0;
+  { let tp=0,fp=0,fn=0; for(let i=0;i<pred.length;i++){ if(pred[i]==="C"&&actual[i]==="C")tp++; else if(pred[i]==="C"&&actual[i]!=="C")fp++; else if(pred[i]!=="C"&&actual[i]==="C")fn++; } const p=tp/(tp+fp||1), r=tp/(tp+fn||1); f1C=p+r===0?0:2*p*r/(p+r); }
+  { let tp=0,fp=0,fn=0; for(let i=0;i<pred.length;i++){ if(pred[i]==="D"&&actual[i]==="D")tp++; else if(pred[i]==="D"&&actual[i]!=="D")fp++; else if(pred[i]!=="D"&&actual[i]==="D")fn++; } const p=tp/(tp+fp||1), r=tp/(tp+fn||1); f1D=p+r===0?0:2*p*r/(p+r); }
+  return {
+    accuracy: accuracy(pred, actual),
+    balancedAccuracy: balancedAccuracy(pred, actual),
+    macroF1: macroF1(pred, actual),
+    f1C, f1D,
+    retentionAcc: trans.retentionAcc, retention_n: trans.retention_n,
+    transitionAcc: trans.transitionAcc, transition_n: trans.transition_n,
+    c2c: trans.c2c, c2c_n: trans.c2c_n, d2d: trans.d2d, d2d_n: trans.d2d_n,
+    c2d: trans.c2d, c2d_n: trans.c2d_n, d2c: trans.d2c, d2c_n: trans.d2c_n,
+    ece: probs ? ece(probs, actual) : undefined,
+  };
 }
 export function ece(probs: number[], actual: Move[], bins=5): number {
   const b = Array.from({length:bins}, ()=>({sumConf:0,sumAcc:0,n:0}));

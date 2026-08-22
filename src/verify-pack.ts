@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { isValidPayoff, normalizeShares } from "./domain.js";
-import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions } from "./predictive.js";
+import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions, predictiveReport } from "./predictive.js";
 import { playMatch, strategies, tournament, stepGeneration } from "./kernel.js";
 import { Rng } from "./rng.js";
 
@@ -110,8 +110,31 @@ run("4.y Weak spots — balanced accuracy, ECE, transitions vs Markov", ()=>{
   assert.ok(ece([0.9,0.8,0.6,0.2,0.1,0.4], actual) < 0.6);
   const trans=confusionTransitions(["D","C"],["D","C"], ["C","D"]);
   assert.ok(trans.c2d_n===1 && trans.d2c_n===1 && trans.c2d===1 && trans.d2c===1);
+  const tr2=confusionTransitions(["C","C","D","D"],["C","D","D","C"], ["C","C","D","D"]);
+  assert.ok(tr2.c2c_n===1 && tr2.d2d_n===1 && tr2.retention_n===2 && tr2.transition_n===2);
+  assert.ok(Math.abs(tr2.retentionAcc-1)<0.01 && Math.abs(tr2.transitionAcc-0)<0.01);
   const mkPred:("C"|"D")[]=["C","D","C"], mkActual:("C"|"D")[]=["C","C","C"];
   assert.ok(Math.abs(accuracy(mkPred,mkActual)-0.66)<0.02);
+});
+
+run("4.z PredictiveReport + imbalanced + retention vs transition (friend proposal)", ()=>{
+  const actualTies:("C"|"D")[]=[...Array(248).fill("D"), ...Array(110).fill("C")] as ("C"|"D")[];
+  const prevTies:("C"|"D")[]=["C", ...actualTies.slice(0,-1)] as ("C"|"D")[];
+  const predAllD:("C"|"D")[]=Array(358).fill("D") as ("C"|"D")[];
+  const rAllD=predictiveReport(predAllD, actualTies, prevTies);
+  assert.ok(Math.abs(rAllD.accuracy - 248/358) < 0.01, `ALL-D acc ${rAllD.accuracy}`);
+  assert.ok(rAllD.balancedAccuracy < 0.6, `ALL-D balAcc should be ~50% got ${rAllD.balancedAccuracy}`);
+  assert.ok(rAllD.macroF1 < 0.5, `ALL-D macroF1 should be low got ${rAllD.macroF1}`);
+  assert.ok(rAllD.f1C < 0.01, `ALL-D F1_C ~0 got ${rAllD.f1C}`);
+  const predTFT:("C"|"D")[]=prevTies.slice() as ("C"|"D")[];
+  const rTFT=predictiveReport(predTFT, actualTies, prevTies);
+  assert.ok(rTFT.macroF1 > rAllD.macroF1, `TFT macroF1 ${rTFT.macroF1} > ALL-D ${rAllD.macroF1}`);
+  assert.ok(rTFT.accuracy > rAllD.accuracy);
+  assert.ok(rTFT.retention_n + rTFT.transition_n === 358);
+  assert.ok(rTFT.retentionAcc >= rTFT.transitionAcc, `retention ${rTFT.retentionAcc} should >= transition ${rTFT.transitionAcc} (inertia inflates acc)`);
+  const simplePred:("C"|"D")[]=["C","D"], simpleAct:("C"|"D")[]=["C","D"], simplePrev:("C"|"D")[]=["C","C"];
+  const rSimple=predictiveReport(simplePred, simpleAct, simplePrev);
+  assert.equal(rSimple.c2c_n,1); assert.equal(rSimple.c2d_n,1);
 });
 
 console.log("verify-pack OK");

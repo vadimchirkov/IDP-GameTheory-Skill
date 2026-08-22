@@ -8,7 +8,8 @@
     "demo": "tsx src/demo.ts",
     "scenario": "tsx src/cli.ts",
     "scenario:build": "tsx src/cli.ts --build",
-    "verify": "tsx src/verify-pack.ts"
+    "verify": "tsx src/verify-pack.ts",
+    "bench:predictive": "tsx src/bench-predictive.ts"
   },
   "dependencies": {
     "@lambda-house/teob-ts": "0.2.2"
