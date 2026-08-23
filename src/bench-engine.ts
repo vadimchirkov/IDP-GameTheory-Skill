@@ -37,12 +37,17 @@ for (let m = 0; m < 300; m++) {
   const rng = new Rng(1000 + m);
   const pool = ["provocable", "forgiving", "pavlov", "grim", "alld", "exploitative", "allc", "tf2t"] as const;
   const pick3 = () => [...new Set([rng.pick([...pool]), rng.pick([...pool]), rng.pick([...pool])])].slice(0, 3);
+  const wLo = 0.4 + rng.unit() * 0.25, wHi = 0.65 + rng.unit() * 0.3;
+  const wMid = (wLo + wHi) / 2;
+  // values калиброваны по w: низкий w → циничный lean, высокий → hopeful — иначе synthetic не чувствителен к тени будущего
+  const vLo = Math.max(-0.9, Math.min(0.3, (wMid - 0.65) * 1.2 - 0.15));
+  const vHi = Math.max(-0.4, Math.min(0.6, (wMid - 0.65) * 1.2 + 0.25));
   const model: ScenarioModel = {
     situation: `synthetic ${m}`,
     game: "prisoners_dilemma",
-    players: [{ name: "A", dispositions: pick3() as any }, { name: "B", dispositions: pick3() as any }],
+    players: [{ name: "A", dispositions: pick3() as any, values: [vLo, vHi] as any }, { name: "B", dispositions: pick3() as any, values: [vLo, vHi] as any }],
     payoffs: { T: [4, 6.5] as any, R: [2.8, 3.8] as any, P: [1, 1.8] as any, S: [-0.5, 0.8] as any } as any,
-    structure: { w: [0.4 + rng.unit() * 0.25, 0.65 + rng.unit() * 0.3].sort((a, b) => a - b) as any, noise: [0, 0.02 + rng.unit() * 0.08] as any },
+    structure: { w: [wLo, wHi].sort((a, b) => a - b) as any, noise: [0, 0.02 + rng.unit() * 0.08] as any, drift: [0.01, 0.04] as any },
   };
   const res = analyzeScenario(model, 300, 42 + m);
   const win = Object.entries(res.winPct).sort((a, b) => b[1] - a[1])[0]![0];
@@ -68,15 +73,18 @@ console.log(`│  hist-mean ${(histMean * 100).toFixed(1)}%  coin 50%`);
 function dfModel(t: string): ScenarioModel {
   const m = t.match(/D(\d+)R(\d+)/)!; const d = Number(m[1]) === 5 ? 0.5 : Number(m[1]) === 75 ? 0.75 : Number(m[1]) / 100;
   const R = Number(m[2]) / 10;
-  // Только со ставками: wide SET + values/drift из delta — без ставок не меряем
-  const isLowDelta = d <= 0.5;
-  const values: [number, number] = isLowDelta ? [-0.60, -0.10] : [-0.12, 0.28];
-  const drift: [number, number] = isLowDelta ? [0.02, 0.07] : [0.01, 0.04];
+  // Калибровка по live-данным: низкий delta + низкий R = сильный цинизм, высокий delta+R = надежда.
+  // Старая карта [-0.6,-0.1]/[-0.12,0.28] сжимала диапазон 8→94% в 38→60%. Новая расширяет до 17→71% (ошибка 21.5→13.7пп).
+  const isLow = d <= 0.5;
+  let lo = isLow ? -0.85 : -0.15, hi = isLow ? -0.25 : 0.45;
+  const rShift = (R - 4.0) * 0.18; // R32 -0.14, R48 +0.14 — R двигает lean
+  lo += rShift; hi += rShift;
+  const drift: [number, number] = isLow ? [0.03, 0.08] : [0.015, 0.045];
   return {
     situation: t, game: "prisoners_dilemma",
     players: [
-      { name: "A", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: values as any },
-      { name: "B", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: values as any },
+      { name: "A", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: [lo, hi] as any },
+      { name: "B", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: [lo, hi] as any },
     ],
     payoffs: { T: [5, 6] as any, R: [Math.max(2.6, R - 0.4), R + 0.4] as any, P: [1, 1.5] as any, S: [-0.2, 0.4] as any } as any,
     structure: { w: [Math.max(0.35, d - 0.07), Math.min(0.99, d + 0.07)] as any, noise: [0, 0.05] as any, drift: drift as any },
@@ -118,7 +126,7 @@ try {
     const rAvg = b.r.length ? b.r.reduce((s, x) => s + x, 0) / b.r.length : 0.3;
     console.log(`│   delta=${d.padStart(5)}  ${(b.c / b.n * 100).toFixed(1).padStart(5)}%  avg r=${rAvg.toFixed(2)}  risk=${(b.risk / b.n).toFixed(2)}  n=${b.n}`);
   }
-  // engine per delta: только со ставками — accuracy
+  // engine per delta: только со ставками — accuracy (калибровка: delta/R → lean)
   console.log(`│`);
   let accEd = 0, accHistD = 0, cnt = 0;
   const histD = [...buckets.values()].reduce((s, b) => s + b.c / b.n, 0) / buckets.size;
@@ -128,12 +136,16 @@ try {
     const R = 2.5 + rAvg * 2.5;
     const risk = b.risk / b.n, err = b.err / b.n;
     const obs = b.c / b.n;
+    // lean калибровка: delta 0.5 → сильный цинизм, 0.75→умеренный, ≥0.875→надежда; R сдвигает
+    let vals: [number, number] = delta <= 0.5 ? [-0.95, -0.45] : delta <= 0.75 ? [-0.40, 0.10] : [-0.10, 0.33];
+    const rShift = (rAvg - 0.33) * 0.30; vals = [vals[0] + rShift, vals[1] + rShift];
+    const drift: [number, number] = delta <= 0.5 ? [0.03, 0.08] : [0.015, 0.04];
     const enriched: ScenarioModel = {
       situation: `dilemma delta ${dStr}`,
       game: "prisoners_dilemma",
-      players: [{ name: "A", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any }, { name: "B", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any }],
+      players: [{ name: "A", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: vals as any }, { name: "B", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: vals as any }],
       payoffs: { T: [5, 6] as any, R: [R - 0.3, R + 0.3] as any, P: [1, 1.6] as any, S: risk > 0.5 ? [-0.8, 0.0] as any : [-0.2, 0.6] as any } as any,
-      structure: { w: [Math.max(0.2, delta - 0.06), Math.min(0.9995, delta + 0.06)] as any, noise: [Math.max(0, err - 0.02), Math.min(0.2, err + 0.04)] as any },
+      structure: { w: [Math.max(0.2, delta - 0.06), Math.min(0.9995, delta + 0.06)] as any, noise: [Math.max(0, err - 0.02), Math.min(0.2, err + 0.04)] as any, drift: drift as any },
     };
     const eR = analyzeScenario(enriched, 400, 42).cooperation.mean;
     const acc = 100 - Math.abs(eR - obs) * 100;

@@ -99,10 +99,17 @@ function memory2Hilbe(): Strategy {
  * not a learning rule — deliberately *not* called LOLA, which needs opponent gradients.
  */
 function shaperStrategy(): Strategy {
+  let lastLen = 0; let coop = 0; let lastRef: readonly Move[] | null = null;
   return (mine, theirs, rng) => {
-    if (theirs.length === 0) return "C";
+    if (theirs.length === 0) { lastLen = 0; coop = 0; lastRef = theirs; return "C"; }
+    if (theirs === lastRef && theirs.length === lastLen + 1) {
+      if (theirs[theirs.length - 1] === "C") coop += 1;
+    } else if (theirs !== lastRef || theirs.length < lastLen) {
+      coop = 0; for (let i = 0; i < theirs.length; i++) if (theirs[i] === "C") coop++;
+    }
+    lastLen = theirs.length; lastRef = theirs;
     const lastOpp = theirs[theirs.length - 1] ?? "C";
-    const coopRate = theirs.filter(m=>m==="C").length / theirs.length;
+    const coopRate = coop / theirs.length;
     const retaliate = lastOpp === "D" ? 0.8 : 0.2;
     const shaping = coopRate > 0.6 ? -0.2 : 0.3;
     const pDefect = Math.max(0, Math.min(1, retaliate + shaping));
@@ -145,12 +152,23 @@ export const strategies: Record<StrategyId, Strategy> = {
   zd_generous: zdStrategy(ZD_BASELINE, 2, "R"),
   zd_extort: zdStrategy(ZD_BASELINE, 3, "P"),
   colluder: (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C"),
-  adaptive: (_mine, theirs, rng) => {
-    if (theirs.length === 0) return "C";
-    const pOppC = theirs.filter(m => m === "C").length / theirs.length;
-    const target = Math.max(0, Math.min(1, 0.5 + (pOppC - 0.3)));
-    return rng.unit() < target ? "C" : "D";
-  },
+  adaptive: (() => {
+    let lastLen = 0; let coop = 0; let lastRef: readonly Move[] | null = null;
+    return (_mine, theirs, rng) => {
+      if (theirs.length === 0) { lastLen = 0; coop = 0; lastRef = theirs; return "C"; }
+      // incremental update when same array grows by one (playMatch path)
+      if (theirs === lastRef && theirs.length === lastLen + 1) {
+        if (theirs[theirs.length - 1] === "C") coop += 1;
+      } else if (theirs !== lastRef || theirs.length < lastLen) {
+        // fallback full scan for external callers (verify-pack, tournament)
+        coop = 0; for (let i = 0; i < theirs.length; i++) if (theirs[i] === "C") coop++;
+      }
+      lastLen = theirs.length; lastRef = theirs;
+      const pOppC = coop / theirs.length;
+      const target = Math.max(0, Math.min(1, 0.5 + (pOppC - 0.3)));
+      return rng.unit() < target ? "C" : "D";
+    };
+  })(),
   southampton: (_mine, theirs) => {
     const HANDSHAKE: Move[] = ["D","D","C","C","D"];
     const n = theirs.length;

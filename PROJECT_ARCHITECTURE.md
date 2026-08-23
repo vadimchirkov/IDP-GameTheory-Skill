@@ -89,7 +89,7 @@ RunReply   = {tag:"Accepted"} | {tag:"State",state} | {tag:"Rejected",reason}
 runCategory = categoryTypes<RunCommand,RunReply>(CategoryId("game-run"))
 KERNEL_VERSION = "1"
 tickTimer = TimerId("next-generation")
-snapshotEvery: 25
+snapshotEvery: 10 // src/run.ts:117 — 10, not 25 (eco cycles >500 gens)
 ```
 
 ### 4.2 Lifecycle
@@ -123,7 +123,7 @@ runEventCodec = tagCodec<RunEvent>("RunStarted","GenerationCompleted","RunPaused
 stateCodec    = objectCodec<RunState>("RunState") // used in src/selfcheck.ts:60
 ```
 
-Current runtime: `createSingleRuntime(runAggregate, runEventCodec, stateCodec)` (`src/selfcheck.ts:60`). Each `EntityId` = one independent run journal. Snapshots every 25 events (`src/run.ts:116`) for fast replay.
+Current runtime: `createSingleRuntime(runAggregate, runEventCodec, stateCodec)` (`src/selfcheck.ts:60`). Each `EntityId` = one independent run journal. Snapshots every 10 events (`src/run.ts:117`) for fast replay (eco/transition cycles >500 gens).
 
 Planned upcasting for schema evolution (`node_modules/@lambda-house/teob-ts/README.md:551`):
 

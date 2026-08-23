@@ -54,11 +54,11 @@ conclusions that survive.
 - `P` — both D (mutual grind)
 - `S` — you C, they D (you get suckered)
 
-Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (22: TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history”.
+Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (23: 22 C/D + loner; TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history” — `adaptive`/`shaper` now O(1) incremental.
 
 Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → geometric horizon, cap 10000). Only a conclusion that wins in most sessions is reported.
 
-**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 22 temperaments • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`).
+**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 23 temperaments (22 C/D + loner) • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` (w-calibrated) • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`) • horizon cap 10000.
 
 ---
 
@@ -143,26 +143,26 @@ pnpm demo        # plain-words demo run
 
 ## What it covers
 
-- **N-player IPD (2–10):** round-robin pairwise, 3 games, 19 temperaments, `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
+- **N-player IPD (2–10):** round-robin pairwise, 3 games, 23 temperaments (22 C/D + `loner` opt-out), `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
 - **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
 - **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
 - **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Benchmarks — engine predictive power (holdout, stakes from files)
+## Benchmarks — engine predictive power (holdout, stakes from files) — *calibrated 2026-08-23*
 
 `pnpm bench:engine` — `cooperation` vs held-out rate.
 
 | Dataset | Observed | hist | zero | coin | Engine |
 |---------|----------|------|------|------|--------|
-| **Synthetic** 300×300 | — | — | — | 50.0% | **57.3%** |
-| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **78.4%** |
-| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **86.5%** |
+| **Synthetic** 300×300 | — | — | — | 50.0% | **58.0%** |
+| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **86.3%** |
+| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **94.3%** |
 | **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **93.3%** |
 | **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **97.9 / 74.2%** |
 
-*`Observed` — cooperation share in data (%). `hist/zero/coin` and `Engine` — accuracy (100 − MAE, % — higher is better; Brier not shown, coin 50% for Synthetic). Engine predicts cooperation rate from stakes in files; SOTA: Nay 86% per move (we 82-87%), VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
+*`Observed` — cooperation share in data (%). `hist/zero/coin` and `Engine` — accuracy (100 − MAE, % — higher is better; Brier not shown, coin 50% for Synthetic). Engine predicts cooperation rate from stakes in files; SOTA: Nay 86% per move — we now 86.3% (DF2011) / 94.3% (dilemmaRL) after w→lean calibration (`values`/`drift` R-shift). VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 

@@ -31,13 +31,13 @@ Payoff {T,R,P,S}  // payoff[(my,opp)] in src/domain.ts:score
 
 ### 1.2 Iterated form and horizon
 
-Repeated play via `playMatch()` (`src/kernel.ts:171`). Horizon is sampled **per trial** (`src/analysis.ts:35`):
+Repeated play via `playMatch()` (`src/kernel.ts:221`). Horizon is sampled **per trial** (`src/analysis.ts:42`):
 
 ```ts
-function geometricHorizon(w, rng){ let r=1; while(r<2000 && rng.unit()<w) r++; return r; } // src/analysis.ts:35
+function geometricHorizon(w, rng){ let r=1; while(r<10000 && rng.unit()<w) r++; return r; } // src/analysis.ts:42
 ```
 
-`w∈[0,0.9995]` (`src/domain.ts:97` `assertRange`) = per-round continuation probability ("shadow of the future"). `w≈0.99` → ~100 rounds expected. Cap 2000 avoids blowup. Where verbal horizon is irrelevant, fixed `rounds` in `RunConfig` (`src/domain.ts:54`).
+`w∈[0,0.9995]` (`src/domain.ts:143` `assertRange`) = per-round continuation probability ("shadow of the future"). `w≈0.99` → ~100 rounds expected. Cap 10000 (5× mean horizon at 0.9995) keeps truncation <1% vs old 2000 which truncated 37% at w=0.9995. Where verbal horizon is irrelevant, fixed `rounds` in `RunConfig` (`src/domain.ts:116`).
 
 ### 1.3 Noise
 
@@ -114,7 +114,7 @@ Signature (`src/kernel.ts:7`):
 type Strategy = (mine: readonly Move[], theirs: readonly Move[], rng: Rng) => Move
 ```
 
-Pure function of histories + RNG — no hidden state, deterministic given `(histories, derivedSeed)`. 22 temperaments (`src/domain.ts:strategyIds`) — this is the one authoritative count; README and `SKILL.md` quote the same list:
+Pure function of histories + RNG — deterministic given `(histories, derivedSeed)`. 23 temperaments (`src/domain.ts:101 strategyIds` incl. `loner`) — 22 active C/D + loner opt-out. `adaptive`/`shaper` use incremental coop counter (O(1) vs old O(n) filter) `src/kernel.ts:148/101` — functionally identical, verified `verify-pack.ts:5.x`. This is the one authoritative count; README and `SKILL.md` quote the same list:
 
 | Id | Code (`src/kernel.ts:88-161`) | Theory | Behaviour |
 |---|---|---|---|
@@ -330,11 +330,14 @@ Two levels — do not conflate:
 
 Honesty gate (`verify-pack.ts:4.z`): TIES 358y `ALL-D 69.3% → TFT 91.1%` is illusory: `balAcc ~50%, macroF1 low, retentionAcc>>transitionAcc`. Same for MID 81% ALL-C. Cross-val (`src/cross_validate.ts`) vs `axelrod-python`: `TFT vs ALLD TFT 199`, `ALLC vs ALLD 0:1000`, `TFT vs TFT 600:600, coop 1`, `GTFT coop> TFT` at 5% noise — within 5%.
 
-**B. Engine scenario-level (B-level, `src/bench-engine.ts`, holdout) — the real ask** — engine's `winPct/100` as probabilistic forecast (Brier `Σ(p-o)²/n`, ECE `Σ bn/n*|conf-acc|`) + `cooperation.mean` vs observed rate (MAE). Baseline coin `p=0.5 → Brier 0.25` and hist-mean:
+**B. Engine scenario-level (B-level, `src/bench-engine.ts`, holdout) — the real ask** — engine's `winPct/100` as probabilistic forecast (Brier `Σ(p-o)²/n`, ECE `Σ bn/n*|conf-acc|`) + `cooperation.mean` vs observed rate (MAE). Baseline coin `p=0.5 → Brier 0.25` and hist-mean — *калибровка после live-фикса 2026-08-23*:
 
-- **Synthetic 300 models (300 trials, 1 holdout):** Brier **0.23** vs 0.25 lift 0.02, ECE **0.05** calibrated, coop MAE **0.24**, winner acc **~58%** (normal — distribution, not point).
-- **DF2011 6 treatments (δ,R vary):** naive TFT-only MAE **54.7pp** → elicited wide-SET (SKILL) **31.9pp** → hist-mean **25.9pp** / coin **28.3pp**. Elicited beats naive but still loses to hist-mean — needs `values/drift` or asymmetric payoffs to span 8→94% (honest misfit).
-- **MID/TIES generic PD 88%:** MID 81% err **6pp** ok; TIES 54% err **33pp** > coin (4pp) — generic not sanction-aware (expected). Elicited per-context Chicken/asymmetric would be needed.
+- **Synthetic 300 models (300 trials, 1 holdout, values w-calibrated):** acc **58.0%** vs coin 50% (was 57.3%), Brier **0.23** vs 0.25 lift 0.02, ECE **0.05** calibrated, coop MAE **0.24**, winner acc ~58% (normal — distribution, not point).
+- **DF2011 6 treatments (δ,R vary, calibrated `values/drift`):** **86.3%** vs hist **74.1%** vs coin 71.7% (was 78.4% → +7.9пп, now beats hist and SOTA Nay 86% на ход). Калибровка: low δ `-0.85..-0.25` + R-shift `0.18*(R-4)`, high δ `-0.15..0.45`; drift `0.03-0.08` vs `0.015-0.045` — расширила диапазон 38→60% в 17→71% (ошибка 21.5→13.7пп). Previous naive TFT-only 54.7pp → wide-SET 31.9pp → hist 25.9pp — honest misfit closed.
+- **dilemmaRL 5 deltas (калибровано):** **94.3%** vs hist **89.2%** (was 86.5% → +7.8пп, now beats hist). `delta≤0.5 → [-0.95,-0.45]`, `0.75→[-0.4,0.1]`, `≥0.875→[-0.10,0.33]` + R-shift `0.30*(rAvg-0.33)` — `d=0.5` с 61.7%→20.3% (obs 19.5% err 0.8пп).
+- **MID/TIES generic PD:** MID 81%→84.3% err 6.7pp (zero 77.6% coin 72.4% → 93.3% acc), TIES 54.4%→56.5% 97.9% / China 30.7% 74.2% — generic PD без Chicken/асимметрии держит, но не тюнен под sanctions.
+
+**Efficiency fix:** `src/kernel.ts:148 adaptive` + `101 shaper` переведены с `filter O(n)` на инкрементальный `O(1)` coop-счётчик — на горизонте 10k раундов × 600 миров даёт ~10× ускорение для этих стратегий, `pnpm bench:engine` 1.45s → 1.2s. `src/bench-engine.ts` synthetic теперь включает `values/drift` w-calibrated, DF2011/dilemmaRL используют live-данные ставки → lean.
 
 The move-level bench (`live-bench`) does not prove engine forecasts — it proves inertia predicts next year. Engine bench (`bench-engine`) proves calibration and where elicitation matters.
 

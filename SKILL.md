@@ -40,19 +40,19 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
 2. **Anchor every payoff to a real stake.** Fill `rationale` with one line per
    payoff tying it to something in the situation ("R ≈ keeping the deal alive,
    worth about a normal quarter"). If you can't justify it, widen the range.
-3. **Dispositions as a SET, not a guess.** You rarely know a party is purely one
-   type. List every plausible disposition for each player; the simulator samples
-   among them, so "what if they're more vindictive than I think" is tested
-   automatically. Available (22): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
-   `pavlov` (WSLS), `grim` (never forgives), `exploitative` (probes, backs off only on 2×D),
-   `trusting` (ALLC), `gradual` (Beaufils: n-th defection → n×D then 2×C), `erratic` (50/50),
-   `prober` ([D,C,C] probe), `contrite` (forgives own noise-induced D), `detective` ([C,D,C,C]→TFT else ALLD),
-   `zd_generous` (Stewart-Plotkin ZDGTFT-2, generous ZD χ=2, `p=[1,1/8,1,1/4]` — shares the surplus, never out-scores you), `zd_extort` (Press-Dyson extortion χ=3, `p=[9/13,0,7/13,0]` — keeps a 3× share of any surplus, never forgives mutual D),
-   `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats), `semigrim` (Semi-Grim: C after CC, D after DD, else 50/50 — human baseline), `memory2` (Hilbe memory-2 table), `shaper` (retaliate hard, ease off once opponent is cooperative).
-4. **Structure = horizon and noise, as ranges.**
-   - `w` (0–0.9995, `assertRange` cap): probability the relationship continues each
-     period. High w = long shadow of the future. Unknown end date → wide range.
-     Horizon in rounds is `geometricHorizon(w)` capped at 2000 (`analysis.ts:31`).
+ 3. **Dispositions as a SET, not a guess.** You rarely know a party is purely one
+    type. List every plausible disposition for each player; the simulator samples
+    among them, so "what if they're more vindictive than I think" is tested
+    automatically. Available (23: 22 C/D + loner): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
+    `pavlov` (WSLS), `grim` (never forgives), `exploitative` (probes, backs off only on 2×D),
+    `trusting` (ALLC), `gradual` (Beaufils: n-th defection → n×D then 2×C), `erratic` (50/50),
+    `prober` ([D,C,C] probe), `contrite` (forgives own noise-induced D), `detective` ([C,D,C,C]→TFT else ALLD),
+    `zd_generous` (Stewart-Plotkin ZDGTFT-2, generous ZD χ=2, `p=[1,1/8,1,1/4]` — shares the surplus, never out-scores you), `zd_extort` (Press-Dyson extortion χ=3, `p=[9/13,0,7/13,0]` — keeps a 3× share of any surplus, never forgives mutual D),
+    `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`, O(1) incremental), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats), `semigrim` (Semi-Grim: C after CC, D after DD, else 50/50 — human baseline), `memory2` (Hilbe memory-2 table), `shaper` (retaliate hard, ease off once opponent is cooperative, O(1)), `loner` (Szabó-Hauert opt-out → σ, abstention, needs `structure.sigma`).
+ 4. **Structure = horizon and noise, as ranges.**
+    - `w` (0–0.9995, `assertRange` cap): probability the relationship continues each
+      period. High w = long shadow of the future. Unknown end date → wide range.
+      Horizon in rounds is `geometricHorizon(w)` capped at 10000 (`analysis.ts:42`, 5× mean horizon at 0.9995, old 2000 truncated 37%).
    - `noise` (0–1, realistically 0–0.2): chance a move is misread as its opposite
      (a rep goes off-script, a message is misinterpreted). Real relationships are
      never 0.
@@ -63,8 +63,8 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
 5. **Teams (fixed coalitions).** `players[].team?: string` — without it each player
    is its own team. `colluder` plays C vs teammate, TFT vs outsider (noise after).
    Winner is team with highest total score (`winPctTeam`), per-capita `winPctPerCapita` shown for different-size teams; `champion` is best individual (`winPct`).
-6. **Values = initial lean.** `players[].values?: [-1,1]` — `-1` flips C→D with prob 1,
-   `+1` flips D→C with prob 1, `0` neutral. Lean then drifts as above. Omit or `[0,0]` = bit-for-bit compatible (no extra `rng.unit()` call).
+ 6. **Values = initial lean.** `players[].values?: [-1,1]` — `-1` flips C→D with prob 1,
+    `+1` flips D→C with prob 1, `0` neutral. Lean then drifts as above. Omit or `[0,0]` = bit-for-bit compatible (no extra `rng.unit()` call). **Live-calibration hint (bench-engine 2026-08):** low `w` (δ≤0.5) pairs with cynical lean `[-0.95,-0.45]` + drift `[0.03,0.08]`; high `w` (≥0.875) with hopeful `[-0.10,0.33]` + R-shift `0.3*(r-0.33)`. This expands DF2011 8→94% span from 38→60% to 17→71% (error 21.5→13.7пп, acc 78.4→86.3% beats hist 74.1%).
 7. **Asymmetric stakes when sides differ.** If one party has far more to lose or
    less to gain (e.g. closing the strait self-harms Iran), give each player its own
    payoff table instead of one shared one — see the two `payoffs` forms below. Use
