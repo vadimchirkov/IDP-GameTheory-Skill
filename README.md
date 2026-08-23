@@ -152,12 +152,15 @@ pnpm demo        # plain-words demo run
 
 ## Benchmarks — engine predictive power (holdout, stakes from files)
 
-`pnpm bench:engine` — `cooperation` vs held-out cooperation rate.
+`pnpm bench:engine` — `cooperation` vs held-out rate.
 
-- **Synthetic 300×300:** Brier **0.23** vs `coin 0.25` lift **0.02**, ECE **0.05** calibrated.
-- **DF2011 6 treatments:** engine **21.6pp** vs `hist 25.9 / zero 57.2 / coin 28.3` — beats all baselines. SOTA `Nay 86%` per move — our `TFT 82-87%` close.
-- **dilemmaRL 5 deltas:** engine **13.5pp** vs `hist 10.8 / zero 59.6 / coin 9.6` — at hist level, SOTA `86% / R²≈0.7`.
-- **MID 77.6% / TIES 54.4% / China 30.7%:** engine `6.7 / 2.1 / 25.8pp` vs `zero 22.4 / 45.6 / 69.3` and `coin 27.6 / 4.4 / 19.3` — beats zero. SOTA VIEWS `zero CRPS 56→ML 49`, sanctions `AUC~0.65`.
+| Dataset | Observed | Engine | Baselines (MAE pp) | SOTA |
+|---------|----------|--------|---------------------|------|
+| **Synthetic** 300×300 | — | Brier **0.23**, ECE **0.05** | coin **0.25** | — |
+| **DF2011** 6 treatments | 8–94% | **21.6pp** | hist **25.9** / zero **57.2** / coin **28.3** | Nay 86% per move (our TFT 82-87%) |
+| **dilemmaRL** 5 deltas | 19–49% | **13.5pp** | hist **10.8** / zero **59.6** / coin **9.6** | 86% / R²≈0.7 |
+| **MID** 77.6% | 77.6% | **6.7pp** | zero **22.4** / coin **27.6** | VIEWS zero CRPS 56→ML 49 |
+| **TIES** 54.4% / China 30.7% | 54.4 / 30.7% | **2.1 / 25.8pp** | zero **45.6 / 69.3** / coin **4.4 / 19.3** | sanctions AUC ~0.65 |
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
