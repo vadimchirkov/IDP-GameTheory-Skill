@@ -150,9 +150,9 @@ pnpm demo        # plain-words demo run
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Benchmarks — engine predictive power (holdout, stakes from files, no naive)
+## Benchmarks — engine predictive power (holdout, stakes from files)
 
-`pnpm bench:engine` — `cooperation` vs held-out cooperation rate. Only with stakes (`D/R→w/R + values/drift`, `delta/r1/risk/error→w/R/S/noise`, `fatality/costs→P/S` + asymmetry). No measurement without stakes.
+`pnpm bench:engine` — `cooperation` vs held-out cooperation rate.
 
 - **Synthetic 300×300:** Brier **0.23** vs `coin 0.25` lift **0.02**, ECE **0.05** calibrated.
 - **DF2011 6 treatments:** engine **21.6pp** vs `hist 25.9 / zero 57.2 / coin 28.3` — beats all baselines. SOTA `Nay 86%` per move — our `TFT 82-87%` close.
