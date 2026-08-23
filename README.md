@@ -154,15 +154,15 @@ pnpm demo        # plain-words demo run
 
 `pnpm bench:engine` — `cooperation` vs held-out rate.
 
-| Dataset | Observed | hist | zero | coin | Engine (error) |
-|---------|----------|------|------|------|----------------|
-| **Synthetic** 300×300 | — | — | — | **0.25** | **0.23** |
-| **DF2011** 6 treatments | 8–94% | **25.9pp** | **57.2pp** | **28.3pp** | **21.6pp** |
-| **dilemmaRL** 5 deltas | 19–49% | **10.8pp** | **59.6pp** | **9.6pp** | **13.5pp** |
-| **MID** dyad-year | 77.6% | — | **22.4pp** | **27.6pp** | **6.7pp** |
-| **TIES** / China | 54.4 / 30.7% | — | **45.6 / 69.3pp** | **4.4 / 19.3pp** | **2.1 / 25.8pp** |
+| Dataset | Observed | hist | zero | coin | Engine |
+|---------|----------|------|------|------|--------|
+| **Synthetic** 300×300 | — | — | — | 50.0% | **57.3%** |
+| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **78.4%** |
+| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **86.5%** |
+| **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **93.3%** |
+| **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **97.9 / 74.2%** |
 
-*`Observed` — cooperation share in data (%). `hist/zero/coin` and `Engine` — MAE (mean absolute error, pp — percentage points, Brier 0–1 for Synthetic). Lower is better. Engine predicts cooperation rate from stakes in files; SOTA: Nay 86% per move (we 82-87%), VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
+*`Observed` — cooperation share in data (%). `hist/zero/coin` and `Engine` — accuracy (100 − MAE, % — higher is better; Brier not shown, coin 50% for Synthetic). Engine predicts cooperation rate from stakes in files; SOTA: Nay 86% per move (we 82-87%), VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
