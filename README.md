@@ -156,11 +156,11 @@ pnpm demo        # plain-words demo run
 
 | Dataset | Observed | hist | zero | coin | Engine |
 |---------|----------|------|------|------|--------|
-| **Synthetic** 300×300 | — | — | — | **0.25** | **0.23** (ECE **0.05**, **-0.02** vs coin) |
-| **DF2011** 6 treatments | 8–94% | **25.9pp** | **57.2pp** | **28.3pp** | **49%** avg (38–61%) **21.6pp** (**-4.3pp** vs hist) |
-| **dilemmaRL** 5 deltas | 19–49% | **10.8pp** | **59.6pp** | **9.6pp** | **53%** avg (44–62%) **13.5pp** (**+2.7pp** vs hist) |
-| **MID** dyad-year | 77.6% | — | **22.4pp** | **27.6pp** | **84.3%** (**+6.7pp**, **-15.7pp** vs zero) |
-| **TIES** / China | 54.4 / 30.7% | — | **45.6 / 69.3pp** | **4.4 / 19.3pp** | **56.5%** (**+2.1pp** / **25.8pp**) |
+| **Synthetic** 300×300 | — | — | — | **0.25** | **0.23** |
+| **DF2011** 6 treatments | 8–94% | **25.9pp** | **57.2pp** | **28.3pp** | **21.6pp** |
+| **dilemmaRL** 5 deltas | 19–49% | **10.8pp** | **59.6pp** | **9.6pp** | **13.5pp** |
+| **MID** dyad-year | 77.6% | — | **22.4pp** | **27.6pp** | **6.7pp** |
+| **TIES** / China | 54.4 / 30.7% | — | **45.6 / 69.3pp** | **4.4 / 19.3pp** | **2.1 / 25.8pp** |
 
 *Headers — Dataset / Observed: live data & held-out rate; hist / zero / coin: MAE of baselines (hist = mean of past, zero = always `C` 100%, coin = 50%; Brier for Synthetic); Engine: predicted `cooperation` and MAE (±pp vs observed). SOTA: Nay 86% per move (we 82-87%), VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
 
