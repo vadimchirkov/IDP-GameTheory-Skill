@@ -154,15 +154,15 @@ pnpm demo        # plain-words demo run
 
 `pnpm bench:engine` — `cooperation` vs held-out rate.
 
-| Dataset | Observed | Baselines (MAE pp) | Engine → vs SOTA |
-|---------|----------|---------------------|------------------|
-| **Synthetic** 300×300 | — | coin **0.25** | Brier **0.23** (ECE **0.05**) — beats coin |
-| **DF2011** 6 treatments | 8–94% | hist **25.9** / zero **57.2** / coin **28.3** | 38–61% → **21.6pp** — beats hist, SOTA Nay 86% (we 82-87%) |
-| **dilemmaRL** 5 deltas | 19–49% | hist **10.8** / zero **59.6** / coin **9.6** | 44–62% → **13.5pp** — near hist, SOTA 86% / R²≈0.7 |
-| **MID** dyad-year | 77.6% | zero **22.4** / coin **27.6** | **84.3% → 6.7pp** — beats zero, SOTA VIEWS 56→49 |
-| **TIES** / China | 54.4 / 30.7% | zero **45.6 / 69.3** / coin **4.4 / 19.3** | **56.5% → 2.1pp** / **25.8pp** — beats zero, SOTA AUC ~0.65 |
+| Dataset | Observed | Baselines | Engine → vs SOTA |
+|---------|----------|-----------|------------------|
+| **Synthetic** 300×300 | — | coin **0.25** (Brier) | Brier **0.23** (ECE **0.05**) — beats coin |
+| **DF2011** 6 treatments | 8–94% | hist **25.9pp** / zero **57.2pp** / coin **28.3pp** | 38–61% → **21.6pp** — beats hist, SOTA Nay 86% (we 82-87%) |
+| **dilemmaRL** 5 deltas | 19–49% | hist **10.8pp** / zero **59.6pp** / coin **9.6pp** | 44–62% → **13.5pp** — near hist, SOTA 86% / R²≈0.7 |
+| **MID** dyad-year | 77.6% | zero **22.4pp** / coin **27.6pp** | **84.3% → 6.7pp** — beats zero, SOTA VIEWS 56→49 |
+| **TIES** / China | 54.4 / 30.7% | zero **45.6 / 69.3pp** / coin **4.4 / 19.3pp** | **56.5% → 2.1pp** / **25.8pp** — beats zero, SOTA AUC ~0.65 |
 
-*Headers — Dataset: live data used; Observed: held-out cooperation rate in data; Baselines: hist = mean of past, zero = always `C` (100%), coin = 50% (MAE in pp); Engine: predicted `cooperation` → MAE, and vs SOTA (best published baseline on same data).*
+*Headers — Dataset: live data; Observed: held-out cooperation rate; Baselines: hist = mean of past, zero = always `C` (100%), coin = 50% (MAE in pp, Brier for Synthetic); Engine: predicted `cooperation` → MAE, and vs SOTA (best published baseline on same data).*
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
