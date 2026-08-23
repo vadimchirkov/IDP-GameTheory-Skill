@@ -150,16 +150,16 @@ pnpm demo        # plain-words demo run
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Benchmarks — предсказательная сила движка (holdout, ставки из файлов, без naive)
+## Benchmarks — engine predictive power (holdout, stakes from files, no naive)
 
-`pnpm bench:engine` — `cooperation` vs held-out доля дружбы. Только со ставками (`D/R→w/R + values/drift`, `delta/r1/risk/error→w/R/S/noise`, `fatality/costs→P/S` + асимметрия). Без ставок не меряем.
+`pnpm bench:engine` — `cooperation` vs held-out cooperation rate. Only with stakes (`D/R→w/R + values/drift`, `delta/r1/risk/error→w/R/S/noise`, `fatality/costs→P/S` + asymmetry). No measurement without stakes.
 
-- **Synthetic 300×300:** Brier **0.23** vs `coin 0.25` lift **0.02**, ECE **0.05** калиброван.
-- **DF2011 6 treatments:** движок **21.6pp** vs `hist 25.9 / zero 57.2 / coin 28.3` — бьёт все бейзлайны. SOTA `Nay 86%` на ход — наш `TFT 82-87%` рядом.
-- **dilemmaRL 5 deltas:** движок **13.5pp** vs `hist 10.8 / zero 59.6 / coin 9.6` — на уровне hist, SOTA `86% / R²≈0.7`.
-- **MID 77.6% / TIES 54.4% / China 30.7%:** движок `6.7 / 2.1 / 25.8pp` vs `zero 22.4 / 45.6 / 69.3` и `coin 27.6 / 4.4 / 19.3` — бьёт zero. SOTA VIEWS `zero CRPS 56→ML 49`, санкции `AUC~0.65`.
+- **Synthetic 300×300:** Brier **0.23** vs `coin 0.25` lift **0.02**, ECE **0.05** calibrated.
+- **DF2011 6 treatments:** engine **21.6pp** vs `hist 25.9 / zero 57.2 / coin 28.3` — beats all baselines. SOTA `Nay 86%` per move — our `TFT 82-87%` close.
+- **dilemmaRL 5 deltas:** engine **13.5pp** vs `hist 10.8 / zero 59.6 / coin 9.6` — at hist level, SOTA `86% / R²≈0.7`.
+- **MID 77.6% / TIES 54.4% / China 30.7%:** engine `6.7 / 2.1 / 25.8pp` vs `zero 22.4 / 45.6 / 69.3` and `coin 27.6 / 4.4 / 19.3` — beats zero. SOTA VIEWS `zero CRPS 56→ML 49`, sanctions `AUC~0.65`.
 
-*Run: `pnpm bench:engine` (B) + `pnpm cross:validate` vs Axelrod-Python <5%. Данные `data/raw/` (`data/README.md`).*
+*Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
