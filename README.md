@@ -162,6 +162,8 @@ pnpm demo        # plain-words demo run
 | **MID** dyad-year | 77.6% | zero **22.4** / coin **27.6** | **84.3% → 6.7pp** — beats zero, SOTA VIEWS 56→49 |
 | **TIES** / China | 54.4 / 30.7% | zero **45.6 / 69.3** / coin **4.4 / 19.3** | **56.5% → 2.1pp** / **25.8pp** — beats zero, SOTA AUC ~0.65 |
 
+*Headers — Dataset: live data used; Observed: held-out cooperation rate in data; Baselines: hist = mean of past, zero = always `C` (100%), coin = 50% (MAE in pp); Engine: predicted `cooperation` → MAE, and vs SOTA (best published baseline on same data).*
+
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
