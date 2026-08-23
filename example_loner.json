@@ -1,0 +1,30 @@
+{
+  "situation": "A freelancer and a client negotiate repeat work — either can keep dealing (cooperate), squeeze the other (defect), or simply walk away to a safe outside option (loner) worth less than a good deal but more than a bad grind",
+  "players": [
+    {
+      "name": "Freelancer",
+      "dispositions": ["provocable", "forgiving", "loner"],
+      "note": "Will keep working if treated fairly, but has other clients to fall back on"
+    },
+    {
+      "name": "Client",
+      "dispositions": ["provocable", "exploitative", "loner"],
+      "note": "Tempted to squeeze on price, but can also just hire someone else"
+    }
+  ],
+  "payoffs": { "T": [4, 6], "R": [3, 4], "P": [1, 2], "S": [-1, 1] },
+  "structure": {
+    "w": [0.7, 0.95],
+    "noise": [0.0, 0.1],
+    "sigma": [1.8, 2.6]
+  },
+  "rationale": {
+    "R": "a fair ongoing arrangement = steady value for both",
+    "T": "squeeze once while they stay committed = a quick win",
+    "P": "mutual squeezing = a grinding, low-trust relationship",
+    "S": "keep delivering while they squeeze = underpaid and overworked",
+    "w": "the relationship may be a one-off or a long retainer",
+    "noise": "a missed deadline or a scope dispute misread as bad faith",
+    "sigma": "the outside option — another client / another freelancer — pays less than a good deal but beats being ground down (P < σ < R)"
+  }
+}

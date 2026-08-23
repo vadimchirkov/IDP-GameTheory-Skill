@@ -183,7 +183,7 @@ Properties: resumable (only new events on next run), rebuildable via `rebuildPro
 | **Testing** | `createAggregateTestKit` + `extractEvents` (`src/selfcheck.ts:1`), `teob-core` invariants, `verify-pack.ts` | `fast-check` property-based + `verifyEntity/verifyAll` (`core.md: Invariants`) | Pure `decide/apply` already testable without runtime |
 | **HTTP** | CLI only (`src/cli.ts`) | `teob-http` `aggregateRoutes/allAggregateRoutes` (ETag/If-Match, OpenAPI `openApiSchema(describeAggregate(...))`) + `teob-quickstart` | Dashboard needs `Run` streaming; no HTTP required for scenario analysis |
 | **Saga** | none | `teob-saga` `statefulSaga` only for cross-aggregate orchestration (SimulationRun↔Participant) | Single `Run` aggregate has no cross-entity choreography |
-| **AI** | `llm_agent` disposition is a stub (`src/kernel.ts:160`) | `teob-ai` `agentFlowAggregate` + `ToolPermission.Confirm` | LLM moves justify per-agent entities + `ReplyDeferred` |
+| **AI** | none — the `llm_agent` stub was removed rather than shipped as a fake strategy | `teob-ai` `agentFlowAggregate` + `ToolPermission.Confirm` | LLM moves justify per-agent entities + `ReplyDeferred` |
 | **Telemetry** | none | `teob-telemetry` `withTelemetry/withJournalTelemetry` | On measured CPU/IO limits |
 
 The swap is literal (`node_modules/@lambda-house/teob-ts/README.md:70`):

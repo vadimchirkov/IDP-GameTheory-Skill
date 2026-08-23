@@ -1,0 +1,37 @@
+{
+  "situation": "Two suppliers under a fragile cartel — when both hold price the market stays fat and lucrative, but a single price war flips everyone into a lean commodity game that is hard to climb back out of",
+  "players": [
+    {
+      "name": "Acme",
+      "dispositions": ["provocable", "forgiving", "exploitative"],
+      "note": "Holds price if the other does, but tempted while margins are fat"
+    },
+    {
+      "name": "Borex",
+      "dispositions": ["provocable", "gradual", "grim"],
+      "note": "Conditional cooperator, slow to forgive a price war"
+    }
+  ],
+  "payoffs": { "T": [4, 6], "R": [3, 4], "P": [1, 2], "S": [-1, 1] },
+  "structure": {
+    "w": [0.85, 0.98],
+    "noise": [0.0, 0.1],
+    "transitions": {
+      "states": {
+        "fat":   { "T": [5, 7], "R": [4, 5], "P": [1, 2], "S": [-1, 0] },
+        "lean":  { "T": [3, 3.5], "R": [2, 2.5], "P": [1, 1.5], "S": [0, 0.5] }
+      },
+      "start": "fat",
+      "next": { "CC": "fat", "CD": "lean", "DD": "lean" }
+    }
+  },
+  "rationale": {
+    "R": "both hold price = steady shared margin",
+    "T": "undercut once while they hold = grab share",
+    "P": "mutual price war = both bleed",
+    "S": "hold while they undercut = lose share",
+    "w": "the market lasts many quarters unless it consolidates",
+    "noise": "a promo misread as a price war",
+    "transitions": "fat = the lucrative market both want to protect; lean = the commodity game a price war drops everyone into; CC keeps it fat, any defection tips it lean"
+  }
+}

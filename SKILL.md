@@ -43,12 +43,12 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
 3. **Dispositions as a SET, not a guess.** You rarely know a party is purely one
    type. List every plausible disposition for each player; the simulator samples
    among them, so "what if they're more vindictive than I think" is tested
-   automatically. Available (20): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
+   automatically. Available (22): `provocable` (TFT), `forgiving` (GTFT, forgives 25%),
    `pavlov` (WSLS), `grim` (never forgives), `exploitative` (probes, backs off only on 2×D),
    `trusting` (ALLC), `gradual` (Beaufils: n-th defection → n×D then 2×C), `erratic` (50/50),
    `prober` ([D,C,C] probe), `contrite` (forgives own noise-induced D), `detective` ([C,D,C,C]→TFT else ALLD),
-   `zd_generous` (Stewart-Plotkin generous ZD χ=0.5, `p=[0.85,0.55,1,0.45]`), `zd_extort` (extortion χ=2),
-   `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats), `semigrim` (Semi-Grim: C after CC, D after DD, else 50/50 — human baseline).
+   `zd_generous` (Stewart-Plotkin ZDGTFT-2, generous ZD χ=2, `p=[1,1/8,1,1/4]` — shares the surplus, never out-scores you), `zd_extort` (Press-Dyson extortion χ=3, `p=[9/13,0,7/13,0]` — keeps a 3× share of any surplus, never forgives mutual D),
+   `colluder` (team: C vs teammate / TFT vs outsider), `adaptive` (Glynatsi: `p(C)=0.5+(pOppC-0.3)`), `southampton` (handshake `[D,D,C,C,D]`→C if kin else D), `alld` (ALLD), `allc` (ALLC alias), `tf2t` (Tit-for-Two-Tats), `semigrim` (Semi-Grim: C after CC, D after DD, else 50/50 — human baseline), `memory2` (Hilbe memory-2 table), `shaper` (retaliate hard, ease off once opponent is cooperative).
 4. **Structure = horizon and noise, as ranges.**
    - `w` (0–0.9995, `assertRange` cap): probability the relationship continues each
      period. High w = long shadow of the future. Unknown end date → wide range.
@@ -58,6 +58,8 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
      never 0.
    - `drift` (0–1, optional): how fast lean shifts after each observed move — after
      observed D lean `−=drift`, after C `+=drift`, clamped to `[-1,1]` (`kernel.ts:playMatch` order `strategy→lean→noise→drift`).
+   - `eco` (optional): a **shared resource that the players' own behaviour depletes or restores**, shifting the game itself *continuously* as they play (fisheries, groundwater, soil, a shared brand, trust in an institution). Use it only when "the pie itself changes smoothly with how they act" is central to the story — otherwise skip it. Shape: `"eco": {"A1": {T,R,P,S ranges}, "game1": "prisoners_dilemma", "theta": [lo,hi], "epsilon": [lo,hi], "n0": [lo,hi]}`. `A0` is your normal `payoffs` (the healthy state); `A1` is the **depleted** game where even mutual restraint pays little; `theta` = how strongly cooperation replenishes the resource; `epsilon` = how fast the resource responds (0.05–0.3 typical); `n0` = how healthy it starts (0 healthy → 1 depleted). Requires a **shared** payoff table (not per-player). The report adds where the resource settles (`environment`) and `eco_theta/eco_epsilon/eco_n0` sensitivities. See `example_eco.json`. **Read it in Stage 3 as:** does restraint actually keep the commons alive, or does the resource slide to depleted no matter how well they behave?
+   - `transitions` (optional): the **discrete** cousin of `eco` — the situation flips between *named regimes* depending on the last outcome, and it is hard to climb back once it tips (a cartel that holds price vs a price-war commodity market; peace vs an active feud; a healthy partnership vs a broken one). Use it when the story has clear **modes** rather than a smoothly draining resource. Shape: `"transitions": {"states": {"good": {T,R,P,S ranges}, "bad": {...}}, "start": "good", "next": {"CC": "good", "CD": "bad", "DD": "bad"}}`. Each state is a full payoff table (same game ordering); `next` says where each outcome sends the shared regime — `CC` = both cooperate, `DD` = both defect, `CD` = exactly one defects. Requires a **shared** payoff table and can't be combined with `eco`. The report adds `stateOccupancy` (share of time in each regime). See `example_transitions.json`. **Read it in Stage 3 as:** which regime does the relationship spend most of its time in, and how easily does one slip trap it in the bad one?
 5. **Teams (fixed coalitions).** `players[].team?: string` — without it each player
    is its own team. `colluder` plays C vs teammate, TFT vs outsider (noise after).
    Winner is team with highest total score (`winPctTeam`), per-capita `winPctPerCapita` shown for different-size teams; `champion` is best individual (`winPct`).
@@ -79,6 +81,13 @@ Read the situation. Produce a JSON model (schema below). Rules that keep it real
      `"stag_hunt"`. Ordering `R>T>P>S`.
    The move mechanics and temperaments are identical across games — only the payoff
    ordering changes, so honor the chosen game's ordering when you set the ranges.
+9. **Audit hidden players and internal factions (fractional player).** Before finalizing,
+   ask three checks — this is cheap and catches 80% of flat-model errors without code changes:
+   - **Latent player?** Is there a regulator/market/electorate that sets payoff but wasn't named? If yes, add as `{"name":"...","dispositions":["gradual"]}` with asymmetric payoffs (its `P` shifts others). Keep `visibility` low via `noise` wide.
+   - **Split player?** Is a named side internally divided (hawks vs doves, siloviki vs economists)? Split into 2 sub-players with same `team:"X"` + `colluder` (`C` inside, `TFT` outside). Use `betrayalProb` for intra-split defection.
+   - **Internal forces?** Does one person battle two drives (duty vs fear)? Widen `values` to `[-0.8,0.8]` + expand `dispositions` SET to `["provocable","grim","pavlov"]` so `rng.pick` samples the force each world. Single `lean` + `drift` already models planner/doer.
+
+   Only if this SKILL-level split still leaves `maxWin<60%` or `coopStd>30%` after 600 worlds, propose formal `factions/forces/latent` extension (`DYNAMIC_MODELS.md:Q` + `ROADMAP.md:3.5`) — don't pre-optimize.
 
 Put the first-listed disposition of each player as its *modal* (most-likely) type —
 the regime map uses those.
@@ -129,8 +138,8 @@ reproducible (same input → identical numbers); omit it for a fresh sample.
 `--seed` is parsed anywhere in args, `trials` must be the first number after the
 path.
 
-**Output.** `src/cli.ts` prints two blocks: (1) `scenarioReport()` — `Team <t> leads in X% (per-capita: <t> Y%)` if teams present else `<player> leads…`, plus `Cooperation averages X% (± Y%). Most worth verifying: <input>.` — this is the Bottom line; (2) `JSON{winPct, winPctTeam, winPctPerCapita, cooperation:{mean,std}, sensitivity:[{input,correlation}]}` —
-sensitivity is `|corr(input, cooperation)|` sorted descending, inputs include `T,R,P,S,w,noise,drift` + `value_<player>` per-player.
+**Output.** `src/cli.ts` prints two blocks: (1) `scenarioReport()` — `Team <t> leads in X% (per-capita: <t> Y%)` if teams present else `<player> leads…`, plus `Cooperation averages X% (± Y%). Most worth verifying: <coop pivot>; <winner pivot>.` — this is the Bottom line; (2) `JSON{winPct, winPctTeam, winPctPerCapita, cooperation:{mean,std}, sensitivity, sensitivityWin, sensitivityWinTarget}`.
+There are **two** signed sensitivity lists: `sensitivity` = `corr(input, cooperation)`, `sensitivityWin` = `corr(input, top side wins)`, both sorted by magnitude with the sign kept (positive = the input *raises* the target). Inputs include `T,R,P,S,w,noise,drift` + `value_<player>` per-player. Use `sensitivityWin` when the user asks "who wins" — cooperation can be flat while a different input decides the outcome.
 
 **Determinism.** `src/rng.ts:Rng` (xorshift) + `deriveSeed(root,generation,i,j,rep)`
 — every match gets its own derived seed, so parallelisation stays reproducible.

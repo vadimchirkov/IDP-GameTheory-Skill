@@ -1,5 +1,5 @@
 import {
-  type Move, type Payoff, type RunConfig, type Shares, type StrategyId,
+  type Move, type Outcome, type Payoff, type RunConfig, type Shares, type StrategyId,
   normalizeShares, score, strategyIds,
 } from "./domain.js";
 import { deriveSeed, Rng } from "./rng.js";
@@ -33,23 +33,41 @@ function makeMemoryN(probs: Record<string, number>, n: number): Strategy {
   };
 }
 
-/** Simplified ZD parameterization (chi/phi fixed). TODO: align with canonical Press-Dyson/Stewart-Plotkin; p3/p4 are placeholders identical for both variants. */
-function zdGenerousStrategy(): Strategy {
-  const chi = 0.5; const phi = 0.15; const R = 3; const S = 0; const T = 5; const P = 1;
-  const p1 = clamp(1 - phi * (1 - chi) * (R - P) / (P - S));
-  const p2 = clamp(1 - phi * (1 + chi * (T - P) / (P - S)));
-  const p3 = clamp(1 - phi * (1 - (R - P) / (P - S)));
-  const p4 = clamp(phi * ((T - R) / (P - S) + chi * (T - R) / (P - S)));
-  return makeMemoryOne(p1, p2, p3, p4);
+/**
+ * Canonical zero-determinant memory-1 vector (Press & Dyson PNAS 2012).
+ *
+ * A ZD strategy enforces the linear relation `s_self - k = chi * (s_opp - k)` on the
+ * long-run average scores against *any* opponent. Writing the probability vector as
+ * `p~ = (p1-1, p2-1, p3, p4) = phi * [(S_self - k) - chi * (S_opp - k)]` with
+ * `S_self = (R,S,T,P)` and `S_opp = (R,T,S,P)` gives the four entries below.
+ *
+ * - `anchor: "P"` (extortion, chi > 1): self keeps a chi-fold share of the surplus over
+ *   mutual defection. Yields `p4 = 0` — never forgives mutual D.
+ * - `anchor: "R"` (generosity, chi > 1): self absorbs a chi-fold share of any shortfall
+ *   below mutual cooperation. Yields `p1 = 1` — never defects after mutual C.
+ *
+ * `phi` is set to its largest value keeping all four entries inside `[0,1]`, which is the
+ * standard normalization; for `T,R,P,S = 5,3,1,0` and `chi = 2` the generous branch
+ * reproduces Stewart & Plotkin's ZDGTFT-2 vector `(1, 1/8, 1, 1/4)` exactly.
+ */
+export function zdVector(payoff: Payoff, chi: number, anchor: "P" | "R"): [number, number, number, number] {
+  const { T, R, P, S } = payoff;
+  const k = anchor === "P" ? P : R;
+  const raw = [(R - k) * (1 - chi), (S - k) - chi * (T - k), (T - k) - chi * (S - k), (P - k) * (1 - chi)];
+  // Largest phi with p1..p4 all inside [0,1]: every |raw| term must stay within its slack.
+  const bounds = [Math.abs(raw[0] ?? 0), Math.abs(raw[1] ?? 0), Math.abs(raw[2] ?? 0), Math.abs(raw[3] ?? 0)];
+  const phi = 1 / Math.max(...bounds.filter((b) => b > 0), Number.EPSILON);
+  return [
+    clamp(1 + phi * (raw[0] ?? 0)), clamp(1 + phi * (raw[1] ?? 0)),
+    clamp(phi * (raw[2] ?? 0)), clamp(phi * (raw[3] ?? 0)),
+  ];
 }
 
-/** Simplified ZD extortion — see note above. */
-function zdExtortStrategy(): Strategy {
-  const chi = 2.0; const phi = 0.15; const R = 3; const S = 0; const T = 5; const P = 1;
-  const p1 = clamp(1 - phi * (1 - chi) * (R - P) / (P - S));
-  const p2 = clamp(1 - phi * (1 + chi * (T - P) / (P - S)));
-  const p3 = clamp(1 - phi * (1 - (R - P) / (P - S)));
-  const p4 = clamp(phi * ((T - R) / (P - S) + chi * (T - R) / (P - S)));
+/** Payoff the registry entries are calibrated for; a ZD vector is only exact for one payoff table. */
+export const ZD_BASELINE: Payoff = { T: 5, R: 3, P: 1, S: 0 };
+
+export function zdStrategy(payoff: Payoff, chi: number, anchor: "P" | "R"): Strategy {
+  const [p1, p2, p3, p4] = zdVector(payoff, chi, anchor);
   return makeMemoryOne(p1, p2, p3, p4);
 }
 
@@ -75,8 +93,12 @@ function memory2Hilbe(): Strategy {
   };
   return makeMemoryN(probs, 2);
 }
-/** Stub approximating LOLA intuition (retaliate + coop shaping). Not true Foerster LOLA (requires gradient ETA); keep as heuristic until RL branch. */
-function lolaStrategy(): Strategy {
+/**
+ * Retaliate-and-shape heuristic: punish the last defection hard, but push back toward
+ * cooperation once the opponent's running cooperation rate is already high. Hand-tuned,
+ * not a learning rule — deliberately *not* called LOLA, which needs opponent gradients.
+ */
+function shaperStrategy(): Strategy {
   return (mine, theirs, rng) => {
     if (theirs.length === 0) return "C";
     const lastOpp = theirs[theirs.length - 1] ?? "C";
@@ -120,8 +142,8 @@ export const strategies: Record<StrategyId, Strategy> = {
     if (theirs.slice(0, 4).includes("D")) return theirs[theirs.length - 1] ?? "C";
     return "D";
   },
-  zd_generous: zdGenerousStrategy(),
-  zd_extort: zdExtortStrategy(),
+  zd_generous: zdStrategy(ZD_BASELINE, 2, "R"),
+  zd_extort: zdStrategy(ZD_BASELINE, 3, "P"),
   colluder: (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C"),
   adaptive: (_mine, theirs, rng) => {
     if (theirs.length === 0) return "C";
@@ -153,8 +175,10 @@ export const strategies: Record<StrategyId, Strategy> = {
     return theirs.at(-1) === "D" && theirs.at(-2) === "D" ? "D" : "C";
   },
   memory2: memory2Hilbe(),
-  lola: lolaStrategy(), // stub — see lolaStrategy() note
-  llm_agent: (_mine, theirs) => (theirs.length===0 ? "C" : theirs[theirs.length-1] ?? "C"), // stub TFT until teob-ai agentFlowAggregate
+  shaper: shaperStrategy(),
+  // Voluntary opt-out (Szabó & Hauert 2002): never plays a C/D move — resolved at the match level
+  // (tournament / oneTrial award σ to both sides). This stub fires only if a caller forgets to intercept.
+  loner: () => { throw new Error("loner opts out of the C/D game — resolve it at the match level with σ, do not call it as a move"); },
 };
 
 export { makeMemoryOne as memoryOne, makeMemoryN as memoryN };
@@ -163,6 +187,35 @@ export interface MatchResult {
   scoreA: number;
   scoreB: number;
   cooperation: number;
+  /** Final environment state `n` when eco feedback is active; undefined otherwise. */
+  envFinal?: number;
+  /** Fraction of rounds spent in each game state when transitions are active; undefined otherwise. */
+  stateOccupancy?: Record<string, number>;
+}
+
+/** Weitz eco state carried through a match: A0 is the passed match payoff, A1 the depleted corner. */
+export interface EcoState { A1: Payoff; theta: number; epsilon: number; n: number }
+
+/** Su game-transition state: named payoff matrices + the current state + the outcome→next map. */
+export interface TransitionState { states: Record<string, Payoff>; cur: string; next: Record<Outcome, string> }
+
+const outcomeOf = (a: Move, b: Move): Outcome => (a === "C" && b === "C" ? "CC" : a === "D" && b === "D" ? "DD" : "CD");
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+function lerpPayoff(a: Payoff, b: Payoff, t: number): Payoff {
+  return { T: lerp(a.T, b.T, t), R: lerp(a.R, b.R, t), P: lerp(a.P, b.P, t), S: lerp(a.S, b.S, t) };
+}
+
+/** One environment step per round, sub-stepped so a large ε keeps the Euler error bounded (ROADMAP 1A). */
+function ecoStep(n: number, epsilon: number, theta: number, coop: number): number {
+  const steps = Math.max(1, Math.ceil(epsilon / 0.05));
+  const de = epsilon / steps;
+  let next = n;
+  for (let s = 0; s < steps; s += 1) {
+    next += de * next * (1 - next) * (theta * coop - (1 - coop));
+    next = Math.min(0.99, Math.max(0.01, next));
+  }
+  return next;
 }
 
 export function playMatch(
@@ -176,6 +229,8 @@ export function playMatch(
   leanA = 0,
   leanB = 0,
   drift = 0,
+  eco?: EcoState,
+  transition?: TransitionState,
 ): MatchResult {
   const historyA: Move[] = [];
   const historyB: Move[] = [];
@@ -184,6 +239,9 @@ export function playMatch(
   let cooperations = 0;
   let curLeanA = leanA;
   let curLeanB = leanB;
+  let ecoN = eco?.n ?? 0;
+  let tState = transition?.cur ?? "";
+  const occupancy: Record<string, number> = transition ? Object.fromEntries(Object.keys(transition.states).map((s) => [s, 0])) : {};
   for (let round = 0; round < rounds; round += 1) {
     let moveA = a(historyA, historyB, rng);
     let moveB = b(historyB, historyA, rng);
@@ -197,9 +255,18 @@ export function playMatch(
     }
     if (rng.unit() < noise) moveA = flip(moveA);
     if (rng.unit() < noise) moveB = flip(moveB);
-    scoreA += score(payoffA, moveA, moveB);
-    scoreB += score(payoffB, moveB, moveA);
-    cooperations += Number(moveA === "C") + Number(moveB === "C");
+    // Both sides play one shared matrix per round: eco interpolates it, transitions pick a named state.
+    // (eco and transitions are mutually exclusive by schema, so these branches never overlap.)
+    let pA = payoffA;
+    let pB = payoffB;
+    if (eco) { pA = lerpPayoff(payoffA, eco.A1, ecoN); pB = lerpPayoff(payoffB, eco.A1, ecoN); }
+    else if (transition) { const m = transition.states[tState]!; pA = m; pB = m; occupancy[tState]! += 1; }
+    scoreA += score(pA, moveA, moveB);
+    scoreB += score(pB, moveB, moveA);
+    const roundCoop = (Number(moveA === "C") + Number(moveB === "C")) / 2;
+    cooperations += roundCoop * 2;
+    if (eco) ecoN = ecoStep(ecoN, eco.epsilon, eco.theta, roundCoop);
+    if (transition) tState = transition.next[outcomeOf(moveA, moveB)];
     historyA.push(moveA);
     historyB.push(moveB);
     if (drift !== 0) {
@@ -207,7 +274,11 @@ export function playMatch(
       curLeanB = Math.max(-1, Math.min(1, curLeanB + (moveA === "D" ? -drift : drift)));
     }
   }
-  return { scoreA, scoreB, cooperation: cooperations / (2 * rounds) };
+  return {
+    scoreA, scoreB, cooperation: cooperations / (2 * rounds),
+    ...(eco ? { envFinal: ecoN } : {}),
+    ...(transition ? { stateOccupancy: Object.fromEntries(Object.entries(occupancy).map(([s, n]) => [s, n / rounds])) } : {}),
+  };
 }
 
 export interface TournamentResult {
@@ -218,15 +289,25 @@ export interface TournamentResult {
 /** One round-robin generation. Match seeds make later parallelisation reproducible. */
 export function tournament(config: RunConfig, generation: number, rootSeed: number): TournamentResult {
   const active = strategyIds.filter((id) => (config.initialShares[id] ?? 0) > 0);
+  if (active.includes("loner") && config.sigma === undefined) throw new Error("loner has a share but config.sigma is not set");
   const scores = Object.fromEntries(strategyIds.map((id) => [id, 0])) as Shares;
   let cooperation = 0;
   let matches = 0;
+  let coopMatches = 0;
   for (let i = 0; i < active.length; i += 1) {
     for (let j = i; j < active.length; j += 1) {
       const left = active[i];
       const right = active[j];
       if (!left || !right) continue;
       for (let rep = 0; rep < config.matchReps; rep += 1) {
+        // A loner opts out: both sides collect σ per round, no C/D game, no cooperation contribution.
+        if (left === "loner" || right === "loner") {
+          const optOut = config.sigma! * config.rounds;
+          if (left === right) scores[left] += optOut;
+          else { scores[left] += optOut; scores[right] += optOut; }
+          matches += 1;
+          continue;
+        }
         const result = playMatch(
           strategies[left], strategies[right], config.payoff, config.payoff,
           config.rounds, config.noise, new Rng(deriveSeed(rootSeed, generation, i, j, rep)),
@@ -239,12 +320,13 @@ export function tournament(config: RunConfig, generation: number, rootSeed: numb
         }
         cooperation += result.cooperation;
         matches += 1;
+        coopMatches += 1;
       }
     }
   }
   const divisor = Math.max(1, active.length * config.matchReps);
   for (const id of strategyIds) scores[id] /= divisor;
-  return { fitness: scores, cooperation: cooperation / Math.max(1, matches) };
+  return { fitness: scores, cooperation: cooperation / Math.max(1, coopMatches) };
 }
 
 function weightedPick(shares: Shares, rng: Rng): StrategyId {

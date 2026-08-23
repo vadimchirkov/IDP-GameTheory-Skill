@@ -5,6 +5,7 @@ dist/
 reports/
 *.report.json
 *.tips.md
+*.visual.html
 ai_frontier_*.json
 ai_frontier_*.report.json
 ai_frontier_*.tips.md

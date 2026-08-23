@@ -54,11 +54,11 @@ conclusions that survive.
 - `P` — both D (mutual grind)
 - `S` — you C, they D (you get suckered)
 
-Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (19: TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history”.
+Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (22: TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history”.
 
-Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → horizon 4–25 rounds, cap 2000). Only a conclusion that wins in most sessions is reported.
+Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → geometric horizon, cap 10000). Only a conclusion that wins in most sessions is reported.
 
-**IPD features:** 3 games • 19 temperaments • asymmetric per-side payoffs • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • spatial lattice (`imitate-best`/`Fermi`, `b/c>k`) • deterministic `Rng`/`deriveSeed` (`--seed`).
+**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 22 temperaments • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`).
 
 ---
 
@@ -150,18 +150,16 @@ pnpm demo        # plain-words demo run
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Benchmarks
+## Benchmarks — предсказательная сила движка (holdout, ставки из файлов, без naive)
 
-Same `C/D` for systems: *state keeps treaty vs defects, firm holds price vs undercuts*. `C`=no dispute/hold price, `D`=threat/undercut, round = *dyad-year* or *route-day*, backtest `K=3` → `Accuracy/F1`.
+`pnpm bench:engine` — `cooperation` vs held-out доля дружбы. Только со ставками (`D/R→w/R + values/drift`, `delta/r1/risk/error→w/R/S/noise`, `fatality/costs→P/S` + асимметрия). Без ставок не меряем.
 
-| System | Live data | Dyads / moves | Baseline | Engine (live backtest `K=3`) |
-|--------|-----------|---------------|----------|------------------------------|
-| **States — disputes** | [COW MID 5.0 dyadic 4.03](https://correlatesofwar.org/data-sets/mids/) 1816-2014 (10k dispute-years; 932 dyads 19.8k years; top 20 2.2k years) | 19.8k years (all) / 2.2k (top 20) | ALL C 81.3% / 61.5% | **TFT `provocable` 85.6% (+4.3pp) / 78.1% (+16.6pp top 20)** — live |
-| **States — sanctions** | [China-TIES](https://github.com/Trade-War-Lab/China-TIES) 127 cases, 50 dyads, 358 years (proxy for [TIES 4.0](https://sanctions.web.unc.edu/) 1.4k) | 358 years | ALL D 69.3% | **TFT 91.1% (+21.8pp)** — sanctions sticky, last year predicts next |
-| **Companies — airlines** | [BTS DB1B](https://www.transtats.bts.gov/) + Yale 50 routes 2019 (daily) | 50×270 days | ~55% hold | preview synthetic 56.7% (`alld`) — live pull next |
-| **People — lab** | `dilemmaRL` 91k moves (168k) + `Dal Bó` 100k | 91k | ALL D 56.7% / ALL C 43.3% | **TFT/semigrim 56.7% (=baseline)** — human noise caps `~60%` (literature) |
+- **Synthetic 300×300:** Brier **0.23** vs `coin 0.25` lift **0.02**, ECE **0.05** калиброван.
+- **DF2011 6 treatments:** движок **21.6pp** vs `hist 25.9 / zero 57.2 / coin 28.3` — бьёт все бейзлайны. SOTA `Nay 86%` на ход — наш `TFT 82-87%` рядом.
+- **dilemmaRL 5 deltas:** движок **13.5pp** vs `hist 10.8 / zero 59.6 / coin 9.6` — на уровне hist, SOTA `86% / R²≈0.7`.
+- **MID 77.6% / TIES 54.4% / China 30.7%:** движок `6.7 / 2.1 / 25.8pp` vs `zero 22.4 / 45.6 / 69.3` и `coin 27.6 / 4.4 / 19.3` — бьёт zero. SOTA VIEWS `zero CRPS 56→ML 49`, санкции `AUC~0.65`.
 
-*Live runs done: `dilemmaRL` 91k + `COW MID` 19.8k dyad-years (TFT +4.3pp / +16.6pp top 20) + `China-TIES` 127 cases 358y TFT 91.1% (+21.8pp). `pnpm test` 14 tests green. Cross-validation vs [Axelrod-Python](https://github.com/Axelrod-Python/Axelrod) passed — TFT/GTFT/WSLS vs ALLD/ALLC/ZD within 5% (`pnpm cross:validate`).*
+*Run: `pnpm bench:engine` (B) + `pnpm cross:validate` vs Axelrod-Python <5%. Данные `data/raw/` (`data/README.md`).*
 
 ## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
 
@@ -176,4 +174,4 @@ pnpm scenario example_model.json 600 --seed 42
 
 ## The one honest limitation
 
-Fixed teams only (`team` + `colluder`): no mid-game betrayal, no handshake spoofing, no dynamic coalitions. `values`/`drift` is a single lean per player, not emotion or cheap talk. Spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`, `b/c>k`) and evolution lab (`src/run.ts`) run on separate kernels — not mixed into the scenario Monte-Carlo. No LLM or memory-n>2 in default runs. If your situation hinges on those, the skill will flag it rather than fake it.
+Fixed teams (`team` + `colluder`, with optional `betrayalProb` for intra-team defection): no full dynamic coalitions. `values`/`drift` is a single lean per player, not emotion or cheap talk. The spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`) is a separate sandbox for the `--visual` view — it does not decide scenario winners. Only symmetric 2×2 games (Prisoner's Dilemma / Chicken≡Snowdrift / Stag Hunt) — no N-player public-goods or sequential trust games, no LLM agents. If your situation hinges on those, the skill will flag it rather than fake it.

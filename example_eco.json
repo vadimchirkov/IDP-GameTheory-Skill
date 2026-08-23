@@ -1,0 +1,36 @@
+{
+  "situation": "Two fishing fleets share one stock — cooperating (light quotas) keeps the sea rich, overfishing depletes it and shifts the whole game toward a race to the bottom",
+  "players": [
+    {
+      "name": "FleetNorth",
+      "dispositions": ["provocable", "forgiving", "exploitative"],
+      "note": "Will hold quotas if the other does, but tempted when the stock still looks full"
+    },
+    {
+      "name": "FleetSouth",
+      "dispositions": ["provocable", "gradual", "grim"],
+      "note": "Conditional cooperator, remembers a raided season"
+    }
+  ],
+  "payoffs": { "T": [4, 6], "R": [3, 4], "P": [1, 2], "S": [-1, 1] },
+  "structure": {
+    "w": [0.85, 0.98],
+    "noise": [0.0, 0.1],
+    "eco": {
+      "A1": { "T": [3.5, 4.5], "R": [1.5, 2.2], "P": [1, 1.4], "S": [0, 0.5] },
+      "game1": "prisoners_dilemma",
+      "theta": [1.5, 3.0],
+      "epsilon": [0.05, 0.25],
+      "n0": [0.3, 0.6]
+    }
+  },
+  "rationale": {
+    "R": "both hold quotas while the sea is rich = steady shared catch",
+    "T": "overfish once while they hold = a bumper season",
+    "P": "both overfish = a lean grind for everyone",
+    "S": "hold quota while they raid = you lose the season",
+    "w": "the fishery lasts many seasons unless a stock collapse ends it",
+    "noise": "a misreported catch or a bad-weather season read as cheating",
+    "eco": "A1 is the depleted sea where even mutual restraint pays little; theta = how much restraint replenishes; epsilon = how fast the stock responds; n0 = how healthy it starts"
+  }
+}

@@ -1,38 +1,41 @@
-import { normalizeShares, type ScenarioModel } from "./domain.js";
+import { normalizeShares, type Payoff, type PayoffRanges, type RunConfig, type ScenarioModel, type StrategyId } from "./domain.js";
+import { samplePayoff } from "./analysis.js";
 import { stepGeneration, type Generation } from "./kernel.js";
-import type { RunConfig } from "./domain.js";
 import { Rng } from "./rng.js";
 
-export function runEvolution(model: ScenarioModel, generations=500, seed=42): { trajectory: Generation[]; fixation: Record<string, number> } {
-  const game = model.game ?? "prisoners_dilemma";
-  const payoff = { T:4, R:3, P:1, S:0 };
-  const allIds = [...new Set(model.players.flatMap(p=>p.dispositions))];
-  const init: Record<string,number> = {}; for(const id of allIds) init[id as any]=1/allIds.length;
-  const config: RunConfig = { game: game as any, payoff, rounds:50, matchReps:5, noise:0.02, initialShares: normalizeShares(init as any), generations, rule:"replicator", populationSize:100, stepDelayMs:0 };
-  let shares = normalizeShares(init as any);
-  const traj: Generation[] = [];
-  for(let g=0;g<generations;g++){ const gen=stepGeneration(config, shares, g, seed+g); traj.push(gen); shares=gen.shares; }
-  const fixation: Record<string,number> = {}; for(const id of allIds) fixation[id]= (shares as any)[id] ?? 0;
-  return { trajectory: traj, fixation };
+/** Mid-range point of the model's own payoff ranges, so evolution plays the scenario's game. */
+function representativePayoff(model: ScenarioModel, rng: Rng): Payoff {
+  const shared = model.payoffs as Partial<PayoffRanges>;
+  const ranges = shared.T !== undefined
+    ? (model.payoffs as PayoffRanges)
+    : Object.values(model.payoffs as Record<string, PayoffRanges>)[0];
+  if (!ranges) throw new Error("Model has no payoff ranges");
+  return samplePayoff(ranges, model.game ?? "prisoners_dilemma", rng);
 }
 
-/**
- * Neutral-drift fixation placeholder — selection is ignored.
- * Returns ≈1/N for any (mutant,resident) pair. Selective (payoff-aware)
- * Moran is TODO and should reuse kernel.tournament fitness; kept as stub
- * to avoid misleading selective claims.
- */
-export function estimateFixation(_mutant: string, _resident: string, trials = 200, N = 50): number {
-  let wins = 0;
-  for (let t = 0; t < trials; t++) {
-    const rng = new Rng(t * 997);
-    let m = 1;
-    for (let s = 0; s < 1000 && m > 0 && m < N; s++) {
-      const next = rng.unit() > 0.5 ? m + 1 : m - 1;
-      if (next < 0 || next > N) continue;
-      m = next;
-    }
-    if (m === N) wins++;
+export function runEvolution(model: ScenarioModel, generations = 500, seed = 42): { trajectory: Generation[]; fixation: Record<string, number>; config: RunConfig } {
+  const rng = new Rng(seed);
+  const ids = [...new Set(model.players.flatMap((p) => p.dispositions))] as StrategyId[];
+  const initialShares = normalizeShares(Object.fromEntries(ids.map((id) => [id, 1 / ids.length])));
+  const config: RunConfig = {
+    game: model.game ?? "prisoners_dilemma",
+    payoff: representativePayoff(model, rng),
+    rounds: 50,
+    matchReps: 5,
+    noise: rng.between(model.structure.noise),
+    initialShares,
+    generations,
+    rule: "replicator",
+    populationSize: 100,
+    stepDelayMs: 0,
+    ...(model.structure.sigma ? { sigma: rng.between(model.structure.sigma) } : {}),
+  };
+  let shares = initialShares;
+  const trajectory: Generation[] = [];
+  for (let g = 0; g < generations; g += 1) {
+    const gen = stepGeneration(config, shares, g, seed + g);
+    trajectory.push(gen);
+    shares = gen.shares;
   }
-  return wins / trials;
+  return { trajectory, fixation: Object.fromEntries(ids.map((id) => [id, shares[id]])), config };
 }

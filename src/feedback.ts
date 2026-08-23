@@ -13,12 +13,16 @@ export function buildSuggestions(model: ScenarioModel, result: ScenarioResult): 
   }
   if (coop < 0.35) tips.push(`Cooperation collapses at ${(coop*100).toFixed(0)}% — try lower T upper bound or higher w lower bound, or add forgiving/contrite/gradual to temperaments.`);
   if (coop > 0.8 && coopStd < 0.15) tips.push(`Cooperation always holds — stress-test it: widen noise to [0,0.15] or add drift [0,0.05] + values to see if trust is fragile.`);
-  if (top && top.correlation > 0.25) {
+  if (top && Math.abs(top.correlation) > 0.25) {
     if (top.input === "noise") tips.push(`Sensitivity #1 is noise (r=${top.correlation.toFixed(2)}) — narrow noise by asking: how often is a move misread? Add contrite/detective to handle misreads.`);
     else if (top.input === "w") tips.push(`Sensitivity #1 is w (r=${top.correlation.toFixed(2)}) — narrow w by asking: how long do both expect this to last? Cap w at 0.99 if horizon unknown.`);
     else if (top.input === "drift") tips.push(`Sensitivity #1 is drift (r=${top.correlation.toFixed(2)}) — drift drives lean. Try narrowing drift or fixing values for key player.`);
     else if (top.input.startsWith("value_")) tips.push(`Sensitivity #1 is ${top.input} (r=${top.correlation.toFixed(2)}) — that player's lean matters. Ask: is that side cynical (-1) or hopeful (+1)? Narrow its values.`);
     else tips.push(`Sensitivity #1 is ${top.input} (r=${top.correlation.toFixed(2)}) — narrow that payoff range first (Stage 2b: only the pivots).`);
+  }
+  const topWin = result.sensitivityWin[0];
+  if (topWin && Math.abs(topWin.correlation) > 0.25 && topWin.input !== top?.input) {
+    tips.push(`Who wins turns on a different input than cooperation does: ${topWin.input} (r=${topWin.correlation.toFixed(2)} vs ${result.sensitivityWinTarget} winning). Narrow it too — the cooperation pivot alone will not settle the outcome.`);
   }
   const hasTeam = model.players.some(p => p.team);
   if (!hasTeam && model.players.length > 2 && maxWin < 55) tips.push(`3+ players without teams — round-robin only. If a bloc gangs up, add team:"coalition-1" + colluder to 2+ players.`);

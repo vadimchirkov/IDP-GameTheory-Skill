@@ -1,6 +1,6 @@
 import {
-  CategoryId, EntityId, TimerId, andReply, andRun, categoryTypes, persist, reply,
-  tagCodec, type Aggregate, type Effect,
+  CategoryId, codecWithUpcasts, EntityId, TimerId, andReply, andRun, categoryTypes, persist, reply,
+  tagCodec, type Aggregate, type Effect, upcast,
 } from "@lambda-house/teob-ts/core";
 import { assertRunConfig, normalizeShares, type RunConfig, type Shares } from "./domain.js";
 import { stepGeneration, type Generation } from "./kernel.js";
@@ -113,7 +113,25 @@ export const runAggregate: Aggregate<RunCommand, RunReply, RunEvent, RunState> =
   async onRecoveryComplete(state, ctx) {
     if (state.status === "running") await scheduleNext(state, ctx);
   },
-  snapshotEvery: 25,
+
+  snapshotEvery: 10,
 };
 
-export const runEventCodec = tagCodec<RunEvent>("RunStarted", "GenerationCompleted", "RunPaused", "RunResumed", "RunFinished");
+const runEventBaseCodec = tagCodec<RunEvent>("RunStarted", "GenerationCompleted", "RunPaused", "RunResumed", "RunFinished");
+
+export const runEventCodec = codecWithUpcasts(runEventBaseCodec, [
+  // Phase 0: old journals lack sigma/kernelVersion/config defaults — upcast in place keeps them readable.
+  upcast("RunStarted", "RunStarted", (old: unknown) => {
+    const o = old as Record<string, unknown>;
+    const cfg = (o.config ?? {}) as Record<string, unknown>;
+    return {
+      ...o,
+      kernelVersion: (o.kernelVersion as string) ?? KERNEL_VERSION,
+      config: {
+        ...cfg,
+        sigma: (cfg.sigma as number | undefined) ?? undefined,
+        stepDelayMs: (cfg.stepDelayMs as number | undefined) ?? 0,
+      },
+    };
+  }),
+]);

@@ -9,8 +9,9 @@ const buildMode = args.includes("--suggest") || args.includes("--improve") || ar
 const evolveMode = args.includes("--evolve");
 const heatmapMode = args.includes("--heatmap");
 const tournamentMode = args.includes("--tournament");
+const visualMode = args.includes("--visual");
 if (!path) {
-  console.error("Usage: pnpm scenario <model.json> [trials] [--seed N] [--suggest|--build|--evolve|--heatmap|--tournament]");
+  console.error("Usage: pnpm scenario <model.json> [trials] [--seed N] [--suggest|--build|--evolve|--heatmap|--tournament|--visual]");
   process.exitCode = 1;
 } else {
   const trialsArg = args.find(a => /^\d+$/.test(a));
@@ -39,9 +40,20 @@ if (!path) {
     console.log("heatmap -> reports/heatmap.html");
     process.exit(0);
   }
+  if (visualMode) {
+    const { generateVisual } = await import("./report.js");
+    const html = generateVisual(model, seed);
+    await mkdir("reports", { recursive:true });
+    await writeFile("reports/visual.html", html);
+    console.log("visual -> reports/visual.html");
+    process.exit(0);
+  }
+  if (model.topology) {
+    console.error("note: `topology` only drives the --visual lattice; scenario winners are always well-mixed round-robin.");
+  }
   const result = analyzeScenario(model, trials, seed);
   console.log(scenarioReport(result));
-  const out: Record<string, unknown> = { winPct: result.winPct, winPctTeam: result.winPctTeam, winPctPerCapita: result.winPctPerCapita, cooperation: result.cooperation, sensitivity: result.sensitivity };
+  const out: Record<string, unknown> = { winPct: result.winPct, winPctTeam: result.winPctTeam, winPctPerCapita: result.winPctPerCapita, cooperation: result.cooperation, sensitivity: result.sensitivity, sensitivityWin: result.sensitivityWin, sensitivityWinTarget: result.sensitivityWinTarget, ...(result.environment ? { environment: result.environment } : {}), ...(result.stateOccupancy ? { stateOccupancy: result.stateOccupancy } : {}) };
   if (buildMode) {
     const tips = buildSuggestions(model, result);
     out.buildTips = tips;

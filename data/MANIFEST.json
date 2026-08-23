@@ -1,0 +1,54 @@
+{
+  "generated": "2026-08-23",
+  "pipeline": "K=3 prev->actual (TFT provocable), same as src/predictive.ts:predictiveReport",
+  "files": [
+    {
+      "file": "data/raw/dilemmaRL_all_data.csv",
+      "source": "https://raw.githubusercontent.com/doerlbh/dilemmaRL/master/data/all_data.csv",
+      "commit": "e1755d034a8356083fdc298f205eb2de584aa9d2",
+      "rows": 168386,
+      "sha256": "672be58b3833e7e4234e85cf5685f3cb8eabe7c98614d43e4edc4da81f5fd504",
+      "live": { "moves_period_gt3": 91220, "ALL_D": 56.7, "ALL_C": 43.3, "TFT": 82.1 }
+    },
+    {
+      "file": "data/raw/dyadic_mid_4.03.csv",
+      "source": "https://correlatesofwar.org/wp-content/uploads/dyadic_mid_4.03_update.zip",
+      "version": "Dyadic MID 4.03 1816-2014",
+      "rows": 10358,
+      "sha256": "9d26eedd792a0067f590f038c3b7b240bd373cd70200ee729241e1078c6957c3",
+      "live": { "dyads": 932, "years": 19808, "ALL_C": 81.3, "TFT": 85.6 }
+    },
+    {
+      "file": "data/raw/CESv1Sender_2025c.csv",
+      "source": "https://raw.githubusercontent.com/Trade-War-Lab/China-TIES/main/CESv1Sender_2025c.csv",
+      "rows": 127,
+      "sha256": "971209ffd40216a7bfe8050f486f5543c5934918ea780a3fddf007a5e8664cd1",
+      "live": { "dyads": 50, "years": 358, "ALL_D": 69.3, "TFT": 91.1 }
+    },
+    {
+      "file": "data/raw/DF2011.csv",
+      "source": "R::stratEst::DF2011 / https://openicpsr.org/project/112401",
+      "version": "Dal Bó & Fréchette 2011 AER",
+      "rows": 7358,
+      "sha256": "b881beb0a1baaba6d4c004d0ca66a6602f0af4e7b6908f6a5475fbc0ecf94c86",
+      "live": { "pairs": 4754, "ALL_C": 44.8, "ALL_D": 55.2, "TFT": 87.7, "balAcc": 87.7, "transition": 78.2 }
+    },
+    {
+      "file": "data/raw/TIESv4.xls",
+      "source": "https://sanctions.web.unc.edu/wp-content/uploads/sites/18834/2021/04/TIESv4-1.xls",
+      "version": "TIES 4.0 1945-2005",
+      "rows": 1412,
+      "sha256": "3ef2bc393e7a7d9681d5cd2f8549a9a1d99e5c1de19ef0cd75e5ea01325dd21a",
+      "live": { "dyads": 482, "years": 4922, "ALL_C": 54.4, "ALL_D": 45.6, "TFT": 88.1, "balAcc": 88.0 }
+    },
+    {
+      "file": "data/raw/MIDA_5.0.csv",
+      "source": "https://correlatesofwar.org/wp-content/uploads/MID-5-Data-and-Supporting-Materials.zip",
+      "sha256": "fa00331f8b5e68b57d510303039081a1494b4d45df680ca38dfd8640d32c8474"
+    },
+    {
+      "file": "data/raw/MIDB_5.0.csv",
+      "sha256": "5189071e3b8aa32e1338f3df43fe574f4a0f2a06b2f481a3213c9e8f01211722"
+    }
+  ]
+}
