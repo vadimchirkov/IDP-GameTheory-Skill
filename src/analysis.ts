@@ -90,7 +90,11 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   const w = rng.between(model.structure.w);
   const noise = rng.between(model.structure.noise);
   const drift = model.structure.drift ? rng.between(model.structure.drift) : 0;
-  const rounds = geometricHorizon(w, rng);
+  const roundsRaw = geometricHorizon(w, rng);
+  // Temporal activity-driven Li et al: g games per snapshot, g=1 worse than static, g>5 better than static
+  const g = model.structure.temporal ? rng.between(model.structure.temporal.g) : 1;
+  const noiseEff = g <= 1.5 ? noise * 1.22 : g < 5 ? noise : noise * Math.max(0.35, 0.88 - (g - 5) * 0.06);
+  const rounds = Math.max(1, Math.round(roundsRaw * (g <= 1.5 ? 0.72 : g < 5 ? 1 : 1 + (g - 5) * 0.10)));
   const payoffByName = new Map(model.players.map((player) => [player.name, samplePayoff(payoffRangesFor(model, player.name), game, rng)]));
   const strategyByName = new Map(model.players.map((player) => [player.name, rng.pick(player.dispositions)]));
   const leanByName = new Map(model.players.map((player) => [player.name, player.values ? rng.between(player.values) : 0]));
@@ -134,7 +138,11 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
       const bStrat = effectiveStrategy(b, bId, teamOf(a));
       const ecoState: EcoState | undefined = eco ? { A1: eco.A1, theta: eco.theta, epsilon: eco.epsilon, n: eco.n0 } : undefined;
       const transState: TransitionState | undefined = transStates && transCfg ? { states: transStates, cur: transCfg.start, next: transCfg.next } : undefined;
-      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noise, rng, aLean, bLean, drift, ecoState, transState);
+      const norm = model.structure.reputation?.norm as any;
+      const gossipProb = model.structure.reputation?.gossip ? rng.between(model.structure.reputation.gossip) : 0;
+      const quantitative = !!model.structure.reputation?.quantitative;
+      const theta = model.structure.reputation?.theta ?? 0;
+      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noiseEff, rng, aLean, bLean, drift, ecoState, transState, norm, gossipProb, quantitative, theta);
       scores.set(a.name, (scores.get(a.name) ?? 0) + match.scoreA);
       scores.set(b.name, (scores.get(b.name) ?? 0) + match.scoreB);
       cooperation += match.cooperation;
@@ -165,6 +173,7 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   for (const [name, lean] of leanByName) (inputs as Record<string, number>)[`value_${name}`] = lean;
   if (eco) { inputs.eco_theta = eco.theta; inputs.eco_epsilon = eco.epsilon; inputs.eco_n0 = eco.n0; }
   if (sigma !== undefined) inputs.sigma = sigma;
+  if (model.structure.temporal) (inputs as Record<string, number>).temporal_g = g;
   return {
     winners, teamWinners, perCapitaWinners, teamScores,
     cooperation: cooperation / Math.max(1, coopMatches),
@@ -221,7 +230,7 @@ export function analyzeScenario(model: ScenarioModel, trials: number, seed: numb
     for (const t of run.perCapitaWinners) perCapitaWins[t] = (perCapitaWins[t] ?? 0) + 1 / run.perCapitaWinners.length;
   }
   const baseInputs = ["T", "R", "P", "S", "w", "noise", "drift"] as const;
-  const extraInputs = [...new Set(runs.flatMap(r => Object.keys(r.inputs)).filter(k => k.startsWith("value_") || k.startsWith("eco_") || k === "sigma"))];
+  const extraInputs = [...new Set(runs.flatMap(r => Object.keys(r.inputs)).filter(k => k.startsWith("value_") || k.startsWith("eco_") || k === "sigma" || k === "temporal_g"))];
   const allInputs = [...baseInputs, ...extraInputs];
   const cooperation = runs.map((run) => run.cooperation);
   const winPct = Object.fromEntries(Object.entries(wins).map(([name, w]) => [name, 100 * w / trials]));

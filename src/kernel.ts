@@ -3,6 +3,7 @@ import {
   normalizeShares, score, strategyIds,
 } from "./domain.js";
 import { deriveSeed, Rng } from "./rng.js";
+import { assess, discriminatorMove, type Image, type NormId } from "./reputation.js";
 
 export type Strategy = (mine: readonly Move[], theirs: readonly Move[], rng: Rng) => Move;
 
@@ -249,6 +250,10 @@ export function playMatch(
   drift = 0,
   eco?: EcoState,
   transition?: TransitionState,
+  norm?: NormId,
+  gossipProb = 0,
+  quantitative = false,
+  theta = 0,
 ): MatchResult {
   const historyA: Move[] = [];
   const historyB: Move[] = [];
@@ -260,9 +265,18 @@ export function playMatch(
   let ecoN = eco?.n ?? 0;
   let tState = transition?.cur ?? "";
   const occupancy: Record<string, number> = transition ? Object.fromEntries(Object.keys(transition.states).map((s) => [s, 0])) : {};
+  let imageA: Image = "G", imageB: Image = "G";
+  let repScoreA = 0, repScoreB = 0;
   for (let round = 0; round < rounds; round += 1) {
     let moveA = a(historyA, historyB, rng);
     let moveB = b(historyB, historyA, rng);
+    if (quantitative) {
+      moveA = repScoreA >= theta ? "C" : "D";
+      moveB = repScoreB >= theta ? "C" : "D";
+    } else if (norm) {
+      if (imageA === "B") moveA = "D";
+      if (imageB === "B") moveB = "D";
+    }
     if (curLeanA !== 0) {
       if (moveA === "C" && curLeanA < 0 && rng.unit() < -curLeanA) moveA = "D";
       else if (moveA === "D" && curLeanA > 0 && rng.unit() < curLeanA) moveA = "C";
@@ -287,6 +301,22 @@ export function playMatch(
     if (transition) tState = transition.next[outcomeOf(moveA, moveB)];
     historyA.push(moveA);
     historyB.push(moveB);
+    if (norm || quantitative) {
+      if (norm) {
+        imageA = assess(norm, imageA, "G", moveB);
+        imageB = assess(norm, imageB, "G", moveA);
+        if (gossipProb > 0 && rng.unit() < gossipProb) {
+          const tmp = imageA;
+          imageA = imageB;
+          imageB = tmp;
+          if (rng.unit() < 0.5) { imageA = "G"; imageB = "G"; }
+        }
+      }
+      if (quantitative) {
+        repScoreA += moveB === "C" ? 1 : -1;
+        repScoreB += moveA === "C" ? 1 : -1;
+      }
+    }
     if (drift !== 0) {
       curLeanA = Math.max(-1, Math.min(1, curLeanA + (moveB === "D" ? -drift : drift)));
       curLeanB = Math.max(-1, Math.min(1, curLeanB + (moveA === "D" ? -drift : drift)));

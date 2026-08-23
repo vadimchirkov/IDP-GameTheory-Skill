@@ -37,9 +37,11 @@ export interface ScenarioPlayer {
 
 const PLAYER_KEYS = new Set(["name", "dispositions", "team", "values", "betrayalProb", "memory", "note"]);
 const MODEL_KEYS = new Set(["situation", "game", "players", "payoffs", "structure", "topology", "rationale"]);
-const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma"]);
+const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma", "reputation", "temporal"]);
 const ECO_KEYS = new Set(["A1", "game1", "theta", "epsilon", "n0"]);
 const TRANSITION_KEYS = new Set(["states", "start", "next"]);
+const TEMPORAL_KEYS = new Set(["g", "activity"]);
+const REPUTATION_KEYS = new Set(["norm", "gossip", "quantitative", "theta"]);
 
 /**
  * Eco-evolutionary feedback (Weitz et al. 2016, "An oscillating tragedy of the commons").
@@ -85,6 +87,17 @@ export interface TransitionConfig {
   next: Record<Outcome, string>;
 }
 
+export type ReputationNorm = "L1"|"L2"|"L3"|"L4"|"L5"|"L6"|"L7"|"L8";
+export interface ReputationConfig {
+  norm?: ReputationNorm;
+  gossip?: Range;
+  quantitative?: boolean;
+  theta?: number;
+}
+export interface TemporalConfig {
+  g: Range; // games per snapshot Li et al 2021: g=1 worse than static, g>5 better
+  activity?: Range; // λ_i = 1/k_i^γ heterogeneity, optional
+}
 export interface ScenarioModel {
   situation: string;
   game?: GameType;
@@ -92,8 +105,9 @@ export interface ScenarioModel {
   payoffs: PayoffRanges | Record<string, PayoffRanges>;
   structure: {
     w: Range; noise: Range; drift?: Range; eco?: EcoConfig; transitions?: TransitionConfig;
-    /** Guaranteed per-round payoff a `loner` (voluntary opt-out) collects; required if any player can play `loner`. Cycle C→D→L→C needs `P<σ<R`. */
     sigma?: Range;
+    reputation?: ReputationConfig;
+    temporal?: TemporalConfig;
   };
   topology?: { type: "lattice" | "small_world" | "scale_free"; size?: number; K?: number };
 }
@@ -194,6 +208,8 @@ export function assertScenario(model: ScenarioModel): void {
   if (model.structure.eco !== undefined && model.structure.transitions !== undefined) {
     throw new Error("eco and transitions are two encodings of a dynamic game — use one, not both");
   }
+  if (model.structure.reputation !== undefined) assertReputation(model);
+  if (model.structure.temporal !== undefined) assertTemporal(model);
 }
 
 function assertTransitions(model: ScenarioModel): void {
@@ -220,6 +236,24 @@ function assertTransitions(model: ScenarioModel): void {
   for (const key of Object.keys(t.next)) {
     if (key !== "CC" && key !== "CD" && key !== "DD") throw new Error(`transitions.next has unknown outcome "${key}" — expected CC, CD, DD`);
   }
+}
+
+function assertReputation(model: ScenarioModel): void {
+  const rep = model.structure.reputation!;
+  for (const key of Object.keys(rep)) {
+    if (!REPUTATION_KEYS.has(key)) throw new Error(`Unknown reputation field "${key}" — expected one of ${[...REPUTATION_KEYS].join(", ")}`);
+  }
+  if (rep.norm !== undefined && !["L1","L2","L3","L4","L5","L6","L7","L8"].includes(rep.norm)) throw new Error(`reputation.norm must be L1..L8`);
+  if (rep.gossip !== undefined) assertRange(rep.gossip, "reputation.gossip", 1);
+  if (rep.theta !== undefined && (!Number.isFinite(rep.theta) || rep.theta < -10 || rep.theta > 10)) throw new Error(`reputation.theta must be -10..10`);
+}
+function assertTemporal(model: ScenarioModel): void {
+  const t = model.structure.temporal!;
+  for (const key of Object.keys(t)) {
+    if (!TEMPORAL_KEYS.has(key)) throw new Error(`Unknown temporal field "${key}" — expected one of ${[...TEMPORAL_KEYS].join(", ")}`);
+  }
+  assertRange(t.g, "temporal.g", 20);
+  if (t.activity !== undefined) assertRange(t.activity, "temporal.activity", 1);
 }
 
 function assertEco(model: ScenarioModel): void {

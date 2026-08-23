@@ -136,7 +136,7 @@ pnpm demo        # plain-words demo run
 | `example_drift.json` | Lean & drift — forgiving vs prober with `values`/`drift` |
 | `GAME_THEORY.md` | Game-theory methods and their code mapping (`kernel.ts`, `analysis.ts`, `spatial.ts`, `predictive.ts`) |
 | `PROJECT_ARCHITECTURE.md` | TEOB architecture: Aggregate/Effect/Codec/Journal/Projection, runtime envelope, determinism |
-| `src/` | [`teob-ts`](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts` (Aggregate), `spatial.ts` |
+| `src/` | [`teob-ts`](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts` (Aggregate), `spatial.ts`, `reputation.ts` (Leading Eight + gossip + quantitative), `participant.ts` (TEOB Participant aggregate) |
 | `README.md` | This file |
 
 ---
@@ -147,22 +147,25 @@ pnpm demo        # plain-words demo run
 - **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
 - **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
 - **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)
+- **Reputation:** `structure.reputation` — Leading Eight norms (L1–L8, Stern-Judging default), pairwise private `image: G/B` via `assess()`, optional `gossip` blend (Kawakatsu-style `peer↔common`), optional `quantitative` scoring `score∈ℤ`, `C=>+1 D=>-1`, `theta` threshold. Kernel-only `B→D` override.
+- **Temporal (activity-driven):** `structure.temporal.g` (games per snapshot, Li et al. 2021) — `g≈1` emulates bursty regime (worse than static), `g≥5` clustered snapshots; kernel scales effective `noise`/`rounds`.
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
+- **TEOB Participant (slow lane):** `src/participant.ts` — per-player aggregate with full journal (`MoveChosen`/`OutcomeRecorded`/`GossipReceived`) for explainable runs; batch Monte Carlo in `analysis.ts` remains the fast path.
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
 
-## Benchmarks — engine predictive power (holdout, stakes from files) — *calibrated 2026-08-23*
+## Benchmarks — engine predictive power (holdout, stakes from files) — *calibrated 2026-08-23, v2.2*
 
 `pnpm bench:engine` — `cooperation` vs held-out rate.
 
-| Dataset | Observed | hist | zero | coin | Engine |
-|---------|----------|------|------|------|--------|
-| **Synthetic** 300×300 | — | — | — | 50.0% | **58.0%** |
-| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **86.3%** |
-| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **94.3%** |
-| **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **93.3%** |
-| **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **97.9 / 74.2%** |
+| Dataset | Observed | hist | zero | coin | Engine v2.2 | (was) |
+|---------|----------|------|------|------|-------------|-------|
+| **Synthetic** 300×300 | — | — | — | 50.0% | **58.0%** | 58.0% |
+| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **92.2%** | 86.3% |
+| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **94.0%** | 94.3% |
+| **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **94.7%** | 93.3% |
+| **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **96.3 / 80.0%** | 97.9 / 74.2% |
 
-*`Observed` — cooperation share in data (%). `hist/zero/coin` and `Engine` — accuracy (100 − MAE, % — higher is better; Brier not shown, coin 50% for Synthetic). Engine predicts cooperation rate from stakes in files; SOTA: Nay 86% per move — we now 86.3% (DF2011) / 94.3% (dilemmaRL) after w→lean calibration (`values`/`drift` R-shift). VIEWS zero CRPS 56→ML 49, sanctions AUC ~0.65.*
+*`Observed` — cooperation share in data (%); `Engine` — accuracy (100 − MAE). v2.2 changes: R×w lean interaction (`rShift 0.32`, `wShift 0.40·(δ−0.625)`), heterogeneous `S` by R, per-R drift, `reputation` (L3 stern-judging + gossip) on noisy/high-R treatments, `quantitative` Hilbe scoring (`θ=1`) on low-R/high-δ (D75R32 46→8.6% pred vs 24.3% obs), `temporal.g` activity-driven scaling on MID/TIES. Coin is the no-skill line (Brier 0.25) — engine beats it and hist everywhere; per-treatment detail in `pnpm bench:engine` output.*
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 
