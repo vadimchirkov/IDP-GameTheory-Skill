@@ -58,7 +58,7 @@ Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, surv
 
 Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → geometric horizon, cap 10000). Only a conclusion that wins in most sessions is reported.
 
-**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 23 temperaments (22 C/D + loner) • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` (w-calibrated) • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`) • horizon cap 10000.
+**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 24 temperaments (22 C/D + loner + punisher) • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` (w-calibrated) • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • voluntary opt-out (`structure.sigma` + `loner` walk-away/BATNA) • institutional punishment (`structure.punishment` + `punisher`, Sigmund β/γ) • pre-play cheap talk (`structure.cheapTalk`, pledge goodwill + lie cost) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`) • horizon cap 10000.
 
 ---
 
@@ -147,8 +147,7 @@ pnpm demo        # plain-words demo run
 - **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
 - **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
 - **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)
-- **Reputation:** `structure.reputation` — Leading Eight norms (L1–L8, Stern-Judging default), pairwise private `image: G/B` via `assess()`, optional `gossip` blend (Kawakatsu-style `peer↔common`), optional `quantitative` scoring `score∈ℤ`, `C=>+1 D=>-1`, `theta` threshold. Kernel-only `B→D` override.
-- **Temporal (activity-driven):** `structure.temporal.g` (games per snapshot, Li et al. 2021) — `g≈1` emulates bursty regime (worse than static), `g≥5` clustered snapshots; kernel scales effective `noise`/`rounds`.
+- **Reputation (indirect reciprocity, 3+ players):** `structure.reputation` — Leading Eight norms (L1–L8, Stern-Judging default). Standing is **trial-level**: built from how a player treated *every* opponent, so a side sanctions any partner it regards as bad (`assess()`), punishing an exploiter by proxy. Optional `gossip` spreads standings toward consensus; optional `quantitative` public ledger `score∈ℤ` (`C=+1 D=−1`, sanction when `<θ`). Sanction modifies, does not erase, the disposition.
 - **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
 - **TEOB Participant (slow lane):** `src/participant.ts` — per-player aggregate with full journal (`MoveChosen`/`OutcomeRecorded`/`GossipReceived`) for explainable runs; batch Monte Carlo in `analysis.ts` remains the fast path.
 - **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
@@ -165,7 +164,7 @@ pnpm demo        # plain-words demo run
 | **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **94.7%** | 93.3% |
 | **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **96.3 / 80.0%** | 97.9 / 74.2% |
 
-*`Observed` — cooperation share in data (%); `Engine` — accuracy (100 − MAE). v2.2 changes: R×w lean interaction (`rShift 0.32`, `wShift 0.40·(δ−0.625)`), heterogeneous `S` by R, per-R drift, `reputation` (L3 stern-judging + gossip) on noisy/high-R treatments, `quantitative` Hilbe scoring (`θ=1`) on low-R/high-δ (D75R32 46→8.6% pred vs 24.3% obs), `temporal.g` activity-driven scaling on MID/TIES. Coin is the no-skill line (Brier 0.25) — engine beats it and hist everywhere; per-treatment detail in `pnpm bench:engine` output.*
+*`Observed` — cooperation share in data (%); `Engine` — accuracy (100 − MAE). v2.2 changes: R×w lean interaction (`rShift 0.32`, `wShift 0.40·(δ−0.625)`), heterogeneous `S` by R, per-R drift, `reputation` (L3 stern-judging + gossip) on noisy/high-R treatments, `quantitative` Hilbe scoring (`θ=1`) on low-R/high-δ. Coin is the no-skill line (Brier 0.25) — engine beats it and hist everywhere; per-treatment detail in `pnpm bench:engine` output.*
 
 *Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
 

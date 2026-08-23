@@ -1,0 +1,39 @@
+{
+  "situation": "An industry association where members can dump waste cheaply (defect) or treat it (cooperate) — a compliance body can fine polluters, but running it costs the honest members dues, so some cooperate without paying to enforce",
+  "players": [
+    {
+      "name": "Enforcer",
+      "dispositions": ["punisher"],
+      "note": "Cooperates and pays into the compliance body that fines polluters"
+    },
+    {
+      "name": "GoodCitizen",
+      "dispositions": ["trusting", "provocable"],
+      "note": "Cooperates but does not pay to enforce — a second-order free-rider"
+    },
+    {
+      "name": "Polluter",
+      "dispositions": ["exploitative", "alld"],
+      "note": "Dumps waste when it can get away with it"
+    }
+  ],
+  "payoffs": { "T": [4, 6], "R": [3, 4], "P": [1, 2], "S": [-1, 1] },
+  "structure": {
+    "w": [0.85, 0.97],
+    "noise": [0.0, 0.08],
+    "punishment": {
+      "beta": [2.5, 4.0],
+      "gamma": [0.5, 1.5],
+      "pool": true
+    }
+  },
+  "rationale": {
+    "R": "everyone treats waste = clean industry, steady",
+    "T": "dump once while others treat = cheap disposal windfall",
+    "P": "everyone dumps = fouled commons, all bleed",
+    "S": "treat while others dump = you pay costs, they don't",
+    "w": "the industry persists for many cycles",
+    "noise": "a treatment failure misread as deliberate dumping",
+    "punishment": "beta = the fine a caught polluter pays; gamma = dues the enforcer pays to run the body; pool = dues are owed every period, even when nobody pollutes (the second-order free-rider trap)"
+  }
+}

@@ -1,9 +1,43 @@
 import {
-  assertScenario, isValidPayoff, type GameType, type Payoff, type PayoffRanges,
+  assertScenario, isValidPayoff, type GameType, type Move, type Payoff, type PayoffRanges,
   type ScenarioModel, type StrategyId,
 } from "./domain.js";
 import { memoryN, playMatch, strategies, type EcoState, type TransitionState } from "./kernel.js";
+import { assess, gossipBlend, type Image, type NormId } from "./reputation.js";
 import { Rng } from "./rng.js";
+
+interface RepState { norm: NormId; quantitative: boolean; theta: number; gossipProb: number }
+
+/**
+ * Fold one pairing's outcome into the trial-level reputation state. `actA`/`actB` are each side's
+ * match-level action (mostly cooperated → C, else D). The public `ledger` is Hilbe's numeric tally;
+ * the private `image` is every observer's Leading-Eight assessment, so the same defection can look
+ * justified to one observer and not another — and gossip lets those views converge, repairing the
+ * spurious Bad marks that noise creates.
+ */
+function updateStanding(
+  rep: RepState,
+  image: Record<string, Record<string, Image>>,
+  ledger: Record<string, number>,
+  names: readonly string[],
+  aName: string, bName: string, actA: Move, actB: Move,
+  rng: Rng,
+): void {
+  ledger[aName] = (ledger[aName] ?? 0) + (actA === "C" ? 1 : -1);
+  ledger[bName] = (ledger[bName] ?? 0) + (actB === "C" ? 1 : -1);
+  for (const o of names) {
+    const row = (image[o] ??= {});
+    const oa = row[aName] ?? "G";
+    const ob = row[bName] ?? "G";
+    row[aName] = assess(rep.norm, oa, ob, actA); // a is the donor, b (as o sees it) the recipient
+    row[bName] = assess(rep.norm, ob, oa, actB);
+  }
+  if (rep.gossipProb > 0 && rng.unit() < rep.gossipProb) {
+    const o1 = rng.pick(names), o2 = rng.pick(names), t = rng.pick(names);
+    const row = (image[o1] ??= {});
+    row[t] = gossipBlend(row[t] ?? "G", image[o2]?.[t] ?? "G", 1, () => rng.unit());
+  }
+}
 
 export interface Trial {
   winners: readonly string[];
@@ -90,11 +124,7 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   const w = rng.between(model.structure.w);
   const noise = rng.between(model.structure.noise);
   const drift = model.structure.drift ? rng.between(model.structure.drift) : 0;
-  const roundsRaw = geometricHorizon(w, rng);
-  // Temporal activity-driven Li et al: g games per snapshot, g=1 worse than static, g>5 better than static
-  const g = model.structure.temporal ? rng.between(model.structure.temporal.g) : 1;
-  const noiseEff = g <= 1.5 ? noise * 1.22 : g < 5 ? noise : noise * Math.max(0.35, 0.88 - (g - 5) * 0.06);
-  const rounds = Math.max(1, Math.round(roundsRaw * (g <= 1.5 ? 0.72 : g < 5 ? 1 : 1 + (g - 5) * 0.10)));
+  const rounds = geometricHorizon(w, rng);
   const payoffByName = new Map(model.players.map((player) => [player.name, samplePayoff(payoffRangesFor(model, player.name), game, rng)]));
   const strategyByName = new Map(model.players.map((player) => [player.name, rng.pick(player.dispositions)]));
   const leanByName = new Map(model.players.map((player) => [player.name, player.values ? rng.between(player.values) : 0]));
@@ -110,6 +140,28 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
     : undefined;
   // Loner opt-out payoff (Szabó-Hauert): both sides collect σ per round, no C/D game played.
   const sigma = model.structure.sigma ? rng.between(model.structure.sigma) : undefined;
+  // Sigmund pool/peer punishment: sample β/γ once per trial; applied per match when a side is a punisher.
+  const punish = model.structure.punishment
+    ? { beta: rng.between(model.structure.punishment.beta), gamma: rng.between(model.structure.punishment.gamma), pool: !!model.structure.punishment.pool }
+    : undefined;
+  // Pre-play cheap talk: sample credibility/lieCost once per trial; applied to every match's pledge phase.
+  const talk = model.structure.cheapTalk
+    ? { credibility: rng.between(model.structure.cheapTalk.credibility), lieCost: rng.between(model.structure.cheapTalk.lieCost) }
+    : undefined;
+  // Indirect reciprocity (Leading Eight): reputation lives at the trial level — a standing built from
+  // how each player treated *every* opponent, so a player can be sanctioned for what it did to others.
+  const rep = model.structure.reputation ? {
+    norm: (model.structure.reputation.norm ?? "L3") as NormId,
+    quantitative: !!model.structure.reputation.quantitative,
+    theta: model.structure.reputation.theta ?? 0,
+    gossipProb: model.structure.reputation.gossip ? rng.between(model.structure.reputation.gossip) : 0,
+  } : undefined;
+  const names = model.players.map((p) => p.name);
+  const image: Record<string, Record<string, Image>> = {}; // observer → target → private good/bad view
+  const ledger: Record<string, number> = {};               // target → public C=+1/D=−1 score (quantitative)
+  const viewOf = (obs: string, tgt: string): Image => image[obs]?.[tgt] ?? "G";
+  const sanctions = (obs: string, tgt: string): boolean =>
+    rep!.quantitative ? (ledger[tgt] ?? 0) < rep!.theta : viewOf(obs, tgt) === "B";
   const scores = new Map(model.players.map((player) => [player.name, 0]));
   let cooperation = 0;
   let coopMatches = 0;
@@ -134,17 +186,22 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
         scores.set(b.name, (scores.get(b.name) ?? 0) + optOut);
         continue; // abstention: not counted toward cooperation
       }
-      const aStrat = effectiveStrategy(a, aId, teamOf(b));
-      const bStrat = effectiveStrategy(b, bId, teamOf(a));
+      let aStrat = effectiveStrategy(a, aId, teamOf(b));
+      let bStrat = effectiveStrategy(b, bId, teamOf(a));
+      // Reputation sanction: defect on a partner you regard as Bad, otherwise play your disposition.
+      if (rep) {
+        if (sanctions(a.name, b.name)) aStrat = strategies.alld;
+        if (sanctions(b.name, a.name)) bStrat = strategies.alld;
+      }
       const ecoState: EcoState | undefined = eco ? { A1: eco.A1, theta: eco.theta, epsilon: eco.epsilon, n: eco.n0 } : undefined;
       const transState: TransitionState | undefined = transStates && transCfg ? { states: transStates, cur: transCfg.start, next: transCfg.next } : undefined;
-      const norm = model.structure.reputation?.norm as any;
-      const gossipProb = model.structure.reputation?.gossip ? rng.between(model.structure.reputation.gossip) : 0;
-      const quantitative = !!model.structure.reputation?.quantitative;
-      const theta = model.structure.reputation?.theta ?? 0;
-      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noiseEff, rng, aLean, bLean, drift, ecoState, transState, norm, gossipProb, quantitative, theta);
+      const punishment = punish && (aId === "punisher" || bId === "punisher")
+        ? { beta: punish.beta, gamma: punish.gamma, pool: punish.pool, aPunishes: aId === "punisher", bPunishes: bId === "punisher" }
+        : undefined;
+      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noise, rng, { leanA: aLean, leanB: bLean, drift, eco: ecoState, transition: transState, punishment, cheapTalk: talk });
       scores.set(a.name, (scores.get(a.name) ?? 0) + match.scoreA);
       scores.set(b.name, (scores.get(b.name) ?? 0) + match.scoreB);
+      if (rep) updateStanding(rep, image, ledger, names, a.name, b.name, match.coopA >= 0.5 ? "C" : "D", match.coopB >= 0.5 ? "C" : "D", rng);
       cooperation += match.cooperation;
       if (match.envFinal !== undefined) { envSum += match.envFinal; ecoMatches += 1; }
       if (match.stateOccupancy) for (const [s, f] of Object.entries(match.stateOccupancy)) occSum[s] = (occSum[s] ?? 0) + f;
@@ -173,7 +230,8 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   for (const [name, lean] of leanByName) (inputs as Record<string, number>)[`value_${name}`] = lean;
   if (eco) { inputs.eco_theta = eco.theta; inputs.eco_epsilon = eco.epsilon; inputs.eco_n0 = eco.n0; }
   if (sigma !== undefined) inputs.sigma = sigma;
-  if (model.structure.temporal) (inputs as Record<string, number>).temporal_g = g;
+  if (punish) { inputs.punish_beta = punish.beta; inputs.punish_gamma = punish.gamma; }
+  if (talk) { inputs.talk_credibility = talk.credibility; inputs.talk_lieCost = talk.lieCost; }
   return {
     winners, teamWinners, perCapitaWinners, teamScores,
     cooperation: cooperation / Math.max(1, coopMatches),
@@ -230,7 +288,7 @@ export function analyzeScenario(model: ScenarioModel, trials: number, seed: numb
     for (const t of run.perCapitaWinners) perCapitaWins[t] = (perCapitaWins[t] ?? 0) + 1 / run.perCapitaWinners.length;
   }
   const baseInputs = ["T", "R", "P", "S", "w", "noise", "drift"] as const;
-  const extraInputs = [...new Set(runs.flatMap(r => Object.keys(r.inputs)).filter(k => k.startsWith("value_") || k.startsWith("eco_") || k === "sigma" || k === "temporal_g"))];
+  const extraInputs = [...new Set(runs.flatMap(r => Object.keys(r.inputs)).filter(k => k.startsWith("value_") || k.startsWith("eco_") || k === "sigma" || k.startsWith("punish_") || k.startsWith("talk_")))];
   const allInputs = [...baseInputs, ...extraInputs];
   const cooperation = runs.map((run) => run.cooperation);
   const winPct = Object.fromEntries(Object.entries(wins).map(([name, w]) => [name, 100 * w / trials]));

@@ -29,6 +29,7 @@ export function runEvolution(model: ScenarioModel, generations = 500, seed = 42)
     populationSize: 100,
     stepDelayMs: 0,
     ...(model.structure.sigma ? { sigma: rng.between(model.structure.sigma) } : {}),
+    ...(model.structure.punishment ? { punishment: { beta: rng.between(model.structure.punishment.beta), gamma: rng.between(model.structure.punishment.gamma), pool: !!model.structure.punishment.pool } } : {}),
   };
   let shares = initialShares;
   const trajectory: Generation[] = [];

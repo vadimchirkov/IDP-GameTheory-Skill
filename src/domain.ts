@@ -37,11 +37,12 @@ export interface ScenarioPlayer {
 
 const PLAYER_KEYS = new Set(["name", "dispositions", "team", "values", "betrayalProb", "memory", "note"]);
 const MODEL_KEYS = new Set(["situation", "game", "players", "payoffs", "structure", "topology", "rationale"]);
-const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma", "reputation", "temporal"]);
+const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma", "reputation", "punishment", "cheapTalk"]);
 const ECO_KEYS = new Set(["A1", "game1", "theta", "epsilon", "n0"]);
 const TRANSITION_KEYS = new Set(["states", "start", "next"]);
-const TEMPORAL_KEYS = new Set(["g", "activity"]);
 const REPUTATION_KEYS = new Set(["norm", "gossip", "quantitative", "theta"]);
+const PUNISHMENT_KEYS = new Set(["beta", "gamma", "pool"]);
+const CHEAPTALK_KEYS = new Set(["credibility", "lieCost"]);
 
 /**
  * Eco-evolutionary feedback (Weitz et al. 2016, "An oscillating tragedy of the commons").
@@ -88,16 +89,59 @@ export interface TransitionConfig {
 }
 
 export type ReputationNorm = "L1"|"L2"|"L3"|"L4"|"L5"|"L6"|"L7"|"L8";
+/**
+ * Indirect reciprocity (Ohtsuki & Iwasa 2006 Leading Eight). Reputation is a property of the
+ * whole round-robin, not a single match: each player carries a standing that everyone can see,
+ * built from how it treated *every* opponent. A player defects on a partner it regards as Bad
+ * (a sanction), otherwise plays its disposition — so B can punish A for how A treated C, the
+ * indirect channel a 2-player match cannot express. Resolved at the trial level in `oneTrial`.
+ */
 export interface ReputationConfig {
+  /** Assessment norm; default `L3` stern-judging. */
   norm?: ReputationNorm;
+  /** Rate at which players reconcile their private views (Kawakatsu gossip); repairs noise misreads. */
   gossip?: Range;
+  /** Public numeric ledger instead of a private good/bad image (Hilbe 2023): sanction when score < θ. */
   quantitative?: boolean;
+  /** Sanction threshold for the quantitative ledger (C=+1, D=−1); default 0. */
   theta?: number;
 }
-export interface TemporalConfig {
-  g: Range; // games per snapshot Li et al 2021: g=1 worse than static, g>5 better
-  activity?: Range; // λ_i = 1/k_i^γ heterogeneity, optional
+
+/**
+ * Institutional / peer punishment (Sigmund et al. Science 2010; Hauert et al. 2007).
+ * A costly second stage: a `punisher` (cooperates like ALLC in moves) pays `gamma` to make a
+ * defector lose `beta > gamma`. Distinct from reputation, which punishes for *free* by defecting
+ * on a bad name — here punishment is *costly*, which is what creates the second-order free-rider
+ * problem: a plain cooperator who never pays `gamma` out-earns a punisher once defectors are gone.
+ * - `peer` (default): a punisher pays `gamma` only for a round it actually fines a defector.
+ * - `pool`: a punisher pays `gamma` every round into a fund (even with no defectors) — the sharper
+ *   second-order dilemma.
+ */
+export interface PunishmentConfig {
+  /** Penalty a defector suffers from each punishing opponent. */
+  beta: Range;
+  /** Cost a punisher pays. Deterrence needs `beta > gamma`. */
+  gamma: Range;
+  /** Pool variant: punishers pay `gamma` every round regardless of defections. Default peer. */
+  pool?: boolean;
 }
+
+/**
+ * Pre-play cheap talk (Farrell/Aumann; Forges/Bárány/Vida). Before the repeated game each side
+ * sends a non-binding **pledge** (its opening move on an empty history). If both pledge C they
+ * grant each other a `credibility`-sized cooperative lean — the coordination benefit that lets a
+ * pair jump straight to the good equilibrium (decisive in a Stag Hunt). Talk is *cheap*, so a
+ * liar can pledge C and then defect; `lieCost` is the per-round penalty a pledge-C side pays for
+ * each defection. With `lieCost = 0` cheap talk is babbling and freely exploitable in a PD (the
+ * paradox); a positive `lieCost` makes the pledge credible.
+ */
+export interface CheapTalkConfig {
+  /** Cooperative lean each side gains when both pledge C (0 = ignored, 1 = fully trusted). */
+  credibility: Range;
+  /** Per-round penalty a side that pledged C pays for each round it defects. */
+  lieCost: Range;
+}
+
 export interface ScenarioModel {
   situation: string;
   game?: GameType;
@@ -107,7 +151,8 @@ export interface ScenarioModel {
     w: Range; noise: Range; drift?: Range; eco?: EcoConfig; transitions?: TransitionConfig;
     sigma?: Range;
     reputation?: ReputationConfig;
-    temporal?: TemporalConfig;
+    punishment?: PunishmentConfig;
+    cheapTalk?: CheapTalkConfig;
   };
   topology?: { type: "lattice" | "small_world" | "scale_free"; size?: number; K?: number };
 }
@@ -117,7 +162,7 @@ export const strategyIds = [
   "trusting", "gradual", "erratic", "prober",
   "contrite", "detective", "zd_generous", "zd_extort", "colluder",
   "adaptive", "southampton", "alld", "allc", "tf2t", "semigrim",
-  "memory2", "shaper", "loner",
+  "memory2", "shaper", "loner", "punisher",
 ] as const;
 export type StrategyId = (typeof strategyIds)[number];
 
@@ -140,6 +185,8 @@ export interface RunConfig {
   stepDelayMs: number;
   /** Loner opt-out payoff; required if `loner` has positive initial share. */
   sigma?: number;
+  /** Punishment fine/cost; required if `punisher` has positive initial share. */
+  punishment?: { beta: number; gamma: number; pool: boolean };
 }
 
 export function isValidPayoff(game: GameType, p: Payoff): boolean {
@@ -209,7 +256,27 @@ export function assertScenario(model: ScenarioModel): void {
     throw new Error("eco and transitions are two encodings of a dynamic game — use one, not both");
   }
   if (model.structure.reputation !== undefined) assertReputation(model);
-  if (model.structure.temporal !== undefined) assertTemporal(model);
+  if (model.structure.punishment !== undefined) assertPunishment(model);
+  if (model.players.some((p) => p.dispositions.includes("punisher")) && model.structure.punishment === undefined) {
+    throw new Error("a player can play punisher but structure.punishment (beta/gamma) is not set");
+  }
+  if (model.structure.cheapTalk !== undefined) {
+    const c = model.structure.cheapTalk;
+    for (const key of Object.keys(c)) {
+      if (!CHEAPTALK_KEYS.has(key)) throw new Error(`Unknown cheapTalk field "${key}" — expected one of ${[...CHEAPTALK_KEYS].join(", ")}`);
+    }
+    assertRange(c.credibility, "cheapTalk.credibility", 1);
+    assertRange(c.lieCost, "cheapTalk.lieCost");
+  }
+}
+
+function assertPunishment(model: ScenarioModel): void {
+  const p = model.structure.punishment!;
+  for (const key of Object.keys(p)) {
+    if (!PUNISHMENT_KEYS.has(key)) throw new Error(`Unknown punishment field "${key}" — expected one of ${[...PUNISHMENT_KEYS].join(", ")}`);
+  }
+  assertRange(p.beta, "punishment.beta");
+  assertRange(p.gamma, "punishment.gamma");
 }
 
 function assertTransitions(model: ScenarioModel): void {
@@ -240,20 +307,16 @@ function assertTransitions(model: ScenarioModel): void {
 
 function assertReputation(model: ScenarioModel): void {
   const rep = model.structure.reputation!;
+  // Reputation is *indirect* reciprocity — B punishing A for how A treated C. On a 2-player dyad there is
+  // no third party, so it collapses to direct reciprocity (already captured by grim/tit-for-tat) and just
+  // acts as a hidden cooperation knob. Require a real group so the mechanism means what it claims.
+  if (model.players.length < 3) throw new Error("reputation is indirect reciprocity — it needs at least three players; on a two-party dyad use grim/provocable instead");
   for (const key of Object.keys(rep)) {
     if (!REPUTATION_KEYS.has(key)) throw new Error(`Unknown reputation field "${key}" — expected one of ${[...REPUTATION_KEYS].join(", ")}`);
   }
   if (rep.norm !== undefined && !["L1","L2","L3","L4","L5","L6","L7","L8"].includes(rep.norm)) throw new Error(`reputation.norm must be L1..L8`);
   if (rep.gossip !== undefined) assertRange(rep.gossip, "reputation.gossip", 1);
   if (rep.theta !== undefined && (!Number.isFinite(rep.theta) || rep.theta < -10 || rep.theta > 10)) throw new Error(`reputation.theta must be -10..10`);
-}
-function assertTemporal(model: ScenarioModel): void {
-  const t = model.structure.temporal!;
-  for (const key of Object.keys(t)) {
-    if (!TEMPORAL_KEYS.has(key)) throw new Error(`Unknown temporal field "${key}" — expected one of ${[...TEMPORAL_KEYS].join(", ")}`);
-  }
-  assertRange(t.g, "temporal.g", 20);
-  if (t.activity !== undefined) assertRange(t.activity, "temporal.activity", 1);
 }
 
 function assertEco(model: ScenarioModel): void {

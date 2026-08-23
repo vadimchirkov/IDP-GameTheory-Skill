@@ -84,7 +84,6 @@ function dfModel(t: string): ScenarioModel {
   const T: [number, number] = R <= 3.4 ? [5.2, 6.2] as any : R <= 4.2 ? [4.9, 5.8] as any : [4.6, 5.4] as any;
   const drift: [number, number] = isLow ? [0.035, 0.09] : R <= 3.4 ? [0.02, 0.06] : [0.012, 0.035];
   const wLo = Math.max(0.32, d - (isLow ? 0.08 : 0.06)), wHi = Math.min(0.999, d + (isLow ? 0.06 : 0.09));
-  const rep = d >= 0.75 ? (R <= 3.4 ? { norm: "L3" as const, quantitative: true as const, theta: 1 as const, gossip: [0.08, 0.22] as any } : R >= 4.6 ? { norm: "L3" as const, gossip: [0.08, 0.22] as any } : undefined) : undefined;
   return {
     situation: t, game: "prisoners_dilemma",
     players: [
@@ -92,7 +91,7 @@ function dfModel(t: string): ScenarioModel {
       { name: "B", dispositions: ["provocable", "grim", "alld", "exploitative", "forgiving", "pavlov"] as any, values: [lo, hi] as any },
     ],
     payoffs: { T: T as any, R: [Math.max(2.4, R - 0.35), R + 0.35] as any, P: [1, 1.5] as any, S: S as any } as any,
-    structure: { w: [wLo, wHi] as any, noise: [0, 0.045] as any, drift: drift as any, ...(rep ? { reputation: rep } : {}) },
+    structure: { w: [wLo, wHi] as any, noise: [0, 0.045] as any, drift: drift as any },
   };
 }
 let accE = 0, accHist = 0, accZero = 0, accCoin = 0; let k = 0;
@@ -181,14 +180,14 @@ const midProxy = {
   game: "prisoners_dilemma",
   players: [{ name: "A", dispositions: ["provocable", "forgiving", "grim"] }, { name: "B", dispositions: ["provocable", "forgiving", "grim"] }],
   payoffs: { T: [4.8, 5.4], R: [3, 3.3], P: [1.0, 1.5], S: [-0.3, 0.2] },
-  structure: { w: [0.80, 0.92], noise: [0.02, 0.07], reputation: { norm: "L3", gossip: [0.10, 0.25] }, temporal: { g: [1, 2.5] } }
+  structure: { w: [0.80, 0.92], noise: [0.02, 0.07] }
 } as unknown as ScenarioModel;
 const tiesProxy = {
   situation: "TIES proxy (asymmetric PD)",
   game: "prisoners_dilemma",
   players: [{ name: "Sender", dispositions: ["provocable", "exploitative", "grim"] }, { name: "Target", dispositions: ["provocable", "forgiving", "alld"] }],
   payoffs: { Sender: { T: [3.5, 4.5], R: [3, 3.5], P: [1, 1.5], S: [-0.5, 0.5] }, Target: { T: [5.5, 6.5], R: [3, 3.5], P: [1, 1.5], S: [-1.5, -0.2] } },
-  structure: { w: [0.7, 0.88], noise: [0.02, 0.06], reputation: { norm: "L3", gossip: [0.10, 0.25] }, temporal: { g: [4, 6] } }
+  structure: { w: [0.7, 0.88], noise: [0.02, 0.06] }
 } as unknown as ScenarioModel;
 const mR2 = analyzeScenario(midProxy, 600, 42).cooperation.mean;
 const tR = analyzeScenario(tiesProxy, 600, 42).cooperation.mean;
@@ -228,5 +227,5 @@ else {
 }
 console.log(`└─────────────────────────────────────────────────────────────────────┘`);
 
-console.log("\nDone — движок v2.2: DF2011 92.2% (+5.9pp vs coin 71.7%), dilemmaRL 94.0%, MID/TIES +temporal+gossip, synthetic 58% Brier 0.23");
+console.log("\nDone — движок v2.3: DF2011 90.0%, dilemmaRL 94.3%, MID 93.3%, TIES 97.9%. Reputation gated to 3+ players (indirect reciprocity), so the dyadic proxies use honest knobs only — no reputation fudge.");
 console.log("Запуск: node scripts/live-bench.mjs (A) + npx tsx src/bench-engine.ts (B-E)  // pnpm test — 26 green");

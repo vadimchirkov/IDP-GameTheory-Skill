@@ -1,0 +1,34 @@
+{
+  "situation": "Two firms negotiating a joint technical standard — both openly pledge to adopt it, and the venture only pays off if both actually follow through; walking back a public commitment is embarrassing and costly",
+  "game": "stag_hunt",
+  "players": [
+    {
+      "name": "PlatformX",
+      "dispositions": ["provocable", "pavlov", "trusting"],
+      "note": "Wants the shared standard, will follow if the other does"
+    },
+    {
+      "name": "PlatformY",
+      "dispositions": ["provocable", "gradual"],
+      "note": "Conditional cooperator, coordinates on a credible pledge"
+    }
+  ],
+  "payoffs": { "T": [3, 4], "R": [5, 6], "P": [1, 2], "S": [0, 1] },
+  "structure": {
+    "w": [0.8, 0.95],
+    "noise": [0.02, 0.1],
+    "cheapTalk": {
+      "credibility": [0.4, 0.9],
+      "lieCost": [1.0, 3.0]
+    }
+  },
+  "rationale": {
+    "R": "both adopt the shared standard = the market coordinates, best outcome",
+    "T": "defect to a proprietary stack while they adopt = short-term edge, smaller than the shared win",
+    "P": "both go proprietary = fragmented market",
+    "S": "adopt while they defect = stranded investment",
+    "w": "the standard window lasts a year or two",
+    "noise": "a delayed commit misread as backing out",
+    "cheapTalk": "credibility = how much a public pledge is believed and coordinated on; lieCost = the reputational/embarrassment cost of publicly pledging to adopt and then not"
+  }
+}

@@ -261,15 +261,15 @@ run("4.z PredictiveReport + imbalanced + retention vs transition (friend proposa
 run("6.1 Eco feedback (Weitz): cooperation and environment chase each other", ()=>{
   const eco = (n:number): EcoState => ({ A1:{T:5,R:1,P:0,S:-1}, theta:2, epsilon:0.2, n });
   // Coupling direction: mutual C pushes n up (θc-(1-c)>0), mutual D pushes it down.
-  const up = playMatch(strategies.trusting, strategies.trusting, P,P,100,0,new Rng(1),0,0,0, eco(0.5));
-  const down = playMatch(strategies.alld, strategies.alld, P,P,100,0,new Rng(1),0,0,0, eco(0.5));
+  const up = playMatch(strategies.trusting, strategies.trusting, P,P,100,0,new Rng(1), { eco: eco(0.5) });
+  const down = playMatch(strategies.alld, strategies.alld, P,P,100,0,new Rng(1), { eco: eco(0.5) });
   assert.ok(up.envFinal! > 0.5 && down.envFinal! < 0.5, `coop→n up (${up.envFinal}), defect→n down (${down.envFinal})`);
   // Clamp holds under a violent ε/θ — n never escapes [0.01,0.99].
-  const hot = playMatch(strategies.trusting, strategies.trusting, P,P,500,0,new Rng(1),0,0,0, { A1:P, theta:50, epsilon:0.9, n:0.5 });
+  const hot = playMatch(strategies.trusting, strategies.trusting, P,P,500,0,new Rng(1), { eco: { A1:P, theta:50, epsilon:0.9, n:0.5 } });
   assert.ok(hot.envFinal! <= 0.99 && hot.envFinal! >= 0.01, `clamp escaped: ${hot.envFinal}`);
   // The tragedy: cooperators degrade the environment (n→1, A1 with R1=1<R0=3), lowering their OWN reward vs static.
   const stat = playMatch(strategies.trusting, strategies.trusting, P,P,100,0,new Rng(1));
-  const trag = playMatch(strategies.trusting, strategies.trusting, P,P,100,0,new Rng(1),0,0,0, eco(0.5));
+  const trag = playMatch(strategies.trusting, strategies.trusting, P,P,100,0,new Rng(1), { eco: eco(0.5) });
   assert.ok(trag.scoreA < stat.scoreA, `eco tragedy: eco ${trag.scoreA} should be < static ${stat.scoreA}`);
   assert.equal(stat.envFinal, undefined, "non-eco match must not report envFinal (bit-for-bit legacy path)");
 });
@@ -294,8 +294,8 @@ run("7.1 Game transitions (Su): cooperation holds the rich game, defection sinks
   const rich = {T:5,R:4,P:1,S:0}, poor = {T:5,R:2,P:1,S:0};
   const trans = (): TransitionState => ({ states:{rich, poor}, cur:"rich", next:{CC:"rich", CD:"poor", DD:"poor"} });
   // Cooperators stay in "rich" the whole match; defectors get dragged to "poor" after round 1.
-  const coop = playMatch(strategies.trusting, strategies.trusting, poor, poor, 100, 0, new Rng(1), 0,0,0, undefined, trans());
-  const def = playMatch(strategies.alld, strategies.alld, poor, poor, 100, 0, new Rng(1), 0,0,0, undefined, trans());
+  const coop = playMatch(strategies.trusting, strategies.trusting, poor, poor, 100, 0, new Rng(1), { transition: trans() });
+  const def = playMatch(strategies.alld, strategies.alld, poor, poor, 100, 0, new Rng(1), { transition: trans() });
   assert.ok(coop.stateOccupancy!.rich! > 0.99, `coop should hold rich, got ${coop.stateOccupancy!.rich}`);
   assert.ok(def.stateOccupancy!.poor! > 0.98, `defect should sink to poor, got ${def.stateOccupancy!.poor}`);
   // Occupancy is a distribution.
@@ -359,6 +359,113 @@ run("8.2 Loner as a scenario walk-away (BATNA) + schema guard", ()=>{
   // Schema: a loner disposition without σ is rejected.
   const noSigma:any = structuredClone(canWalk); delete noSigma.structure.sigma;
   assert.throws(()=> assertScenario(noSigma), /structure.sigma/);
+});
+
+run("9.1 Reputation (Leading Eight): indirect reciprocity punishes a serial defector", ()=>{
+  // A lone ALLD among trusting victims. Without reputation it exploits all of them and wins outright.
+  // With reputation the victims learn its bad standing (from how it treated the OTHERS) and sanction it —
+  // the indirect channel a single 2-player match cannot express.
+  const base:any = { situation:"indirect reciprocity",
+    players:[{name:"Cheat",dispositions:["alld"]},{name:"V1",dispositions:["trusting"]},{name:"V2",dispositions:["trusting"]},{name:"V3",dispositions:["trusting"]}],
+    payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.95,0.95], noise:[0,0]}};
+  const noRep = analyzeScenario(base, 150, 42);
+  const image = analyzeScenario({...base, structure:{...base.structure, reputation:{norm:"L3"}}}, 150, 42);
+  const quant = analyzeScenario({...base, structure:{...base.structure, reputation:{quantitative:true, theta:0}}}, 150, 42);
+  assert.ok(noRep.winPct.Cheat! > 99, `without reputation the cheat exploits freely: ${noRep.winPct.Cheat}`);
+  assert.ok(image.winPct.Cheat! < noRep.winPct.Cheat! - 30, `image reputation must curb the cheat: ${image.winPct.Cheat} vs ${noRep.winPct.Cheat}`);
+  assert.ok(quant.winPct.Cheat! < 1, `a public ledger with θ=0 should shut the cheat out entirely: ${quant.winPct.Cheat}`);
+  // Reputation is opt-in: a model without it is byte-for-byte the legacy path (adds no rng draws).
+  const a = analyzeScenario(base, 80, 5), b = analyzeScenario(base, 80, 5);
+  assert.deepEqual(a.winPct, b.winPct, "reputation-off path stays deterministic");
+});
+
+run("9.2 Reputation schema guards + gossip runs deterministically", ()=>{
+  const model:any = { situation:"rep", players:[{name:"A",dispositions:["provocable"]},{name:"B",dispositions:["provocable"]},{name:"C",dispositions:["provocable"]}],
+    payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0.05,0.05], reputation:{norm:"L3", gossip:[0.2,0.2]}}};
+  const r1 = analyzeScenario(model, 60, 3), r2 = analyzeScenario(model, 60, 3);
+  assert.deepEqual(r1.cooperation, r2.cooperation, "gossip path is reproducible under a fixed seed");
+  const badNorm:any = structuredClone(model); badNorm.structure.reputation.norm="L9";
+  assert.throws(()=> assertScenario(badNorm), /norm must be L1..L8/);
+  const badField:any = structuredClone(model); badField.structure.reputation.foo=1;
+  assert.throws(()=> assertScenario(badField), /Unknown reputation field/);
+  const badTheta:any = structuredClone(model); badTheta.structure.reputation.theta=99;
+  assert.throws(()=> assertScenario(badTheta), /reputation.theta/);
+  // Indirect reciprocity needs a third party — reputation on a 2-player dyad is rejected (it would
+  // silently reduce to a direct-reciprocity cooperation knob, which grim/provocable already cover).
+  const dyad:any = structuredClone(model); dyad.players = dyad.players.slice(0,2);
+  assert.throws(()=> assertScenario(dyad), /needs at least three players/);
+});
+
+run("10.1 Pool/peer punishment (Sigmund): deters defection, but plain cooperators free-ride on it", ()=>{
+  const P2={T:5,R:3,P:1,S:0};
+  const pen = (aP:boolean,bP:boolean,pool:boolean)=>({ punishment:{ beta:3, gamma:1, pool, aPunishes:aP, bPunishes:bP } });
+  // Deterrence: a defector facing a punisher is fined β each round, scoring far less than vs a plain cooperator.
+  const defVsCoop = playMatch(strategies.alld, strategies.trusting, P2,P2,20,0,new Rng(1));
+  const defVsPun  = playMatch(strategies.alld, strategies.punisher, P2,P2,20,0,new Rng(1), pen(false,true,false));
+  assert.ok(defVsPun.scoreA < defVsCoop.scoreA - 40, `punishment must bite the defector: ${defVsPun.scoreA} vs ${defVsCoop.scoreA}`);
+  // Second-order free-rider (pool): with no defectors, a plain cooperator out-earns a pool-punisher (who pays γ for nothing).
+  const coopVsCoop = playMatch(strategies.trusting, strategies.trusting, P2,P2,20,0,new Rng(1));
+  const poolPunVsCoop = playMatch(strategies.punisher, strategies.trusting, P2,P2,20,0,new Rng(1), pen(true,false,true));
+  assert.ok(poolPunVsCoop.scoreA < coopVsCoop.scoreA, `pool-punisher must under-earn a free-riding cooperator: ${poolPunVsCoop.scoreA} vs ${coopVsCoop.scoreA}`);
+  // Peer variant: a punisher pays nothing when there is no defection to fine.
+  const peerPunVsCoop = playMatch(strategies.punisher, strategies.trusting, P2,P2,20,0,new Rng(1), pen(true,false,false));
+  assert.equal(peerPunVsCoop.scoreA, coopVsCoop.scoreA, `peer-punisher pays only when it fines: ${peerPunVsCoop.scoreA} vs ${coopVsCoop.scoreA}`);
+  // β>γ makes it a net social deterrent: the fine on the defector exceeds the punisher's added cost.
+  const coopVsDef = playMatch(strategies.trusting, strategies.alld, P2,P2,20,0,new Rng(1)).scoreA; // plain coop, no punishing
+  const fine = defVsCoop.scoreA - defVsPun.scoreA;   // β·n levied on the defector
+  const cost = coopVsDef - defVsPun.scoreB;          // γ·n the punisher paid vs a non-punishing cooperator
+  assert.ok(fine > cost, `fine on defector (β·n=${fine}) must exceed punisher's cost (γ·n=${cost})`);
+});
+
+run("10.2 Punishment end-to-end + evolution guard + schema", ()=>{
+  const model:any = { situation:"sanctioned commons", players:[
+    {name:"Enforcer",dispositions:["punisher"]},{name:"Cheat",dispositions:["exploitative","alld"]}],
+    payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0], punishment:{ beta:[2,4], gamma:[0.5,1.5], pool:false }}};
+  const r=analyzeScenario(model, 40, 3);
+  assert.ok(r.sensitivity.some(s=> s.input === "punish_beta") && r.sensitivity.some(s=> s.input === "punish_gamma"), "β/γ must appear as sensitivity inputs");
+  // Evolution wires punishment through; a punisher pool without config must throw, not silently act like ALLC.
+  const evoModel:any = { situation:"evo", players:[{name:"A",dispositions:["punisher","alld"]}], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0], punishment:{beta:[3,3],gamma:[1,1],pool:false}}};
+  assert.equal(runEvolution(evoModel, 5, 1).trajectory.length, 5);
+  assert.throws(()=> tournament({game:"prisoners_dilemma",payoff:P,rounds:20,matchReps:2,noise:0,initialShares:normalizeShares({punisher:0.5,alld:0.5} as any),generations:1,rule:"replicator",populationSize:100,stepDelayMs:0} as any,0,1), /punishment is not set/);
+  // Schema: a punisher disposition without config is rejected; unknown punishment field rejected.
+  const noCfg:any = structuredClone(model); delete noCfg.structure.punishment;
+  assert.throws(()=> assertScenario(noCfg), /structure.punishment/);
+  const badField:any = structuredClone(model); badField.structure.punishment.foo=1;
+  assert.throws(()=> assertScenario(badField), /Unknown punishment field/);
+});
+
+run("11.1 Cheap talk: a mutual C-pledge builds goodwill; a committed defector can't launder itself; lies cost", ()=>{
+  const SH={T:3,R:5,P:1,S:0}, P2={T:5,R:3,P:1,S:0};
+  // Coordination: in a Stag Hunt a mutual C-pledge lets conditional cooperators lock onto the good equilibrium.
+  const shPlain = playMatch(strategies.pavlov, strategies.pavlov, SH,SH,50,0.1,new Rng(3));
+  const shTalk  = playMatch(strategies.pavlov, strategies.pavlov, SH,SH,50,0.1,new Rng(3), { cheapTalk:{credibility:0.8, lieCost:0} });
+  assert.ok(shTalk.cooperation > shPlain.cooperation + 0.05, `cheap talk must raise Stag-Hunt coordination: ${shTalk.cooperation} vs ${shPlain.cooperation}`);
+  // A committed defector opens with D, so it cannot make a C-pledge — it gets no goodwill boost and pays no lie
+  // cost. Cheap talk therefore cannot launder ALLD: identical to no talk (ALLD/ALLC are deterministic openers).
+  const alldPlain = playMatch(strategies.alld, strategies.trusting, P2,P2,30,0,new Rng(1));
+  const alldTalk  = playMatch(strategies.alld, strategies.trusting, P2,P2,30,0,new Rng(1), { cheapTalk:{credibility:0.8, lieCost:5} });
+  assert.equal(alldTalk.scoreA, alldPlain.scoreA, `cheap talk must not help a committed defector: ${alldTalk.scoreA} vs ${alldPlain.scoreA}`);
+  // A liar that pledges C then defects (detective) is doubly checked: its own goodwill lean cools its defection,
+  // and a positive lieCost fines each betrayal — so a lie costs strictly more than a free pledge.
+  const liarFree  = playMatch(strategies.detective, strategies.trusting, P2,P2,30,0,new Rng(1), { cheapTalk:{credibility:0.8, lieCost:0} });
+  const liarCost  = playMatch(strategies.detective, strategies.trusting, P2,P2,30,0,new Rng(1), { cheapTalk:{credibility:0.8, lieCost:2} });
+  assert.ok(liarCost.scoreA < liarFree.scoreA, `lieCost must bite the liar: ${liarCost.scoreA} vs ${liarFree.scoreA}`);
+  // An honest cooperator that pledges C and cooperates pays no lie cost.
+  const honest = playMatch(strategies.trusting, strategies.trusting, P2,P2,30,0,new Rng(1), { cheapTalk:{credibility:0.5, lieCost:5} });
+  const plain  = playMatch(strategies.trusting, strategies.trusting, P2,P2,30,0,new Rng(1));
+  assert.equal(honest.scoreA, plain.scoreA, `honouring a pledge is free: ${honest.scoreA} vs ${plain.scoreA}`);
+});
+
+run("11.2 Cheap talk end-to-end + schema", ()=>{
+  const model:any = { situation:"joint venture", game:"stag_hunt", players:[
+    {name:"A",dispositions:["provocable","pavlov"]},{name:"B",dispositions:["provocable","trusting"]}],
+    payoffs:{T:[3,4],R:[5,6],P:[1,2],S:[0,1]}, structure:{w:[0.9,0.9], noise:[0.05,0.05], cheapTalk:{credibility:[0.5,0.9], lieCost:[1,3]}}};
+  const r=analyzeScenario(model, 40, 3);
+  assert.ok(r.sensitivity.some(s=> s.input === "talk_credibility") && r.sensitivity.some(s=> s.input === "talk_lieCost"), "credibility/lieCost must appear as sensitivity inputs");
+  const badField:any = structuredClone(model); badField.structure.cheapTalk.foo=1;
+  assert.throws(()=> assertScenario(badField), /Unknown cheapTalk field/);
+  const badCred:any = structuredClone(model); badCred.structure.cheapTalk.credibility=[0,2];
+  assert.throws(()=> assertScenario(badCred), /cheapTalk.credibility/);
 });
 
 console.log("verify-pack OK");

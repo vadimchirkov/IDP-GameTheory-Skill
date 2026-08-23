@@ -105,6 +105,30 @@ Verification (`src/verify-pack.ts:7.1–7.2`): cooperators hold the rich state (
 
 As a **scenario** option, `loner` is a walk-away / BATNA: a side that might opt out locks in `σ` instead of risking `S`. `oneTrial` awards `σ·rounds` to both sides of any loner match; `analyzeScenario` threads `sigma` into the sensitivity inputs. Verification (`src/verify-pack.ts:8.1–8.2`): cyclic dominance; a loner is never zeroed by an exploiter; a `loner` share with no `σ` throws; both-opt-out scenarios tie; the option to walk away never lowers a side's win rate; schema rejects a loner disposition without `sigma`. Example: `example_loner.json` (a freelancer/client with an outside option — giving both a walk-away depresses realised cooperation to ~27%).
 
+### 1.8 Institutional / peer punishment (`structure.punishment` + `punisher`, Sigmund et al. 2010)
+
+The `punisher` disposition cooperates in its moves (like ALLC) but **pays to sanction** defectors: it spends `gamma` to make a defecting opponent lose `beta`. Applied at the **payoff layer** inside `playMatch` (a `MatchModifiers.punishment` field carrying the fine, cost, pool flag, and which side punishes), so it composes with every other match modifier and leaves the move logic untouched.
+
+**Distinct from reputation.** Reputation (`structure.reputation`, §above) punishes for *free* — a discriminator simply defects on a bad name. Punishment here is *costly* (`gamma > 0`), and that cost is exactly what creates the classic **second-order free-rider problem**: a plain cooperator that never pays `gamma` out-earns a punisher once the defectors are gone. The two mechanisms are independent knobs and may be combined.
+
+```
+peer (default): a punisher pays γ only on a round it actually fines a defection.
+pool:           a punisher pays γ every round into a fund, even with no defector to fine (sharper 2nd-order dilemma).
+Per round, in a pairwise match, for each punishing side: defector −= β,  punisher −= γ.
+```
+
+`PunishmentConfig = { beta: Range, gamma: Range, pool?: boolean }` (`structure.punishment`), sampled per trial; deterrence needs `beta > gamma`. A `punisher` disposition without `structure.punishment` (or a `punisher` share in evolution without `config.punishment`) is a hard error — it never silently degrades to ALLC. `analyzeScenario` threads `punish_beta`/`punish_gamma` into the sensitivities; the mechanic works in the scenario engine, `--evolve`, and the disposition ranking.
+
+**Honest scope.** The falsifiable cores are dyadic and gated directly (`verify-pack.ts:10.1–10.2`): punishment bites the defector (fined `β·n`); a net-positive social deterrent (`β·n > γ·n`); the second-order free-rider (a pool-punisher under-earns a non-paying cooperator in a defector-free pair); peer pays only when it fines. The full evolutionary *rescue* result — that voluntary participation (`loner`) or antisocial punishment stabilises punishers against second-order free-riders — is **not claimed**, for the same reason the `loner` closed cycle is not: it needs abundance-weighted replicator fitness, which `tournament` does not use. Example: `example_punishment.json` (a compliance body — the paying `Enforcer` wins 0% while the free-riding `GoodCitizen` out-earns it, exactly the second-order trap; higher `β` measurably lowers the polluter's edge).
+
+### 1.9 Pre-play cheap talk (`structure.cheapTalk`, Farrell/Aumann; Forges/Bárány/Vida)
+
+Non-binding communication *before* the repeated game — a **structure knob, not a disposition** (no new strategy). Each side sends a **pledge**: the move its disposition would open with on an empty history (`strategy([], [], rng)`). When **both pledge C**, each gains a `credibility`-sized cooperative lean (`0`–`1`) — mutual good-faith declarations building mutual goodwill. Talk is cheap, so a side that pledged C and then defects pays `lieCost` per betraying round, which is what makes the pledge worth anything.
+
+`CheapTalkConfig = { credibility: Range, lieCost: Range }` (`structure.cheapTalk`), sampled per trial and applied inside `playMatch` (`MatchModifiers.cheapTalk`, composes with every other modifier); `analyzeScenario` threads `talk_credibility`/`talk_lieCost` into the sensitivities. Off by default — no pledge is computed, so the RNG stream and legacy determinism are untouched.
+
+**Where it bites (honest scope).** Cheap talk is **decisive in coordination games**: in a Stag Hunt two conditional cooperators lock onto the payoff-dominant equilibrium (`verify-pack.ts:11.1`, coordination 0.64→0.82 under noise; `example_cheaptalk.json` lifts a joint-standard venture 0.87→0.93). A **committed defector opens with D**, so it can never make a C-pledge and gets neither goodwill nor lie cost — cheap talk cannot launder ALLD (verified identical to no talk). A **liar** that pledges C then defects is doubly checked: its own goodwill lean cools its defection *and* `lieCost` fines each betrayal. This is the **goodwill + lie-cost** model; it deliberately does **not** claim the full correlated-equilibrium result (Bárány/Forges `n≥4` CE, sunspot coordination), which needs a belief/signalling apparatus and a public correlating device the engine does not have. Gates (`verify-pack.ts:11.1–11.2`): Stag-Hunt coordination lift; ALLD unlaunderable; `lieCost` bites a liar; honouring a pledge is free; sensitivities present; schema rejects unknown fields and out-of-range `credibility`.
+
 ---
 
 ## 2. Strategies (`src/kernel.ts:88`)
@@ -141,6 +165,7 @@ Pure function of histories + RNG — deterministic given `(histories, derivedSee
 | `memory2` | `makeMemoryN(probs,2)` Hilbe table (`src/kernel.ts:68`) | Memory-2 (Hilbe 2017) | 16-entry window `CC|CC` etc. |
 | `shaper` | retaliate 0.8/0.2 + shaping `±0.3` by `coopRate>0.6` | Hand-tuned heuristic, **not** LOLA | Punishes the last D, eases off once the opponent is already cooperative |
 | `loner` | opts out → both get `σ` (`structure.sigma`); no move fn, match-level | Voluntary participation (Szabó-Hauert 2002) | Walk-away / BATNA; needs `structure.sigma`, abstention excluded from cooperation |
+| `punisher` | cooperates, then fines a defector `β` at self-cost `γ` (`structure.punishment`) | Institutional/peer punishment (Sigmund 2010) | Costly sanctioning; second-order free-rider; needs `structure.punishment` |
 
 Factory helpers (`src/kernel.ts`):
 * `makeMemoryOne(pCC,pCD,pDC,pDD)` — memory-1 cube `[0,1]^4`
@@ -380,6 +405,9 @@ Invoked via `pnpm scenario model.json 600 --build` (`src/cli.ts:8`), writes `*.r
 | `example_drift.json` | Forgiving vs prober with lean | PD + `values`/`drift` | `values[-1,1]` `drift[0..]` lean walk |
 | `example_eco.json` | Two fishing fleets, shared stock | PD + `structure.eco` | Weitz `Π(n)`, `A1` depleted, `θ/ε/n0`; stock settles depleted despite cooperation |
 | `example_transitions.json` | Fragile cartel: fat vs lean market | PD + `structure.transitions` | Su states `fat/lean`, `next` per outcome; market sits "fat" ~63% tied to cooperation |
+| `example_loner.json` | Freelancer/client with an outside option | PD + `structure.sigma` + `loner` | Szabó-Hauert opt-out `σ`; a walk-away for both depresses cooperation to ~27% |
+| `example_punishment.json` | Compliance body fining polluters | PD + `structure.punishment` + `punisher` | Sigmund β/γ pool punishment; paying enforcer wins 0%, free-rider out-earns it |
+| `example_cheaptalk.json` | Two firms pledging a joint standard | Stag Hunt + `structure.cheapTalk` | Pre-play pledges + lie cost; coordination 0.87→0.93 |
 
 All validated against `isValidPayoff(game)` (`src/domain.ts:isValidPayoff`).
 
@@ -387,9 +415,9 @@ All validated against `isValidPayoff(game)` (`src/domain.ts:isValidPayoff`).
 
 ## 12. What the Code Covers (and What It Doesn’t)
 
-**Covers:** 2–10 players round-robin; 3 distinct payoff orderings (PD / Chicken≡Snowdrift / Stag Hunt); 22 temperaments (incl. canonical ZD, memory-2, per-player memory-n tables, adaptive, Southampton collective); asymmetric payoffs with per-player score normalisation; fixed `team/colluder` with `betrayalProb`; `values∈[-1,1]`+`drift` with correct `strategy→lean→noise→drift` order and per-player `value_*` sensitivity; **eco-evolutionary feedback** (`structure.eco`, Weitz `Π(n)` with sub-stepped Euler + clamp) reporting where the shared environment settles; **game transitions** (`structure.transitions`, Su discrete states driven by round outcome) reporting per-state occupancy; deterministic `deriveSeed`; 600-world Monte Carlo → `winPct/winPctTeam/winPctPerCapita/cooperation±std/environment/stateOccupancy` + two signed sensitivity lists (cooperation and winner); `winPct≥60` robustness bar; build tips; `--visual` lattice sandbox + heatmap; evolution `replicator/Moran` and a disposition ranking, both under the model's own game; benchmark backtests.
+**Covers:** 2–10 players round-robin; 3 distinct payoff orderings (PD / Chicken≡Snowdrift / Stag Hunt); 24 dispositions (22 plain C/D incl. canonical ZD, memory-2, per-player memory-n tables, adaptive, Southampton collective + the `loner` voluntary opt-out + the `punisher` costly sanctioner); asymmetric payoffs with per-player score normalisation (also expresses Perc heterogeneous-perception multi-game — well-mixed, so no lattice amplification); fixed `team/colluder` with `betrayalProb`; `values∈[-1,1]`+`drift` with correct `strategy→lean→noise→drift` order and per-player `value_*` sensitivity; **eco-evolutionary feedback** (`structure.eco`, Weitz `Π(n)` with sub-stepped Euler + clamp) reporting where the shared environment settles; **game transitions** (`structure.transitions`, Su discrete states driven by round outcome) reporting per-state occupancy; **voluntary participation** (`structure.sigma` + `loner`, Szabó-Hauert opt-out with cyclic-dominance invasion structure); **institutional/peer punishment** (`structure.punishment` + `punisher`, Sigmund costly β/γ sanctioning with the second-order free-rider); **pre-play cheap talk** (`structure.cheapTalk`, mutual C-pledge goodwill + lie cost, decisive in coordination games); deterministic `deriveSeed`; 600-world Monte Carlo → `winPct/winPctTeam/winPctPerCapita/cooperation±std/environment/stateOccupancy` + two signed sensitivity lists (cooperation and winner); `winPct≥60` robustness bar; build tips; `--visual` lattice sandbox + heatmap; evolution `replicator/Moran` and a disposition ranking, both under the model's own game; benchmark backtests.
 
-**Does not:** N-player group games (public goods) or sequential games (trust) — the enum is symmetric-2×2 only; cheap talk / signalling; emotion beyond a single scalar lean; spatial per-player scoring (the lattice is a separate sandbox, not fed into scenario winners); memory-n>2 as named registry entries (available via per-player `memory` tables instead); Shapley/core coalition solving; LLM-driven agents. Removed rather than left as misleading stubs: `public_goods`/`trust` games, the perpetual-`1/N` fixation estimator, the `lola`/`llm_agent` "strategies", and the `handshakeSpoof`/`llmModel` schema fields.
+**Does not:** N-player group games (public goods) or sequential games (trust) — the enum is symmetric-2×2 only; cheap talk / signalling; emotion beyond a single scalar lean; spatial per-player scoring (the lattice is a separate sandbox, not fed into scenario winners); memory-n>2 as named registry entries (available via per-player `memory` tables instead); Shapley/core coalition solving; LLM-driven agents; Perc heterogeneity's lattice cooperation-boost (well-mixed cancels it — needs the topology phase); Hauert's closed-orbit C→D→L→C coexistence cycle (needs abundance-weighted replicator fitness; the engine shows only the cyclic-dominance invasion order `L>D>C>L`). Removed rather than left as misleading stubs: `public_goods`/`trust` games, the perpetual-`1/N` fixation estimator, the `lola`/`llm_agent` "strategies", and the `handshakeSpoof`/`llmModel` schema fields.
 
 ---
 

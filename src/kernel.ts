@@ -3,7 +3,6 @@ import {
   normalizeShares, score, strategyIds,
 } from "./domain.js";
 import { deriveSeed, Rng } from "./rng.js";
-import { assess, discriminatorMove, type Image, type NormId } from "./reputation.js";
 
 export type Strategy = (mine: readonly Move[], theirs: readonly Move[], rng: Rng) => Move;
 
@@ -198,6 +197,9 @@ export const strategies: Record<StrategyId, Strategy> = {
   // Voluntary opt-out (Szabó & Hauert 2002): never plays a C/D move — resolved at the match level
   // (tournament / oneTrial award σ to both sides). This stub fires only if a caller forgets to intercept.
   loner: () => { throw new Error("loner opts out of the C/D game — resolve it at the match level with σ, do not call it as a move"); },
+  // Institutional punisher (Sigmund 2010): cooperates in moves; its costly fining of defectors is
+  // applied at the payoff layer via MatchModifiers.punishment (set by the caller from strategy identity).
+  punisher: () => "C",
 };
 
 export { makeMemoryOne as memoryOne, makeMemoryN as memoryN };
@@ -206,6 +208,9 @@ export interface MatchResult {
   scoreA: number;
   scoreB: number;
   cooperation: number;
+  /** Fraction of rounds each side cooperated — used by trial-level reputation to assess standing. */
+  coopA: number;
+  coopB: number;
   /** Final environment state `n` when eco feedback is active; undefined otherwise. */
   envFinal?: number;
   /** Fraction of rounds spent in each game state when transitions are active; undefined otherwise. */
@@ -237,6 +242,27 @@ function ecoStep(n: number, epsilon: number, theta: number, coop: number): numbe
   return next;
 }
 
+/**
+ * Per-match model knobs. Everything past the core `(a,b,payoffs,rounds,noise,rng)` lives here so
+ * adding a dynamic model is a new optional field, not another positional argument. A bare
+ * `playMatch(...,rng)` call plays the plain iterated game (every field defaults off).
+ */
+export interface MatchModifiers {
+  /** Initial lean of each side (`values`), −1 flips C→D w.p.1, +1 flips D→C. */
+  leanA?: number;
+  leanB?: number;
+  /** Lean shift per observed move (after D `−=drift`, after C `+=drift`). */
+  drift?: number;
+  /** Weitz eco feedback: the shared matrix drifts between A0 and A1 with the environment. */
+  eco?: EcoState | undefined;
+  /** Su game transitions: the shared matrix jumps between named states by round outcome. */
+  transition?: TransitionState | undefined;
+  /** Sigmund pool/peer punishment: a punishing side fines a defecting opponent `beta` at self-cost `gamma`. */
+  punishment?: { beta: number; gamma: number; pool: boolean; aPunishes: boolean; bPunishes: boolean } | undefined;
+  /** Pre-play cheap talk: a mutual C-pledge grants `credibility` cooperative lean; a broken C-pledge costs `lieCost`/defection. */
+  cheapTalk?: { credibility: number; lieCost: number } | undefined;
+}
+
 export function playMatch(
   a: Strategy,
   b: Strategy,
@@ -245,38 +271,40 @@ export function playMatch(
   rounds: number,
   noise: number,
   rng: Rng,
-  leanA = 0,
-  leanB = 0,
-  drift = 0,
-  eco?: EcoState,
-  transition?: TransitionState,
-  norm?: NormId,
-  gossipProb = 0,
-  quantitative = false,
-  theta = 0,
+  mods: MatchModifiers = {},
 ): MatchResult {
+  const leanA = mods.leanA ?? 0;
+  const leanB = mods.leanB ?? 0;
+  const drift = mods.drift ?? 0;
+  const eco = mods.eco;
+  const transition = mods.transition;
+  const punishment = mods.punishment;
+  const cheapTalk = mods.cheapTalk;
   const historyA: Move[] = [];
   const historyB: Move[] = [];
   let scoreA = 0;
   let scoreB = 0;
   let cooperations = 0;
+  let coopA = 0;
+  let coopB = 0;
   let curLeanA = leanA;
   let curLeanB = leanB;
+  // Cheap talk: each side pledges its opening move; a mutual C-pledge grants a cooperative lean.
+  let pledgeA: Move = "C", pledgeB: Move = "C";
+  if (cheapTalk) {
+    pledgeA = a(historyA, historyB, rng);
+    pledgeB = b(historyB, historyA, rng);
+    if (pledgeA === "C" && pledgeB === "C") {
+      curLeanA = Math.min(1, curLeanA + cheapTalk.credibility);
+      curLeanB = Math.min(1, curLeanB + cheapTalk.credibility);
+    }
+  }
   let ecoN = eco?.n ?? 0;
   let tState = transition?.cur ?? "";
   const occupancy: Record<string, number> = transition ? Object.fromEntries(Object.keys(transition.states).map((s) => [s, 0])) : {};
-  let imageA: Image = "G", imageB: Image = "G";
-  let repScoreA = 0, repScoreB = 0;
   for (let round = 0; round < rounds; round += 1) {
     let moveA = a(historyA, historyB, rng);
     let moveB = b(historyB, historyA, rng);
-    if (quantitative) {
-      moveA = repScoreA >= theta ? "C" : "D";
-      moveB = repScoreB >= theta ? "C" : "D";
-    } else if (norm) {
-      if (imageA === "B") moveA = "D";
-      if (imageB === "B") moveB = "D";
-    }
     if (curLeanA !== 0) {
       if (moveA === "C" && curLeanA < 0 && rng.unit() < -curLeanA) moveA = "D";
       else if (moveA === "D" && curLeanA > 0 && rng.unit() < curLeanA) moveA = "C";
@@ -295,28 +323,26 @@ export function playMatch(
     else if (transition) { const m = transition.states[tState]!; pA = m; pB = m; occupancy[tState]! += 1; }
     scoreA += score(pA, moveA, moveB);
     scoreB += score(pB, moveB, moveA);
+    // Sigmund punishment: a punisher pays γ (peer: only when it fines a defection; pool: every round)
+    // and each defector loses β to every punishing opponent.
+    if (punishment) {
+      const { beta, gamma, pool, aPunishes, bPunishes } = punishment;
+      if (aPunishes) { if (pool) { scoreA -= gamma; if (moveB === "D") scoreB -= beta; } else if (moveB === "D") { scoreA -= gamma; scoreB -= beta; } }
+      if (bPunishes) { if (pool) { scoreB -= gamma; if (moveA === "D") scoreA -= beta; } else if (moveA === "D") { scoreB -= gamma; scoreA -= beta; } }
+    }
+    // Cheap-talk lie cost: a side that pledged C pays for each round it defects (makes the pledge credible).
+    if (cheapTalk && cheapTalk.lieCost !== 0) {
+      if (pledgeA === "C" && moveA === "D") scoreA -= cheapTalk.lieCost;
+      if (pledgeB === "C" && moveB === "D") scoreB -= cheapTalk.lieCost;
+    }
+    coopA += Number(moveA === "C");
+    coopB += Number(moveB === "C");
     const roundCoop = (Number(moveA === "C") + Number(moveB === "C")) / 2;
     cooperations += roundCoop * 2;
     if (eco) ecoN = ecoStep(ecoN, eco.epsilon, eco.theta, roundCoop);
     if (transition) tState = transition.next[outcomeOf(moveA, moveB)];
     historyA.push(moveA);
     historyB.push(moveB);
-    if (norm || quantitative) {
-      if (norm) {
-        imageA = assess(norm, imageA, "G", moveB);
-        imageB = assess(norm, imageB, "G", moveA);
-        if (gossipProb > 0 && rng.unit() < gossipProb) {
-          const tmp = imageA;
-          imageA = imageB;
-          imageB = tmp;
-          if (rng.unit() < 0.5) { imageA = "G"; imageB = "G"; }
-        }
-      }
-      if (quantitative) {
-        repScoreA += moveB === "C" ? 1 : -1;
-        repScoreB += moveA === "C" ? 1 : -1;
-      }
-    }
     if (drift !== 0) {
       curLeanA = Math.max(-1, Math.min(1, curLeanA + (moveB === "D" ? -drift : drift)));
       curLeanB = Math.max(-1, Math.min(1, curLeanB + (moveA === "D" ? -drift : drift)));
@@ -324,6 +350,7 @@ export function playMatch(
   }
   return {
     scoreA, scoreB, cooperation: cooperations / (2 * rounds),
+    coopA: coopA / rounds, coopB: coopB / rounds,
     ...(eco ? { envFinal: ecoN } : {}),
     ...(transition ? { stateOccupancy: Object.fromEntries(Object.entries(occupancy).map(([s, n]) => [s, n / rounds])) } : {}),
   };
@@ -338,6 +365,7 @@ export interface TournamentResult {
 export function tournament(config: RunConfig, generation: number, rootSeed: number): TournamentResult {
   const active = strategyIds.filter((id) => (config.initialShares[id] ?? 0) > 0);
   if (active.includes("loner") && config.sigma === undefined) throw new Error("loner has a share but config.sigma is not set");
+  if (active.includes("punisher") && config.punishment === undefined) throw new Error("punisher has a share but config.punishment is not set");
   const scores = Object.fromEntries(strategyIds.map((id) => [id, 0])) as Shares;
   let cooperation = 0;
   let matches = 0;
@@ -356,9 +384,13 @@ export function tournament(config: RunConfig, generation: number, rootSeed: numb
           matches += 1;
           continue;
         }
+        const punishment = config.punishment && (left === "punisher" || right === "punisher")
+          ? { beta: config.punishment.beta, gamma: config.punishment.gamma, pool: config.punishment.pool, aPunishes: left === "punisher", bPunishes: right === "punisher" }
+          : undefined;
         const result = playMatch(
           strategies[left], strategies[right], config.payoff, config.payoff,
           config.rounds, config.noise, new Rng(deriveSeed(rootSeed, generation, i, j, rep)),
+          { punishment },
         );
         if (left === right) {
           scores[left] += (result.scoreA + result.scoreB) / 2;

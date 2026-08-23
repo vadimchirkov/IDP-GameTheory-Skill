@@ -9,6 +9,7 @@ import { playMatch, stepGeneration, strategies } from "./kernel.js";
 import { Rng } from "./rng.js";
 import { runAggregate, runCategory, runEventCodec, type RunCommand, type RunReply, type RunState } from "./run.js";
 import { runSummaryProjection, type RunSummaryView } from "./projections.js";
+import { participantAggregate, participantCategory, participantEventCodec, participantStateCodec } from "./participant.js";
 
 const payoff = { T: 5, R: 3, P: 1, S: 0 };
 const config: RunConfig = {
@@ -67,5 +68,21 @@ const projectionStore = createInMemoryProjectionStore();
 runProjection(runSummaryProjection, journal, projectionStore, { eventCodec: runEventCodec });
 assert.equal(projectionStore.get<RunSummaryView>("run-summary", "runtime-check")?.view.status, "finished");
 await runtime.shutdown();
+
+// Participant aggregate — event-sourced per-player worldview (Initialize → RequestMove → ReceiveOutcome → GetState).
+const participant = createSingleRuntime(participantAggregate, participantEventCodec, participantStateCodec);
+const pid = EntityId("A");
+await participant.runtime.ask(pid, { tag: "Initialize", playerName: "A", dispositions: ["provocable"], lean: 0, drift: 0, seed: 7 }, participantCategory);
+const moveReply = await participant.runtime.ask(pid, { tag: "RequestMove", round: 0, opponentId: "B" }, participantCategory);
+assert.ok(moveReply.ok && moveReply.value.reply?.tag === "Move" && moveReply.value.reply.move === "C", "provocable opens with C");
+await participant.runtime.ask(pid, { tag: "ReceiveOutcome", round: 0, opponentId: "B", myMove: "C", oppMove: "D", payoff: 0, w: 0.9 }, participantCategory);
+const pState = await participant.runtime.ask(pid, { tag: "GetState" }, participantCategory);
+assert.ok(pState.ok && pState.value.reply?.tag === "State", "participant returns its state");
+if (pState.ok && pState.value.reply?.tag === "State") {
+  const s = pState.value.reply.state;
+  assert.deepEqual(s.historyOpp.B, ["D"], "opponent's defection is recorded in the journal");
+  assert.equal(s.reputation.image.B, "B", "stern-judging marks a defector Bad");
+}
+await participant.runtime.shutdown();
 
 console.log("self-check OK");

@@ -97,8 +97,3 @@ export function gossipBlend(
 export function discriminatorMove(opponentImage: Image): "C"|"D" {
   return opponentImage === "G" ? "C" : "D";
 }
-
-// Private assessment size check: N≤10 → Uint8Array N² ~0.1KB, else fallback to public central image
-export function shouldUsePrivateAssessment(N: number): boolean {
-  return N <= 10;
-}

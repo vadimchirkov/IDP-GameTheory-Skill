@@ -20,10 +20,14 @@ export function runTournament(model: ScenarioModel, rounds = 200, seed = 42) {
   const payoff = samplePayoff(ranges, model.game ?? "prisoners_dilemma", rng);
   const noise = rng.between(model.structure.noise);
   const sigma = model.structure.sigma ? rng.between(model.structure.sigma) : undefined;
+  const punish = model.structure.punishment
+    ? { beta: rng.between(model.structure.punishment.beta), gamma: rng.between(model.structure.punishment.gamma), pool: !!model.structure.punishment.pool }
+    : undefined;
 
   const named = [...new Set(model.players.flatMap((p) => p.dispositions))] as StrategyId[];
   const pool = named.length ? named : [...strategyIds];
   if (pool.includes("loner") && sigma === undefined) throw new Error("loner is in the pool but structure.sigma is not set");
+  if (pool.includes("punisher") && punish === undefined) throw new Error("punisher is in the pool but structure.punishment is not set");
   const scores: Record<string, number> = Object.fromEntries(pool.map((id) => [id, 0]));
   const coop: Record<string, number> = Object.fromEntries(pool.map((id) => [id, 0]));
   for (let i = 0; i < pool.length; i += 1) {
@@ -35,9 +39,12 @@ export function runTournament(model: ScenarioModel, rounds = 200, seed = 42) {
         else { scores[a]! += optOut; scores[b]! += optOut; }
         continue;
       }
+      const punishment = punish && (a === "punisher" || b === "punisher")
+        ? { beta: punish.beta, gamma: punish.gamma, pool: punish.pool, aPunishes: a === "punisher", bPunishes: b === "punisher" }
+        : undefined;
       let sumA = 0; let sumB = 0; let sumC = 0;
       for (let rep = 0; rep < REPS; rep += 1) {
-        const r = playMatch(strategies[a], strategies[b], payoff, payoff, rounds, noise, new Rng(rep * 100 + i * 10 + j));
+        const r = playMatch(strategies[a], strategies[b], payoff, payoff, rounds, noise, new Rng(rep * 100 + i * 10 + j), { punishment });
         sumA += r.scoreA; sumB += r.scoreB; sumC += r.cooperation;
       }
       if (a === b) { scores[a]! += (sumA + sumB) / 2 / REPS; coop[a]! += sumC / REPS; }
