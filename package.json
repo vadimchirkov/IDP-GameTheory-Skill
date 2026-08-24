@@ -1,5 +1,6 @@
 {
   "name": "game-theory-teob",
+  "description": "Map possible futures and choose robust strategies with game theory, event sourcing, and AI.",
   "private": true,
   "type": "module",
   "scripts": {
