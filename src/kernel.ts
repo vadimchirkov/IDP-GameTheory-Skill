@@ -6,6 +6,15 @@ import { deriveSeed, Rng } from "./rng.js";
 
 export type Strategy = (mine: readonly Move[], theirs: readonly Move[], rng: Rng) => Move;
 
+/**
+ * Single source of truth for the simulation engine version. Stamped onto every `RunStarted`
+ * event and every analysis/artifact so a stored result carries the engine that produced it —
+ * `replayScenarioWorld` recomputes worlds from `model + seed`, so a result is only reproducible
+ * by the same engine. Bump this string whenever a kernel change alters outputs for a fixed seed
+ * (an output-preserving refactor keeps it).
+ */
+export const KERNEL_VERSION = "1";
+
 const flip = (move: Move): Move => (move === "C" ? "D" : "C");
 
 function clamp(v: number): number { return Math.max(0, Math.min(1, v)); }
