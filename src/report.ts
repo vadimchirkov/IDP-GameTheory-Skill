@@ -63,7 +63,7 @@ export function generateVisual(model: ScenarioModel, seed=42): string {
   const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Что будет с договорённостями — визуальный разбор</title>
+<title>What happens to cooperation — visual analysis</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -111,31 +111,31 @@ summary::-webkit-details-marker{display:none}
 <div class="wrap">
   <div class="hero">
     <div>
-      <div class="kicker">Визуальный разбор · игра повторяется</div>
-      <h1 class="serif">Что будет с <i>договорённостями,</i><br>когда все снова встретятся?</h1>
+      <div class="kicker">Visual analysis · repeated interaction</div>
+      <h1 class="serif">What happens to <i>cooperation</i><br>when everyone meets again?</h1>
       <p class="lead" id="lead"></p>
       <div class="verdict" id="verdict">
         <b id="vTitle">—</b>
         <span id="vText">—</span>
       </div>
       <div class="miniMeta" id="meta"></div>
-      <div class="hint" id="actionHint" style="margin-top:10px">Подсказка появится по ходу игры →</div>
+      <div class="hint" id="actionHint" style="margin-top:10px">A suggestion will appear as the game unfolds →</div>
     </div>
     <div class="card boardWrap">
       <div style="position:relative">
         <canvas id="board" width="640" height="640"></canvas>
         <div class="overlay">
-          <span class="chip"><span style="width:8px;height:8px;border-radius:50%;background:#0ea5e9;display:inline-block"></span><strong id="oCoop">—</strong> доверие</span>
-          <span class="chip"><strong id="oGen">0</strong> ход</span>
+          <span class="chip"><span style="width:8px;height:8px;border-radius:50%;background:#0ea5e9;display:inline-block"></span><strong id="oCoop">—</strong> trust</span>
+          <span class="chip"><strong id="oGen">0</strong> move</span>
           <span class="chip" id="oExtra">—</span>
         </div>
       </div>
       <div class="controls">
-        <button class="btn pri" id="play">▶ Играть</button>
-        <button class="btn" id="step">Шаг</button>
+        <button class="btn pri" id="play">▶ Play</button>
+        <button class="btn" id="step">Step</button>
         <input id="scrub" type="range" min="0" max="119" value="0" style="flex:1;min-width:90px">
         <span class="small"><span id="cur">0</span>/<span id="max">119</span></span>
-        <label class="small" style="display:flex;align-items:center;gap:6px">темп <input id="speed" type="range" min="40" max="320" value="120" style="width:70px"></label>
+        <label class="small" style="display:flex;align-items:center;gap:6px">speed <input id="speed" type="range" min="40" max="320" value="120" style="width:70px"></label>
         <button class="btn" id="reset">↻</button>
       </div>
       <div class="legend" id="legend"></div>
@@ -144,82 +144,82 @@ summary::-webkit-details-marker{display:none}
 
   <div class="section grid2">
     <div class="card pad">
-      <div class="h2">Как меняется доверие — потяни время</div>
+      <div class="h2">How trust changes over time</div>
       <div id="mainPlot" class="plot"></div>
-      <div class="small" id="plotCap" style="margin-top:6px">Синяя линия — доля тех, кто держит слово. Точка — где ты сейчас на доске.</div>
+      <div class="small" id="plotCap" style="margin-top:6px">The blue line shows the share keeping their word. The marker shows the current board state.</div>
     </div>
     <div class="card pad">
-      <div class="h2">Кто сейчас задаёт тон — кликни на цвет</div>
+      <div class="h2">Who sets the tone now — select a color</div>
       <div id="shareBar" style="height:14px;border-radius:999px;overflow:hidden;display:flex;border:1px solid #e7e0d6"></div>
       <div id="shareLabels" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
-      <div class="small" id="shareNote" style="margin-top:8px">Наведи на сегмент — подсветятся клетки на поле.</div>
+      <div class="small" id="shareNote" style="margin-top:8px">Hover over a segment to highlight its cells on the board.</div>
       <div id="subPlot" class="plot" style="height:110px;margin-top:10px;border-top:1px solid #f0e9de;padding-top:8px"></div>
     </div>
   </div>
 
   <details class="section" id="deep">
-    <summary><span><b>Погрузиться глубже</b> <span class="small">— ставки, характеры, память, ошибки</span></span><span class="small">раскрыть →</span></summary>
+    <summary><span><b>Explore deeper</b> <span class="small">— stakes, behaviors, memory, errors</span></span><span class="small">expand →</span></summary>
     <div style="padding:12px 14px;display:grid;gap:14px">
       <div style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:14px">
         <div>
-          <div class="h2">Ставки — что на кону</div>
+          <div class="h2">Stakes — what is at risk</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <label class="small" style="display:flex;flex-direction:column;gap:4px">Оба держат (R) <input id="inCC" type="number" step="0.5" value="3" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
-            <label class="small" style="display:flex;flex-direction:column;gap:4px">Ты держишь, тебя кинули (S) <input id="inCD" type="number" step="0.5" value="0" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
-            <label class="small" style="display:flex;flex-direction:column;gap:4px">Ты кинул, они держат (T) <input id="inDC" type="number" step="0.5" value="5" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
-            <label class="small" style="display:flex;flex-direction:column;gap:4px">Оба кинули (P) <input id="inDD" type="number" step="0.5" value="1" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
+            <label class="small" style="display:flex;flex-direction:column;gap:4px">Both cooperate (R) <input id="inCC" type="number" step="0.5" value="3" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
+            <label class="small" style="display:flex;flex-direction:column;gap:4px">You cooperate, they defect (S) <input id="inCD" type="number" step="0.5" value="0" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
+            <label class="small" style="display:flex;flex-direction:column;gap:4px">You defect, they cooperate (T) <input id="inDC" type="number" step="0.5" value="5" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
+            <label class="small" style="display:flex;flex-direction:column;gap:4px">Both defect (P) <input id="inDD" type="number" step="0.5" value="1" style="padding:8px;border:1px solid #e7e0d6;border-radius:10px"></label>
           </div>
           <div style="display:flex;gap:6px;margin-top:8px">
-            <button class="btn" id="btnPD" style="font-size:11px">Картель (PD)</button>
-            <button class="btn" id="btnChicken" style="font-size:11px">Блеф (Chicken)</button>
-            <button class="btn" id="btnStag" style="font-size:11px">Команда (Stag)</button>
+            <button class="btn" id="btnPD" style="font-size:11px">Cartel (PD)</button>
+            <button class="btn" id="btnChicken" style="font-size:11px">Bluff (Chicken)</button>
+            <button class="btn" id="btnStag" style="font-size:11px">Team (Stag)</button>
             <span id="gameLbl" style="font-size:11px;background:#fef3c7;padding:6px 8px;border-radius:999px">PD</span>
           </div>
-          <div class="small" style="margin-top:6px">Для не-технарей: это просто «насколько сладко кинуть» (T), «как больно быть кинутым» (S) и «что если все кидают» (P). Пресеты задают классические сюжеты.</div>
+          <div class="small" style="margin-top:6px">In plain terms: how tempting it is to defect (T), how painful it is to be exploited (S), and what happens when everyone defects (P). Presets provide classic scenarios.</div>
         </div>
         <div>
-          <div class="h2">Характеры — кто в поле</div>
+          <div class="h2">Behaviors — who is on the field</div>
           <div id="stratGrid" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-          <div class="small" style="margin-top:6px">5 архетипов для старта (человечно), 16 — если включишь. Клик — вкл/выкл. Мутация идёт только на 1-бит соседей.</div>
+          <div class="small" style="margin-top:6px">Start with 5 familiar archetypes, or enable all 16. Click to toggle. Mutation only reaches one-bit neighbors.</div>
           <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <label class="small" style="background:#fcfbf8;border:1px solid #f0e9de;border-radius:10px;padding:8px">Память обид <b id="payMemV">1</b><input id="payMem" type="range" min="1" max="8" value="1" style="width:100%"></label>
-            <label class="small" style="background:#fcfbf8;border:1px solid #f0e9de;border-radius:10px;padding:8px">Ошибки/шум <b id="pMutV">0.001</b><input id="pMut" type="range" min="0" max="0.05" step="0.001" value="0.001" style="width:100%"></label>
+            <label class="small" style="background:#fcfbf8;border:1px solid #f0e9de;border-radius:10px;padding:8px">Grievance memory <b id="payMemV">1</b><input id="payMem" type="range" min="1" max="8" value="1" style="width:100%"></label>
+            <label class="small" style="background:#fcfbf8;border:1px solid #f0e9de;border-radius:10px;padding:8px">Errors/noise <b id="pMutV">0.001</b><input id="pMut" type="range" min="0" max="0.05" step="0.001" value="0.001" style="width:100%"></label>
           </div>
           <div class="row" style="margin-top:8px;display:flex;gap:6px;align-items:center">
-            <span class="small">Поле</span><select id="sizeSel" style="padding:6px;border:1px solid #e7e0d6;border-radius:8px"><option value="32">32</option><option value="64" selected>64</option><option value="80">80</option></select>
-            <span class="small">Правило</span><select id="rule" style="padding:6px;border:1px solid #e7e0d6;border-radius:8px"><option value="imitate">подражание лучшим (N5)</option><option value="fermi">мягкое (fermi)</option></select>
+            <span class="small">Field</span><select id="sizeSel" style="padding:6px;border:1px solid #e7e0d6;border-radius:8px"><option value="32">32</option><option value="64" selected>64</option><option value="80">80</option></select>
+            <span class="small">Rule</span><select id="rule" style="padding:6px;border:1px solid #e7e0d6;border-radius:8px"><option value="imitate">imitate the best (N5)</option><option value="fermi">soft selection (Fermi)</option></select>
           </div>
         </div>
       </div>
       <div class="divider"></div>
       <div id="heat" style="height:220px"></div>
-      <div class="small">Heatmap — чувствительность к тени будущего (w) и шуму. Смотри только если хочешь понять, что ломает доверие.</div>
+      <div class="small">Heatmap — sensitivity to the shadow of the future (w) and noise. Use it to understand what breaks trust.</div>
     </div>
   </details>
 
-  <div class="small" style="text-align:center;margin-top:14px;color:#8a7f6e">Поле — метафора сети договорённостей. Синее = держат слово, розовое = срывают. Кластеры — кварталы доверия. Нажми «Играть» и тяни время.<br><b>Это песочница, а не результат разбора:</b> она играет 16 простых стратегий «по последнему ходу» на решётке соседей, тогда как вывод сверху считается по вашим игрокам в round-robin. Совпадение направления — хороший знак, точных чисел от неё ждать не нужно.</div>
+  <div class="small" style="text-align:center;margin-top:14px;color:#8a7f6e">The field is a metaphor for a network of agreements. Blue keeps its word; pink breaks it. Clusters are neighborhoods of trust. Press Play and move through time.<br><b>This is a sandbox, not the analysis result:</b> it runs 16 simple last-move strategies on a neighbor grid, while the conclusion above uses your participants in a round robin. Matching direction is a useful signal; do not expect identical numbers.</div>
 </div>
 <script>
 const DATA=${JSON.stringify(payload)};
-const HUMAN={0:{n:"Доверчивый",d:"всегда держит"}, 1:{n:"Наивный+",d:"почти всегда"}, 5:{n:"Ответный",d:"как ты — так и я (TFT)"}, 6:{n:"Гибкий",d:"учюсь на ошибках (WSLS)"}, 7:{n:"Злопамятный",d:"долго помнит срыв"}, 10:{n:"Хитрец",d:"давит слабых"}, 15:{n:"Циник",d:"всегда рвёт"}};
+const HUMAN={0:{n:"Trusting",d:"always cooperates"}, 1:{n:"Naive+",d:"almost always cooperates"}, 5:{n:"Reciprocal",d:"mirrors your move (TFT)"}, 6:{n:"Adaptive",d:"learns from mistakes (WSLS)"}, 7:{n:"Grudger",d:"remembers breaches"}, 10:{n:"Exploiter",d:"pressures the weak"}, 15:{n:"Cynic",d:"always defects"}};
 const PALETTE=["#e11d48","#2563eb","#16a34a","#9333ea","#ea580c","#eab308","#0e7490","#f43f5e","#6b7280","#14b8a6","#f97316","#6366f1","#ec4899","#84cc16","#f59e0b","#78716c"];
 const ARCHETYPES=[0,5,6,7,15]; // старт — 5 человечных
 function stratChoices(n){ const c=[]; for(let i=3;i>=0;i--) c.push((n>>i)&1); return c; }
 function bitsDiff(a,b){ let d=0; for(let i=0;i<4;i++) if(a[i]!==b[i]) d++; return d; }
-function gameLabel(){ const r=+inCC.value, s=+inCD.value, t=+inDC.value, p=+inDD.value; if(t>r && r>p && p>s && 2*r>t+s) return "Картель PD"; if(r>t) return "Команда Stag"; if(t>r && r>s && s>p) return "Блеф Chicken"; return "Своя игра"; }
+function gameLabel(){ const r=+inCC.value, s=+inCD.value, t=+inDC.value, p=+inDD.value; if(t>r && r>p && p>s && 2*r>t+s) return "Cartel PD"; if(r>t) return "Team Stag"; if(t>r && r>s && s>p) return "Bluff Chicken"; return "Custom game"; }
 const canvas=document.getElementById('board'), ctx=canvas.getContext('2d');
 const scrub=document.getElementById('scrub'), speedEl=document.getElementById('speed'), playBtn=document.getElementById('play'), stepBtn=document.getElementById('step'), resetBtn=document.getElementById('reset');
 const ruleSel=document.getElementById('rule'), sizeSel=document.getElementById('sizeSel');
 const inCC=document.getElementById('inCC'), inCD=document.getElementById('inCD'), inDC=document.getElementById('inDC'), inDD=document.getElementById('inDD');
-document.getElementById('lead').textContent = DATA.situation + " — смотрим, удержит ли доверие, когда встреча повторяется снова и снова.";
+document.getElementById('lead').textContent = DATA.situation + " — testing whether trust survives repeated interaction.";
 function getIncluded(){ return [...document.querySelectorAll('.s.on')].map(e=> +e.dataset.i).sort((a,b)=>a-b); }
 function humanVerdict(coop, clusters, distinct){
-  if(coop>0.72 && distinct<=4) return {t:"Доверие держится — кварталы крупные", d:"Большинство держит слово. Срывы гасятся соседями. Риск — только если шум (искажения сигналов) вырастет."};
-  if(coop>0.55) return {t:"Хрупкий баланс — доверие есть, но трещины растут", d:"Синее и розовое перемешаны. Один неверно прочитанный сигнал может запустить волну срывов. Проверь, как часто вас понимают неправильно."};
-  if(coop>0.32) return {t:"Доверие сыпется — циники захватывают", d:"Розовые кварталы растут. Ответные стратегии не успевают наказать срыв. Нужно снижать соблазн кинуть (T) или удлинять тень будущего."};
-  return {t:"Доверие рухнуло", d:"Почти все рвут. Держать слово невыгодно — система скатилась в P (оба кинули). Меняй ставки или правила."};
+  if(coop>0.72 && distinct<=4) return {t:"Trust holds — large stable clusters", d:"Most participants keep their word. Neighbors absorb isolated breaches. The main risk is rising noise or distorted signals."};
+  if(coop>0.55) return {t:"Fragile balance — trust remains, but cracks grow", d:"Blue and pink are mixed. One misread signal can trigger a wave of breaches. Check how often signals are misunderstood."};
+  if(coop>0.32) return {t:"Trust is eroding — cynics are spreading", d:"Pink clusters are growing. Reciprocal strategies cannot punish breaches quickly enough. Reduce the temptation to defect (T) or lengthen the shadow of the future."};
+  return {t:"Trust has collapsed", d:"Almost everyone defects. Keeping one's word no longer pays, and the system has fallen into P (mutual defection). Change the stakes or rules."};
 }
-function actionFor(coop, game){ if(game.includes("PD") && coop<0.6) return "Что проверить первым: как часто сигнал искажается и насколько сладок срыв (T)."; if(game.includes("Stag") && coop<0.6) return "Что проверить: видят ли все выгоду от общего дела (R) — без неё команда не соберётся."; if(game.includes("Chicken") ) return "Что проверить: кто первым моргнёт — блеф опасен, ищите способ показать сигнал без краха."; return "Что проверить: тень будущего (w) — чем дольше играете, тем крепче доверие."; }
+function actionFor(coop, game){ if(game.includes("PD") && coop<0.6) return "Check first: how often signals are distorted and how tempting defection is (T)."; if(game.includes("Stag") && coop<0.6) return "Check whether everyone sees the benefit of the shared effort (R); without it, the team will not form."; if(game.includes("Chicken") ) return "Check who blinks first. Bluffing is dangerous, so find a way to signal without causing collapse."; return "Check the shadow of the future (w): longer relationships usually support stronger trust."; }
 // strat UI — 5 архетипов по умолчанию, кнопка раскрыть все 16
 const stratGrid=document.getElementById('stratGrid');
 function renderStrats(expanded=false){
@@ -232,7 +232,7 @@ function renderStrats(expanded=false){
     el.onclick=()=>{ el.classList.toggle('on'); syncLegend(); if(mode==='pop') resetPop(); };
     stratGrid.appendChild(el);
   }
-  const more=document.createElement('button'); more.className='s'; more.textContent= expanded? "скрыть 11 →" : "показать все 16 →"; more.onclick=()=> renderStrats(!expanded); stratGrid.appendChild(more);
+  const more=document.createElement('button'); more.className='s'; more.textContent= expanded? "hide 11 →" : "show all 16 →"; more.onclick=()=> renderStrats(!expanded); stratGrid.appendChild(more);
 }
 renderStrats(false);
 document.getElementById('gameLbl').textContent=gameLabel();
@@ -267,7 +267,7 @@ function syncLegend(){
     el.innerHTML='<i style="width:9px;height:9px;border-radius:50%;background:'+PALETTE[i]+';display:inline-block"></i>'+h.n;
     leg.appendChild(el);
   });
-  if(!inc.length) leg.textContent="включи характеры";
+  if(!inc.length) leg.textContent="enable behaviors";
 }
 function draw(){
   ensurePop(); const snap=popHistory[idx]||popHistory[popHistory.length-1], grid=snap.grid, n=grid.length, cell=canvas.width/n;
@@ -279,7 +279,7 @@ function draw(){
   }
   document.getElementById('oGen').textContent= snap.gen;
   document.getElementById('oCoop').textContent= (snap.coop*100).toFixed(0)+"%";
-  const distinct=snap.shares.filter(v=>v>0).length; document.getElementById('oExtra').textContent= distinct+" типажей";
+  const distinct=snap.shares.filter(v=>v>0).length; document.getElementById('oExtra').textContent= distinct+" types";
   document.getElementById('cur').textContent=idx; document.getElementById('max').textContent=popHistory.length-1;
   scrub.value=String(idx);
   // verdict human
@@ -299,7 +299,7 @@ function updateShareBar(snap){
   for(const o of sorted.slice(0,6)){
     const h=HUMAN[o.i]||{n:"s"+o.i}; const el=document.createElement('span'); el.style.fontSize="11px"; el.style.display="inline-flex"; el.style.alignItems="center"; el.style.gap="4px"; el.innerHTML='<i style="width:8px;height:8px;border-radius:50%;background:'+PALETTE[o.i]+';display:inline-block"></i>'+h.n+' '+(o.v*100).toFixed(0)+'%'; el.onmouseenter=()=> highlightStrat(o.i); el.onmouseleave=()=> draw(); labels.appendChild(el);
   }
-  if(sorted.length===0) labels.textContent="пока нет доминирующих";
+  if(sorted.length===0) labels.textContent="no dominant types yet";
 }
 function highlightStrat(sIdx){
   const grid=popHistory[idx].grid, n=grid.length, cell=canvas.width/n;
@@ -319,8 +319,8 @@ function renderPlots(){
   const x=popHistory.map(h=>h.gen);
   const yCoop=popHistory.map(h=>h.coop);
   // subPlot — доверие (верхний маленький)
-  Plotly.react('subPlot', [{x, y:yCoop, type:'scatter', mode:'lines', line:{color:'#0ea5e9', width:2.2, shape:'spline', smoothing:0.6}, fill:'tozeroy', fillcolor:'rgba(14,165,233,0.10)', hovertemplate:'доверие %{y:.0%}<extra></extra>', name:'доверие'}],
-    {...mkLayout('доверие',''), xaxis:{...mkLayout('','').xaxis, showticklabels:false}, shapes:[{type:'line', x0:idx, x1:idx, y0:0, y1:1, yref:'paper', line:{color:'#1a1a1a', width:1, dash:'dot'}}], margin:{l:38,r:10,t:6,b:6}},
+  Plotly.react('subPlot', [{x, y:yCoop, type:'scatter', mode:'lines', line:{color:'#0ea5e9', width:2.2, shape:'spline', smoothing:0.6}, fill:'tozeroy', fillcolor:'rgba(14,165,233,0.10)', hovertemplate:'trust %{y:.0%}<extra></extra>', name:'trust'}],
+    {...mkLayout('trust',''), xaxis:{...mkLayout('','').xaxis, showticklabels:false}, shapes:[{type:'line', x0:idx, x1:idx, y0:0, y1:1, yref:'paper', line:{color:'#1a1a1a', width:1, dash:'dot'}}], margin:{l:38,r:10,t:6,b:6}},
     {displayModeBar:false, responsive:true});
   // mainPlot — stacked shares (16 → 5 видимых, но рисуем все для суммы=1)
   const traces=Array.from({length:16},(_,i)=>{
@@ -333,15 +333,15 @@ function renderPlots(){
     };
   });
   Plotly.react('mainPlot', traces,
-    {...mkLayout('кто в поле','ход'), shapes:[{type:'line', x0:idx, x1:idx, y0:0, y1:1, yref:'paper', line:{color:'#1a1a1a', width:1.2, dash:'dot'}}], margin:{l:38,r:10,t:8,b:24}, legend:{orientation:'h'}},
+    {...mkLayout('who is present','move'), shapes:[{type:'line', x0:idx, x1:idx, y0:0, y1:1, yref:'paper', line:{color:'#1a1a1a', width:1.2, dash:'dot'}}], margin:{l:38,r:10,t:8,b:24}, legend:{orientation:'h'}},
     {displayModeBar:false, responsive:true});
   // heat — только когда details открыт, иначе Plotly меряет 0px
   const heatEl=document.getElementById('heat');
   if(heatEl && document.getElementById('deep').open){
     Plotly.react('heat', [{z:DATA.heatGrid, x:DATA.nVals, y:DATA.wVals, type:'heatmap',
       colorscale:[[0,'#991b1b'],[0.35,'#fca5a5'],[0.5,'#fef3c7'],[0.75,'#7dd3fc'],[1,'#0ea5e9']], zmin:0, zmax:1,
-      hovertemplate:'w %{y:.2f}<br>шум %{x:.2f}<br>доверие %{z:.0%}<extra></extra>', showscale:true, colorbar:{tickformat:'.0%', len:0.85, thickness:10}}],
-      {margin:{l:44,r:40,t:6,b:28}, xaxis:{title:'шум (искажения)', tickfont:{size:10}}, yaxis:{title:'тень будущего w', tickfont:{size:10}}, paper_bgcolor:'white', plot_bgcolor:'white'}, {displayModeBar:false, responsive:true});
+      hovertemplate:'w %{y:.2f}<br>noise %{x:.2f}<br>trust %{z:.0%}<extra></extra>', showscale:true, colorbar:{tickformat:'.0%', len:0.85, thickness:10}}],
+      {margin:{l:44,r:40,t:6,b:28}, xaxis:{title:'noise (distortion)', tickfont:{size:10}}, yaxis:{title:'shadow of the future w', tickfont:{size:10}}, paper_bgcolor:'white', plot_bgcolor:'white'}, {displayModeBar:false, responsive:true});
   }
 }
 canvas.addEventListener('click', (e)=>{
@@ -353,7 +353,7 @@ scrub.addEventListener('input',()=>{ idx=+scrub.value; draw(); });
 stepBtn.onclick=()=>{ ensurePop(); const s=pop.step(); popHistory.push(s); scrub.max=String(popHistory.length-1); document.getElementById('max').textContent=popHistory.length-1; idx=popHistory.length-1; draw(); if(popHistory.length%10===0) renderPlots(); };
 resetBtn.onclick=()=> resetPop();
 playBtn.onclick=()=>{
-  playing=!playing; playBtn.textContent=playing?'⏸ Пауза':'▶ Играть';
+  playing=!playing; playBtn.textContent=playing?'⏸ Pause':'▶ Play';
   if(playing) timer=setInterval(()=>{ const s=pop.step(); popHistory.push(s); if(popHistory.length>420) popHistory.shift(); else idx=popHistory.length-1; scrub.max=String(popHistory.length-1); document.getElementById('max').textContent=popHistory.length-1; draw(); if(popHistory.length%12===0) renderPlots(); }, +speedEl.value); else clearInterval(timer);
 };
 speedEl.addEventListener('input',()=>{ if(!playing) return; clearInterval(timer); timer=setInterval(()=>{ const s=pop.step(); popHistory.push(s); idx=popHistory.length-1; scrub.max=String(popHistory.length-1); document.getElementById('max').textContent=popHistory.length-1; draw(); }, +speedEl.value); });

@@ -2,9 +2,9 @@ import {
   assertScenario, isValidPayoff, type GameType, type Move, type Payoff, type PayoffRanges,
   type ScenarioModel, type StrategyId,
 } from "./domain.js";
-import { memoryN, playMatch, strategies, type EcoState, type TransitionState } from "./kernel.js";
+import { memoryN, playMatch, strategies, type EcoState, type MatchDigest, type MatchRound, type TransitionState } from "./kernel.js";
 import { assess, gossipBlend, type Image, type NormId } from "./reputation.js";
-import { Rng } from "./rng.js";
+import { deriveSeed, Rng } from "./rng.js";
 
 interface RepState { norm: NormId; quantitative: boolean; theta: number; gossipProb: number }
 
@@ -47,10 +47,37 @@ export interface Trial {
   inputs: Payoff & { w: number; noise: number; drift: number } & Record<string, number>;
   /** Sum of members' normalised scores (see `normaliseScore`), not raw points. */
   teamScores: Record<string, number>;
+  /** Per-player normalised scores; useful for plotting winner margin without payoff-scale bias. */
+  scores: Record<string, number>;
+  rounds: number;
+  digest: WorldDigest;
+  trace?: TrialTrace;
   /** Mean final environment state across the trial's matches, when eco feedback is active. */
   envFinal?: number;
   /** Mean per-state occupancy across the trial's matches, when game transitions are active. */
   stateOccupancy?: Record<string, number>;
+}
+
+export interface WorldDigest {
+  worldSeed?: number;
+  strategies: Record<string, StrategyId>;
+  opening: string;
+  response: string;
+  regime: "cooperation" | "oscillation" | "fragile" | "conflict" | "exit";
+  pivotalPair?: readonly [string, string];
+  matches: readonly { a: string; b: string; digest: MatchDigest }[];
+}
+
+export interface TrialTrace {
+  strategies: Record<string, StrategyId>;
+  matches: readonly { a: string; b: string; rounds: readonly MatchRound[] }[];
+}
+
+export interface RiverArtifact {
+  schemaVersion: 1;
+  model: ScenarioModel;
+  seed: number;
+  trials: readonly Trial[];
 }
 
 function payoffRangesFor(model: ScenarioModel, name: string): PayoffRanges {
@@ -118,7 +145,13 @@ function effectiveStrategy(
   return () => "C";
 }
 
-export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
+export function oneTrial(
+  model: ScenarioModel,
+  rng: Rng,
+  captureTrace = false,
+  worldSeed?: number,
+  tracePair?: readonly [string, string],
+): Trial {
   assertScenario(model);
   const game = model.game ?? "prisoners_dilemma";
   const w = rng.between(model.structure.w);
@@ -127,6 +160,8 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   const rounds = geometricHorizon(w, rng);
   const payoffByName = new Map(model.players.map((player) => [player.name, samplePayoff(payoffRangesFor(model, player.name), game, rng)]));
   const strategyByName = new Map(model.players.map((player) => [player.name, rng.pick(player.dispositions)]));
+  const tracedMatches: { a: string; b: string; rounds: readonly MatchRound[] }[] = [];
+  const digestedMatches: { a: string; b: string; digest: MatchDigest }[] = [];
   const leanByName = new Map(model.players.map((player) => [player.name, player.values ? rng.between(player.values) : 0]));
   // Eco: sample A1/θ/ε/n0 once per trial; each match gets a fresh EcoState starting at n0 (Weitz per-pair).
   const ecoCfg = model.structure.eco;
@@ -198,7 +233,10 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
       const punishment = punish && (aId === "punisher" || bId === "punisher")
         ? { beta: punish.beta, gamma: punish.gamma, pool: punish.pool, aPunishes: aId === "punisher", bPunishes: bId === "punisher" }
         : undefined;
-      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noise, rng, { leanA: aLean, leanB: bLean, drift, eco: ecoState, transition: transState, punishment, cheapTalk: talk });
+      const capturesPair = captureTrace && (!tracePair || (tracePair.includes(a.name) && tracePair.includes(b.name)));
+      const match = playMatch(aStrat, bStrat, aPayoff, bPayoff, rounds, noise, rng, { leanA: aLean, leanB: bLean, drift, eco: ecoState, transition: transState, punishment, cheapTalk: talk, captureTrace: capturesPair });
+      digestedMatches.push({ a: a.name, b: b.name, digest: match.digest });
+      if (match.trace) tracedMatches.push({ a: a.name, b: b.name, rounds: match.trace });
       scores.set(a.name, (scores.get(a.name) ?? 0) + match.scoreA);
       scores.set(b.name, (scores.get(b.name) ?? 0) + match.scoreB);
       if (rep) updateStanding(rep, image, ledger, names, a.name, b.name, match.coopA >= 0.5 ? "C" : "D", match.coopB >= 0.5 ? "C" : "D", rng);
@@ -232,10 +270,23 @@ export function oneTrial(model: ScenarioModel, rng: Rng): Trial {
   if (sigma !== undefined) inputs.sigma = sigma;
   if (punish) { inputs.punish_beta = punish.beta; inputs.punish_gamma = punish.gamma; }
   if (talk) { inputs.talk_credibility = talk.credibility; inputs.talk_lieCost = talk.lieCost; }
+  const pivotal = [...digestedMatches].sort((a, b) => a.digest.finalCooperation - b.digest.finalCooperation)[0];
+  const opening = !pivotal ? "exit" : pivotal.digest.opening === "CC" ? "mutual-coop" : pivotal.digest.opening === "DD" ? "mutual-conflict" : `defects:${pivotal.digest.opening === "A-defects" ? pivotal.a : pivotal.b}`;
+  const response = !pivotal ? "exit" : pivotal.digest.firstBreach?.response ?? "trust-holds";
+  const finalCooperation = pivotal?.digest.finalCooperation ?? 0;
+  const switchRate = pivotal?.digest.switchRate ?? 0;
+  const regime: WorldDigest["regime"] = !pivotal ? "exit" : cooperation / Math.max(1, coopMatches) >= 0.78 && finalCooperation >= 0.75 ? "cooperation" : switchRate >= 0.25 ? "oscillation" : finalCooperation <= 0.25 ? "conflict" : "fragile";
   return {
-    winners, teamWinners, perCapitaWinners, teamScores,
+    winners, teamWinners, perCapitaWinners, teamScores, scores: Object.fromEntries(scores), rounds,
     cooperation: cooperation / Math.max(1, coopMatches),
     inputs,
+    digest: {
+      ...(worldSeed !== undefined ? { worldSeed } : {}),
+      strategies: Object.fromEntries(strategyByName), opening, response, regime,
+      ...(pivotal ? { pivotalPair: [pivotal.a, pivotal.b] as const } : {}),
+      matches: digestedMatches,
+    },
+    ...(captureTrace ? { trace: { strategies: Object.fromEntries(strategyByName), matches: tracedMatches } } : {}),
     ...(eco ? { envFinal: envSum / Math.max(1, ecoMatches) } : {}),
     ...(transCfg ? { stateOccupancy: Object.fromEntries(Object.entries(occSum).map(([s, f]) => [s, f / Math.max(1, coopMatches)])) } : {}),
   };
@@ -274,10 +325,32 @@ export interface ScenarioResult {
   stateOccupancy?: Record<string, number>;
 }
 
+const WORLD_SEED_TAG = 0x776f726c;
+
+/** Stable address of a world inside a river. */
+export function scenarioWorldSeed(seed: number, index: number): number {
+  if (!Number.isSafeInteger(seed)) throw new Error("seed must be a safe integer");
+  if (!Number.isInteger(index) || index < 0) throw new Error("world index must be a non-negative integer");
+  return deriveSeed(seed, WORLD_SEED_TAG, index);
+}
+
+/** Reconstruct one world exactly; optionally retain only one match's round-by-round trace. */
+export function replayScenarioWorld(
+  model: ScenarioModel,
+  seed: number,
+  index: number,
+  tracePair?: readonly [string, string],
+): Trial {
+  const worldSeed = scenarioWorldSeed(seed, index);
+  return oneTrial(model, new Rng(worldSeed), true, worldSeed, tracePair);
+}
+
 export function analyzeScenario(model: ScenarioModel, trials: number, seed: number): ScenarioResult {
   if (!Number.isInteger(trials) || trials < 1) throw new Error("trials must be a positive integer");
-  const rng = new Rng(seed);
-  const runs = Array.from({ length: trials }, () => oneTrial(model, rng));
+  const runs = Array.from({ length: trials }, (_, index) => {
+    const worldSeed = scenarioWorldSeed(seed, index);
+    return oneTrial(model, new Rng(worldSeed), false, worldSeed);
+  });
   const wins: Record<string, number> = Object.fromEntries(model.players.map((p) => [p.name, 0]));
   const teamWins: Record<string, number> = {};
   const perCapitaWins: Record<string, number> = {};

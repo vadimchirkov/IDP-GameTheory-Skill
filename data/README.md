@@ -1,4 +1,7 @@
-# Data — live benchmarks (K=3, backtest `prev -> actual`)
+# Flumina Benchmark Data
+
+Live benchmarks (`K=3`, backtest `prev -> actual`) used to validate and calibrate
+the simulation engine.
 
 Все датасеты сохранены в `data/raw/` и используются `scripts/live-bench.mjs`.
 Скрипт сначала пробует пути проекта `data/raw/*`, затем fallback `/tmp/*` для CI.

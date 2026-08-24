@@ -3,11 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit && pnpm app:build",
     "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts",
     "demo": "tsx src/demo.ts",
     "scenario": "tsx src/cli.ts",
     "scenario:build": "tsx src/cli.ts --build",
+    "app": "pnpm app:build && tsx src/app-server.ts",
+    "app:build": "tsc -p app/tsconfig.json --noEmit && vite build --config app/vite.config.ts",
+    "app:dev": "vite --config app/vite.config.ts",
+    "app:server": "tsx watch src/app-server.ts",
     "verify": "tsx src/verify-pack.ts",
     "bench:engine": "tsx src/bench-engine.ts",
     "bench:live": "node scripts/live-bench.mjs",
@@ -15,12 +19,23 @@
     "cross:validate": "tsx src/cross_validate.ts && python3 scripts/cross_validate.py"
   },
   "dependencies": {
-    "@lambda-house/teob-ts": "0.2.2"
+    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@lambda-house/teob-ts": "0.2.2",
+    "@tanstack/react-query": "5.102.2",
+    "@tanstack/react-router": "1.170.32",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typebox": "1.3.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
     "fast-check": "^4.9.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite": "8.2.2"
   }
 }

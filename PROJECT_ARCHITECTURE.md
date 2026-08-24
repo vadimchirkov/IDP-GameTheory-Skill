@@ -1,6 +1,6 @@
-# TEOB Architecture in This System
+# Flumina Architecture: TEOB and the Simulation Runtime
 
-> The single source of truth for how **Type-safe Event-sourcing Over Behaviours** (`@lambda-house/teob-ts@0.2.2`) is used in this codebase. Pair with `GAME_THEORY.md` for the game mechanics. References point to live source: `src/domain.ts`, `src/kernel.ts`, `src/rng.ts`, `src/analysis.ts`, `src/run.ts`, `src/projections.ts`, `src/spatial.ts`, `src/cli.ts`, and the upstream package `node_modules/@lambda-house/teob-ts/README.md`.
+> The single source of truth for how Flumina uses **Type-safe Event-sourcing Over Behaviours** (`@lambda-house/teob-ts@0.2.2`). Pair with `GAME_THEORY.md` for the game mechanics. References point to live source: `src/domain.ts`, `src/kernel.ts`, `src/rng.ts`, `src/analysis.ts`, `src/run.ts`, `src/projections.ts`, `src/spatial.ts`, `src/cli.ts`, and the upstream package `node_modules/@lambda-house/teob-ts/README.md`.
 
 ---
 
@@ -279,4 +279,3 @@ node_modules/@lambda-house/teob-ts/{README.md, docs/core.md, docs/inmem.md, docs
 * Do not store strategy state globally (`gradual._state`, `contrite_tft._intent`) — breaks purity of `apply` and `deriveSeed` determinism; use `(my,opp,rng)` history or closure with `reset()`.
 * Do not mix hypotheses `team` + `values/drift` in one PR — attribution impossible.
 * Do not add `teob-postgres/http/telemetry/ai/petrinet` before the corresponding product need — `sqlite` + `quickstart` cover demos; `ai/petrinet` only for LLM branches.
-

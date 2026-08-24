@@ -1,8 +1,12 @@
 node_modules/
 dist/
+app/dist/
 .DS_Store
 .claude/
 reports/
+data/*.db
+data/*.db-shm
+data/*.db-wal
 *.report.json
 *.tips.md
 *.visual.html

@@ -41,8 +41,8 @@ if (!path) {
     process.exit(0);
   }
   if (visualMode) {
-    const { generateVisual } = await import("./report.js");
-    const html = generateVisual(model, seed);
+    const { generateWorldsVisual } = await import("./worlds-report.js");
+    const html = generateWorldsVisual(model, trials, seed);
     await mkdir("reports", { recursive:true });
     await writeFile("reports/visual.html", html);
     console.log("visual -> reports/visual.html");

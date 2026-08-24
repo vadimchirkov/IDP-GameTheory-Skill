@@ -211,10 +211,32 @@ export interface MatchResult {
   /** Fraction of rounds each side cooperated — used by trial-level reputation to assess standing. */
   coopA: number;
   coopB: number;
+  /** Constant-size story summary used to aggregate hundreds of matches into the worlds river. */
+  digest: MatchDigest;
   /** Final environment state `n` when eco feedback is active; undefined otherwise. */
   envFinal?: number;
   /** Fraction of rounds spent in each game state when transitions are active; undefined otherwise. */
   stateOccupancy?: Record<string, number>;
+  /** Full per-round history, collected only for an explicitly requested visual replay. */
+  trace?: readonly MatchRound[];
+}
+
+export interface MatchDigest {
+  opening: "CC" | "A-defects" | "B-defects" | "DD";
+  firstBreach?: { round: number; by: "A" | "B" | "both"; response?: "repair" | "retaliation" | "exploitation" | "escalation" };
+  finalCooperation: number;
+  switchRate: number;
+}
+
+export interface MatchRound {
+  moveA: Move;
+  moveB: Move;
+  scoreA: number;
+  scoreB: number;
+  leanA: number;
+  leanB: number;
+  environment?: number;
+  state?: string;
 }
 
 /** Weitz eco state carried through a match: A0 is the passed match payoff, A1 the depleted corner. */
@@ -261,6 +283,8 @@ export interface MatchModifiers {
   punishment?: { beta: number; gamma: number; pool: boolean; aPunishes: boolean; bPunishes: boolean } | undefined;
   /** Pre-play cheap talk: a mutual C-pledge grants `credibility` cooperative lean; a broken C-pledge costs `lieCost`/defection. */
   cheapTalk?: { credibility: number; lieCost: number } | undefined;
+  /** Collect the match timeline for a visual replay. Off on the Monte Carlo hot path. */
+  captureTrace?: boolean;
 }
 
 export function playMatch(
@@ -280,6 +304,7 @@ export function playMatch(
   const transition = mods.transition;
   const punishment = mods.punishment;
   const cheapTalk = mods.cheapTalk;
+  const trace: MatchRound[] | undefined = mods.captureTrace ? [] : undefined;
   const historyA: Move[] = [];
   const historyB: Move[] = [];
   let scoreA = 0;
@@ -287,6 +312,13 @@ export function playMatch(
   let cooperations = 0;
   let coopA = 0;
   let coopB = 0;
+  let opening: MatchDigest["opening"] = "CC";
+  let firstBreach: MatchDigest["firstBreach"];
+  let previousOutcome = "";
+  let switches = 0;
+  const tailSize = Math.max(1, Math.ceil(rounds * 0.2));
+  const tail: number[] = [];
+  let tailCooperation = 0;
   let curLeanA = leanA;
   let curLeanB = leanB;
   // Cheap talk: each side pledges its opening move; a mutual C-pledge grants a cooperative lean.
@@ -335,9 +367,28 @@ export function playMatch(
       if (pledgeA === "C" && moveA === "D") scoreA -= cheapTalk.lieCost;
       if (pledgeB === "C" && moveB === "D") scoreB -= cheapTalk.lieCost;
     }
+    trace?.push({
+      moveA, moveB, scoreA, scoreB, leanA: curLeanA, leanB: curLeanB,
+      ...(eco ? { environment: ecoN } : {}),
+      ...(transition ? { state: tState } : {}),
+    });
     coopA += Number(moveA === "C");
     coopB += Number(moveB === "C");
     const roundCoop = (Number(moveA === "C") + Number(moveB === "C")) / 2;
+    const directedOutcome = moveA === "C" && moveB === "C" ? "CC" : moveA === "D" && moveB === "D" ? "DD" : moveA === "D" ? "A-defects" : "B-defects";
+    if (round === 0) opening = directedOutcome;
+    if (!firstBreach && directedOutcome !== "CC") firstBreach = { round: round + 1, by: directedOutcome === "DD" ? "both" : directedOutcome === "A-defects" ? "A" : "B" };
+    else if (firstBreach && firstBreach.response === undefined && round === firstBreach.round) {
+      const breachedByA = firstBreach.by === "A";
+      firstBreach.response = directedOutcome === "CC" ? "repair"
+        : directedOutcome === "DD" ? "escalation"
+        : (breachedByA && moveB === "D") || (!breachedByA && moveA === "D") ? "retaliation"
+        : "exploitation";
+    }
+    if (previousOutcome && previousOutcome !== directedOutcome) switches += 1;
+    previousOutcome = directedOutcome;
+    tail.push(roundCoop); tailCooperation += roundCoop;
+    if (tail.length > tailSize) tailCooperation -= tail.shift() ?? 0;
     cooperations += roundCoop * 2;
     if (eco) ecoN = ecoStep(ecoN, eco.epsilon, eco.theta, roundCoop);
     if (transition) tState = transition.next[outcomeOf(moveA, moveB)];
@@ -351,8 +402,15 @@ export function playMatch(
   return {
     scoreA, scoreB, cooperation: cooperations / (2 * rounds),
     coopA: coopA / rounds, coopB: coopB / rounds,
+    digest: {
+      opening,
+      ...(firstBreach ? { firstBreach } : {}),
+      finalCooperation: tailCooperation / tail.length,
+      switchRate: switches / Math.max(1, rounds - 1),
+    },
     ...(eco ? { envFinal: ecoN } : {}),
     ...(transition ? { stateOccupancy: Object.fromEntries(Object.entries(occupancy).map(([s, n]) => [s, n / rounds])) } : {}),
+    ...(trace ? { trace } : {}),
   };
 }
 

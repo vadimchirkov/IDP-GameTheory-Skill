@@ -468,4 +468,13 @@ run("11.2 Cheap talk end-to-end + schema", ()=>{
   assert.throws(()=> assertScenario(badCred), /cheapTalk.credibility/);
 });
 
+run("12.1 Visual replay trace is opt-in and does not change a match", ()=>{
+  const payoff={T:5,R:3,P:1,S:0};
+  const plain=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77));
+  const traced=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77),{captureTrace:true});
+  assert.equal(plain.scoreA,traced.scoreA); assert.equal(plain.scoreB,traced.scoreB);
+  assert.equal(plain.cooperation,traced.cooperation); assert.equal(plain.trace,undefined);
+  assert.equal(traced.trace?.length,40); assert.equal(traced.trace?.at(-1)?.scoreA,traced.scoreA);
+});
+
 console.log("verify-pack OK");

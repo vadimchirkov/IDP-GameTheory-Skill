@@ -1,184 +1,313 @@
-# IPD (Game-Theory Scenarios) — a Claude skill
+# Flumina
 
-Describe a situation where **2–10 sides** keep dealing with each other — a rivalry,
-partnership, price war, standoff, or **coalition vs coalition** — and this skill runs it
-through a game-theory simulator hundreds of times and tells you, in plain language:
+> **Map the currents. Choose your course.**
 
-- who is likely to come out ahead (and how sure we can be),
-- whether cooperation holds or falls apart,
-- what makes it fall apart,
-- and the one real-world fact worth checking first.
+Flumina is a local decision laboratory that combines a game-theory
+engine, an event-sourced TEOB workflow, and an AI agent built on headless Pi. It
+turns an ordinary description of a recurring conflict or partnership into hundreds
+or thousands of reproducible possible futures.
 
-It never reports a single lucky run. It jiggles every guess and keeps only the
-conclusions that survive.
+Instead of producing one confident prediction, the application shows which outcomes
+remain plausible, which strategies perform well across them, and which assumption
+changes the conclusion. It helps answer three practical questions:
 
-> **The classic story — [Prisoner's dilemma on Wikipedia](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma):** *Two members of a gang are arrested and held in solitary with no contact. Police lack evidence for the main charge — both face 1 year on a lesser count — and offer each a Faustian bargain: testify against the partner → go free while the other gets 3 years; if both testify → 2 years each; if both stay silent → 1 year each.* → `T = free, R = 1y, P = 2y, S = 3y` (`T>R>P>S`, `2R>T+S` prevents alternating C/D from beating steady `R`).
->
-> The same 2×2 table shows up everywhere — price wars and cartels, climate pacts and overfishing, doping in sports, trench warfare and arms races, bacteria and academic co-authorship — only the stakes change.
+- who tends to come out ahead across plausible versions of the situation;
+- whether cooperation survives, oscillates, or collapses;
+- which assumption changes the conclusion and is therefore worth checking first.
 
-<details>
-<summary><strong>Learn more — Wikipedia</strong></summary>
+The river metaphor is functional: assumptions create currents, actions split them
+into branches, and repeated simulations reveal the courses that remain viable.
+Flumina maps those possible futures so that a decision-maker can choose a strategy
+without mistaking one plausible outcome for a prediction.
 
-| Topic | Start here |
-|-------|------------|
-| 📖 Prisoner's dilemma | [Article](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma) • [Iterated](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#The_iterated_prisoner%27s_dilemma) |
-| 🐔 Chicken • 🦌 Stag hunt | [Chicken (game)](https://en.wikipedia.org/wiki/Chicken_(game)) • [Stag hunt](https://en.wikipedia.org/wiki/Stag_hunt) |
-| 🏆 Axelrod & TFT | [Tournament & 4 traits](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Axelrod's_tournament_and_successful_strategy_conditions) • [Tit for tat](https://en.wikipedia.org/wiki/Tit_for_tat) |
-| 🎲 Zero-determinant | [ZD strategies](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Zero-determinant_strategies) |
-| 🌍 Real life | [Economics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Economics) • [International politics](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#International_politics) • [Biology](https://en.wikipedia.org/wiki/Prisoner%27s_dilemma#Biology) |
+An AI model translates the situation into explicit assumptions and a validated
+scenario model. A deterministic TypeScript engine then explores the uncertainty
+space at speed; the outcomes are calculated by the simulation, not invented by the
+AI.
 
-</details>
+The three parts have distinct responsibilities:
 
-### What you can do with it
+- **Game theory** supplies the repeated-game model, strategies, payoffs, reputation,
+  punishment, coalitions, and other interaction mechanisms.
+- **TEOB** supplies the experiment lifecycle: commands, immutable events, revision
+  checks, durable history, recovery after restart, and projections for current
+  views. It makes runs traceable and resumable rather than making the math loop fast.
+- **Pi** supplies the modeling agent: it turns prose into explicit assumptions,
+  builds a typed model, optionally researches missing facts, and labels the resulting
+  branches in human terms.
 
-- **A handshake between founders:** “we don’t poach each other’s people” — will it hold when one of you needs to grow fast, or does the upside to defect quietly win?
-- **Two shops on the same street:** keep prices steady together or undercut to steal the client — who blinks first when you meet again next month?
-- **A partnership where you do the extra work:** keep being generous or get firm? Test if being forgiving invites free-riding or keeps trust alive.
-- **A team with a pact vs solo players:** two colleagues cover for each other while two others play solo — does loyalty beat hustle, or does it get exploited?
-- **A subsidy, cartel or shared standard:** will everyone play along, or will a single misread (“they cheated!”) unravel it?
-- **A tense standoff:** both can escalate, but if both do — everyone loses. How to avoid the crash without looking weak?
-- **When a rumor or delay gets misread:** a late reply, a fuel price spike, a closed stat — will one mistake spiral into mutual distrust?
+New to repeated games? Veritasium's
+[This game theory problem will change the way you see the world](https://www.youtube.com/watch?v=mScpHTIi-kM)
+is an accessible introduction to the Prisoner's Dilemma, repeated interaction, and
+why successful strategies often combine cooperation, retaliation, and forgiveness.
 
-**When to use it:** if your story keeps repeating — “we meet again next quarter / next round” — it fits.
+## What the application does
 
-**What you get in 60 seconds:** you describe it in 2 sentences, Claude returns a plain 2–3 sentence verdict — who likely comes out ahead, whether cooperation holds, what makes it break, and the single real-world fact to check first. No tables, no metrics in the verdict — those are in the appendix.
+1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
+   shared resource, or another relationship in which 2–10 sides meet repeatedly.
+2. **Clarify the important unknowns.** The Pi agent identifies gaps, can research a
+   concrete fact, and presents its assumptions in plain language for confirmation.
+3. **Build a model.** Confirmed assumptions are converted into a closed, typed
+   `ScenarioModel`. The model must also pass the engine's domain validation.
+4. **Run possible worlds.** The engine rapidly samples payoff ranges, strategies,
+   noise, continuation probability, dispositions, and other enabled mechanisms.
+   One run can explore 1–5000 worlds; the default is 600.
+5. **Explore the result.** An interactive river groups worlds by approach, opening,
+   response, development, and outcome. Select a branch to inspect it or replay a
+   representative pair round by round.
+6. **Compare runs.** Every run keeps its model revision, seed, metrics, visual report,
+   and replay artifact. Editing the situation marks older runs as stale without
+   erasing them.
 
-**Prompts that trigger it:** `run this through game theory` · `war-game this` · `what happens if` · `who wins` · `should I cooperate`
+The application also includes provider/model selection, reasoning-level controls,
+an assistant chat scoped to the current situation or selected branch, cancellable
+background analysis, live updates, and undoable deletion.
 
-### The game in 30 seconds (IPD)
+## Quick start
 
-**2–10 sides** meet again and again. Each pair plays each round: each picks **C** (cooperate — hold price, keep pact, swerve) or **D** (defect — undercut, poach, hold firm). Payoffs per round (pairwise):
-
-- `R` — both C (the deal holds)
-- `T` — you D, they C (you steal the upside)
-- `P` — both D (mutual grind)
-- `S` — you C, they D (you get suckered)
-
-Different games = different orders: Prisoner's Dilemma `T>R>P>S` (tempting, survivable mutual defect), Chicken `T>R>S>P` (mutual defect = crash, worst), Stag Hunt `R>T>P>S` (mutual C is best). The *shadow of the future* `w` is the chance you meet again; `noise` is misread chance; `drift` shifts lean after each observed move; `team` + `colluder` models fixed coalitions (round-robin pairwise). Temperaments (23: 22 C/D + loner; TFT/GTFT/WSLS/Grim/ALLD/ALLC/TF2T/Adaptive/ZD/Southampton…) are rules for “what to do given history” — `adaptive`/`shaper` now O(1) incremental.
-
-Engine runs **600 sessions/worlds by default** (`pnpm scenario model.json 600` — 2nd arg; 500–800 is plenty, `--seed 42` makes it reproducible). Each session draws a fresh `T/R/P/S`, `w/noise/drift/values`, `dispositions` and plays every pair round-robin (`w` → geometric horizon, cap 10000). Only a conclusion that wins in most sessions is reported.
-
-**IPD features:** 3 game orderings (PD / Chicken≡Snowdrift / Stag Hunt) • 24 temperaments (22 C/D + loner + punisher) • asymmetric per-side payoffs with score normalisation • fixed teams (`winPctTeam` total vs `winPctPerCapita`) • lean `values∈[-1,1]` + `drift` (w-calibrated) • eco-feedback (`structure.eco`, Weitz shared-resource `Π(n)`) • game transitions (`structure.transitions`, Su regime-switching) • voluntary opt-out (`structure.sigma` + `loner` walk-away/BATNA) • institutional punishment (`structure.punishment` + `punisher`, Sigmund β/γ) • pre-play cheap talk (`structure.cheapTalk`, pledge goodwill + lie cost) • two signed sensitivity lists (cooperation & winner) • `--visual` lattice sandbox • deterministic `Rng`/`deriveSeed` (`--seed`) • horizon cap 10000.
-
----
-
-## Install
-
-A skill is just a folder in `.claude/skills/`. The simplest way is a one-line
-clone straight into that folder.
-
-**For everything you do** (available in every project):
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git ~/.claude/skills/game-theory-scenarios
-```
-
-**For one project only:**
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git .claude/skills/game-theory-scenarios
-```
-
-That's it. Restart Claude Code and the skill is live.
-
-**Update later:**
-```bash
-git -C ~/.claude/skills/game-theory-scenarios pull
-```
-
-No git? Download the ZIP from the GitHub page ("Code → Download ZIP") and unzip
-the folder into `~/.claude/skills/`.
-
-**Requirements:** Node 20+, pnpm. Engine is [`teob-ts`](https://github.com/lambda-house/teob-ts) — **Type-safe Event-sourcing Over Behaviours** (pure `Aggregate`/`Effect`/`Projection`, TEOB: DDD + Event Sourcing + CQRS + Actor) (`src/`). Check with `node --version && pnpm --version`.
-
----
-
-## How to use it
-
-Just describe your situation to Claude in plain words — **2 to 10 sides, with or without coalitions**. The skill triggers on things like *"run this through game theory"*, *"war-game this"*, *"what happens if"*, *"who wins"*, *"should I cooperate or not"*. Example:
-
-> Two suppliers have an unspoken deal not to undercut each other. One is under
-> pressure to grow. Run this through game theory — what happens?
-> — or — Four firms: two incumbents in a pact vs two entrants — who holds the market?
-
-Claude will build the model, run it, and give you a plain-language read-out.
-
-### Run it yourself (optional)
-
-You don't need to, but you can drive the engine directly:
-
-```bash
-pnpm scenario example_model.json 600     # 600 = number of simulated worlds
-# or: npx tsx src/cli.ts example_model.json 600
-# or: ./scenario example_model.json 600
-```
-
-Copy `example_model.json`, edit the players, their possible temperaments, and the
-stakes, then run.
-
-### Check it works
-
-```bash
-pnpm test        # prints "self-check OK"
-pnpm demo        # plain-words demo run
-```
-
----
-
-## What's in the folder
-
-| File | What it is |
-|------|-----------|
-| `SKILL.md` | Instructions Claude follows (how to model and interpret honestly) |
-| `scenario` | Shim to `src/cli.ts` (`./scenario example_model.json 600`) |
-| `example_model.json` | Fragile pact — Prisoner's Dilemma (default) |
-| `example_chicken.json` | Brinkmanship — Chicken (mutual escalation is worst) |
-| `example_stag_hunt.json` | Coordination — Stag Hunt (mutual C is best) |
-| `example_team.json` | Fixed coalition — 2 colluders vs 2 solos (total vs per-capita) |
-| `example_drift.json` | Lean & drift — forgiving vs prober with `values`/`drift` |
-| `GAME_THEORY.md` | Game-theory methods and their code mapping (`kernel.ts`, `analysis.ts`, `spatial.ts`, `predictive.ts`) |
-| `PROJECT_ARCHITECTURE.md` | TEOB architecture: Aggregate/Effect/Codec/Journal/Projection, runtime envelope, determinism |
-| `src/` | [`teob-ts`](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours: `kernel.ts`, `analysis.ts`, `rng.ts`, `run.ts` (Aggregate), `spatial.ts`, `reputation.ts` (Leading Eight + gossip + quantitative), `participant.ts` (TEOB Participant aggregate) |
-| `README.md` | This file |
-
----
-
-## What it covers
-
-- **N-player IPD (2–10):** round-robin pairwise, 3 games, 23 temperaments (22 C/D + `loner` opt-out), `--seed` deterministic, 600 worlds jiggle → `winPct`/`winPctTeam`/`cooperation`/`sensitivity`
-- **Asymmetric stakes:** per-player `payoffs` (own `T/R/P/S` ranges)
-- **Coalitions:** `team` + `colluder` (C vs kin / TFT vs outsider → `winPctTeam` total vs `winPctPerCapita`)
-- **Lean & drift:** `values∈[-1,1]` + `drift` (order `strategy→lean→noise→drift`, CLT-clamped)
-- **Reputation (indirect reciprocity, 3+ players):** `structure.reputation` — Leading Eight norms (L1–L8, Stern-Judging default). Standing is **trial-level**: built from how a player treated *every* opponent, so a side sanctions any partner it regards as bad (`assess()`), punishing an exploiter by proxy. Optional `gossip` spreads standings toward consensus; optional `quantitative` public ledger `score∈ℤ` (`C=+1 D=−1`, sanction when `<θ`). Sanction modifies, does not erase, the disposition.
-- **Spatial lattice:** `src/spatial.ts` `imitate-best`/`Fermi` (`b/c>k`), separate kernel
-- **TEOB Participant (slow lane):** `src/participant.ts` — per-player aggregate with full journal (`MoveChosen`/`OutcomeRecorded`/`GossipReceived`) for explainable runs; batch Monte Carlo in `analysis.ts` remains the fast path.
-- **Build feedback:** `--build` → `buildTips` + `*.report.json`/`*.tips.md` to improve the model next run
-
-## Benchmarks — engine predictive power (holdout, stakes from files) — *calibrated 2026-08-23, v2.2*
-
-`pnpm bench:engine` — `cooperation` vs held-out rate.
-
-| Dataset | Observed | hist | zero | coin | Engine v2.2 | (was) |
-|---------|----------|------|------|------|-------------|-------|
-| **Synthetic** 300×300 | — | — | — | 50.0% | **58.0%** | 58.0% |
-| **DF2011** 6 treatments | 8–94% | **74.1%** | **42.8%** | **71.7%** | **92.2%** | 86.3% |
-| **dilemmaRL** 5 deltas | 19–49% | **89.2%** | **40.4%** | **90.4%** | **94.0%** | 94.3% |
-| **MID** dyad-year | 77.6% | — | **77.6%** | **72.4%** | **94.7%** | 93.3% |
-| **TIES** / China | 54.4 / 30.7% | — | **54.4 / 30.7%** | **95.6 / 80.7%** | **96.3 / 80.0%** | 97.9 / 74.2% |
-
-*`Observed` — cooperation share in data (%); `Engine` — accuracy (100 − MAE). v2.2 changes: R×w lean interaction (`rShift 0.32`, `wShift 0.40·(δ−0.625)`), heterogeneous `S` by R, per-R drift, `reputation` (L3 stern-judging + gossip) on noisy/high-R treatments, `quantitative` Hilbe scoring (`θ=1`) on low-R/high-δ. Coin is the no-skill line (Brier 0.25) — engine beats it and hist everywhere; per-treatment detail in `pnpm bench:engine` output.*
-
-*Run: `pnpm bench:engine` + `pnpm cross:validate` vs Axelrod-Python <5%. Data `data/raw/` (`data/README.md`).*
-
-## Development ([teob-ts](https://github.com/lambda-house/teob-ts) — Type-safe Event-sourcing Over Behaviours)
-
-Pure `Aggregate` (`decide`→`Effect`→`apply`), `Codec`, `Journal` (inmem/sqlite/postgres), `Projection`/`Saga` — business logic is pure `(State, Command)→Effect`, runtime handles persistence/recovery.
+Requirements: Node.js **22.19+** and pnpm.
 
 ```bash
 pnpm install
-pnpm build && pnpm test   # self-check OK
-pnpm demo                 # evolution demo
+pnpm app
+```
+
+Open <http://127.0.0.1:4317>. The server only listens on the local loopback
+interface.
+
+`pnpm app` type-checks and builds the React application before starting the API.
+The first launch creates `data/app.db`; completed runs create HTML and JSON
+artifacts under `reports/tasks/`.
+
+### Configure an AI provider
+
+Open **Settings → Model and access** in the application, add a provider API key,
+and choose the default provider, model, and reasoning level. Existing Pi
+authentication is also discovered automatically (normally from
+`~/.pi/agent/auth.json`), as are provider credentials supplied through their
+standard environment variables.
+
+These optional variables control the defaults and local server:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PI_PROVIDER` | Default Pi provider ID | first authenticated provider |
+| `PI_MODEL` | Default model ID | first available fallback/model |
+| `PI_THINKING_LEVEL` | Default reasoning level | model-dependent |
+| `PORT` | HTTP port | `4317` |
+| `APP_DB_PATH` | SQLite journal path | `data/app.db` |
+| `ANALYSIS_TIMEOUT_MS` | Simulation-worker timeout | `300000` |
+
+The web workflow needs an authenticated AI model to understand a situation, build
+the model, and label the river. The simulation engine and CLI do not need an API
+key once a JSON model exists.
+
+## Development
+
+Run the API and Vite development server in separate terminals:
+
+```bash
+pnpm app:server
+pnpm app:dev
+```
+
+Open the Vite URL, normally <http://127.0.0.1:5173>. Vite proxies `/api` and
+`/reports` to the API at port `4317`.
+
+Useful commands:
+
+| Command | What it does |
+|---|---|
+| `pnpm build` | Type-checks the engine and frontend, then builds the app |
+| `pnpm test` | Runs the self-check and model/engine verification pack |
+| `pnpm demo` | Runs the evolution demo |
+| `pnpm app` | Builds and starts the local application |
+| `pnpm app:server` | Starts the API in watch mode |
+| `pnpm app:dev` | Starts the Vite frontend dev server |
+| `pnpm bench:engine` | Runs scenario-level engine benchmarks |
+| `pnpm bench:live` | Runs move-level benchmarks against datasets in `data/raw/` |
+| `pnpm bench:all` | Runs both benchmark layers and cross-validation |
+
+## How it is built
+
+```text
+React + TanStack Router/Query
+              │ HTTP + SSE
+              ▼
+Node HTTP server ── Task aggregate ── SQLite event journal
+       │                    │
+       │                    └── projections rebuild task lists and detail views
+       │
+       ├── Pi model runtime ── typed output contracts ── domain validation
+       │
+       └── worker thread ── deterministic Monte Carlo engine
+                              ├── summary metrics
+                              ├── interactive HTML river
+                              └── JSON replay artifact
+```
+
+### Frontend
+
+`app/` is a React 19 single-page application built with Vite. TanStack Router keeps
+the selected task and run addressable in the URL; TanStack Query owns server state.
+Server-sent events refresh an active task while analysis or AI labeling is running.
+The result river is an embedded, self-contained HTML report that communicates the
+selected worlds back to the workspace.
+
+### Backend and persistence
+
+`src/app-server.ts` serves the built frontend, the JSON API, reports, and SSE. Task
+state is modeled as a TEOB aggregate: commands decide immutable events, SQLite is
+the source of truth, and in-memory projections provide the read side. Optimistic
+revision checks prevent an old browser state from overwriting newer edits.
+
+Simulation runs execute in a worker thread so the HTTP server stays responsive.
+The same seed and model reproduce the same worlds. Interrupted `running` or
+`labeling` tasks are resumed when the server starts again.
+
+The embedded Pi agent does not spawn Claude CLI. Its structured operations expose
+only one terminating TypeBox output tool and disable built-in filesystem, shell,
+editing, extensions, skills, prompt templates, and project-context tools. User text
+and research excerpts are treated as untrusted data. Optional research uses one
+fixed search endpoint and does not fetch result pages.
+
+## Simulation model
+
+Each pair repeatedly chooses **C** (cooperate) or **D** (defect). Per-round payoffs
+use the conventional values:
+
+- `R`: both cooperate;
+- `T`: one defects while the other cooperates;
+- `P`: both defect;
+- `S`: one cooperates while the other defects.
+
+The ordering defines the game:
+
+| Game | Ordering | Typical interpretation |
+|---|---|---|
+| Prisoner's Dilemma | `T > R > P > S`, with `2R > T + S` | cooperation is valuable but unilateral defection tempts |
+| Chicken / Snowdrift | `T > R > S > P` | mutual escalation is the worst outcome |
+| Stag Hunt | `R > T > P > S` | coordination and confidence are the main problem |
+
+Every scenario uses ranges rather than one supposedly exact estimate. A world
+samples fresh values, plays all pairs round-robin, normalizes asymmetric payoff
+scales, and records winners, cooperation, inputs, scores, and a behavioral digest.
+The geometric horizon is controlled by `w` and capped at 10,000 rounds per match.
+
+### Supported mechanisms
+
+- 2–10 participants and 24 built-in dispositions;
+- shared or player-specific payoff ranges;
+- fixed teams, collusion, and optional intra-team betrayal;
+- player lean (`values`), behavioral drift, and observation noise;
+- custom memory-n cooperation tables;
+- voluntary exit with an outside payoff (`sigma` + `loner`);
+- indirect reciprocity with Leading Eight reputation norms, gossip, or a numeric
+  reputation ledger (3+ participants);
+- peer or pool punishment with explicit cost and penalty;
+- pre-play cheap talk with credibility and lying cost;
+- continuous eco-feedback or discrete outcome-driven game transitions;
+- deterministic seeds, winner/cooperation sensitivity, evolution, tournaments,
+  heatmaps, and a separate spatial visualization sandbox.
+
+For the precise schema and game mechanics, see [GAME_THEORY.md](GAME_THEORY.md).
+For the event-sourced design, see
+[PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). Benchmark datasets, provenance,
+and reproduction notes are in [data/README.md](data/README.md).
+
+## Validation and benchmarks
+
+Benchmarks belong in the project because a strategy simulator should demonstrate
+that it can recover known signals and reveal where its model does not fit. Frozen
+scores do not belong in the main README: they become stale as the engine and data
+change. The repository therefore keeps the benchmark method and reproduction path
+here, while every run prints its current results.
+
+The suite covers synthetic holdouts, repeated-game laboratory data (DF2011 and
+dilemmaRL), and historical conflict/sanctions proxies (MID and TIES). It compares
+the engine with simple zero, historical-mean, and coin baselines; the move-level
+suite separately checks predictive behavior under strategy and noise.
+
+```bash
+pnpm bench:engine   # scenario-level calibration and baseline comparison
+pnpm bench:live     # move-level datasets
+pnpm bench:all      # both layers plus cross-validation
+```
+
+These checks validate implementation and calibration; they do not prove that an
+unobserved real-world situation will follow the model. Dataset sources, hashes, and
+known gaps are documented in [data/README.md](data/README.md).
+
+## Command-line use
+
+Run an existing model without the web application:
+
+```bash
 pnpm scenario example_model.json 600 --seed 42
 ```
 
-## The one honest limitation
+The second positional argument is the number of worlds; it defaults to `600`.
+The default seed is `42`.
 
-Fixed teams (`team` + `colluder`, with optional `betrayalProb` for intra-team defection): no full dynamic coalitions. `values`/`drift` is a single lean per player, not emotion or cheap talk. The spatial lattice (`src/spatial.ts` `imitate-best`/`fermi`) is a separate sandbox for the `--visual` view — it does not decide scenario winners. Only symmetric 2×2 games (Prisoner's Dilemma / Chicken≡Snowdrift / Stag Hunt) — no N-player public-goods or sequential trust games, no LLM agents. If your situation hinges on those, the skill will flag it rather than fake it.
+```bash
+pnpm scenario example_model.json 600 --build       # report + improvement hints
+pnpm scenario example_model.json 600 --visual      # reports/visual.html
+pnpm scenario example_model.json --heatmap         # reports/heatmap.html
+pnpm scenario example_model.json --tournament
+pnpm scenario example_model.json --evolve 500 --seed 42
+```
+
+Example models cover Prisoner's Dilemma, Chicken, Stag Hunt, teams, drift,
+eco-feedback, state transitions, voluntary exit, punishment, and cheap talk. Copy
+the closest file, change the situation and ranges, then run it with a fixed seed.
+
+## Repository map
+
+| Path | Responsibility |
+|---|---|
+| `app/` | React workspace, API client, routing, and visual design contract |
+| `src/app-server.ts` | Local HTTP API, static files, SSE, jobs, and report lifecycle |
+| `src/task.ts` | Event-sourced task aggregate and revision rules |
+| `src/pi-agent.ts` | Headless Pi runtime, model discovery/auth, and typed agent runs |
+| `src/scenario-agent.ts` | Situation understanding, model construction, and river labels |
+| `src/domain.ts` | Scenario types and domain validation |
+| `src/kernel.ts` | Repeated-game strategies and match mechanics |
+| `src/analysis.ts` | Monte Carlo analysis, sensitivity, artifacts, and replay |
+| `src/worlds-report.ts` | Interactive river report generation |
+| `src/cli.ts` | Standalone command-line entry point |
+| `data/` | SQLite app state plus benchmark manifest and raw datasets |
+| `reports/tasks/` | Generated run visualizations and replay artifacts |
+| `example_*.json` | Ready-to-run scenario models |
+| `SKILL.md` | Optional Claude Code skill instructions |
+
+## Optional Claude Code skill
+
+The repository can still be installed as a standalone Claude Code skill. This is an
+alternative interface; the web application does not depend on Claude Code or the
+Claude CLI.
+
+Install globally:
+
+```bash
+git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
+  ~/.claude/skills/flumina
+```
+
+Or install for one project:
+
+```bash
+git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
+  .claude/skills/flumina
+```
+
+## Limits
+
+- The core engine models repeated, simultaneous 2×2 games. It does not implement
+  N-player public-goods games or sequential trust games.
+- Teams are fixed during a run; there is no endogenous coalition formation.
+- The spatial topology is a separate visualization/evolution sandbox and does not
+  decide the standard scenario winner.
+- AI helps formulate and label the model, but simulated participants follow explicit
+  strategies; they are not autonomous LLM agents.
+- Results are conditional on the supplied ranges and assumptions. They are scenario
+  analysis, not a factual forecast or a substitute for domain evidence.

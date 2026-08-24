@@ -6,3 +6,6 @@ export * from "./run.js";
 export * from "./projections.js";
 export * from "./reputation.js";
 export * from "./participant.js";
+export * from "./task.js";
+export * from "./task-projections.js";
+export * from "./worlds-report.js";

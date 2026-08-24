@@ -1,8 +1,8 @@
 ---
-name: game-theory-scenarios
+name: flumina
 description: >
-  Analyze an ongoing relationship or repeated strategic situation by running it
-  through a game-theory (iterated prisoner's dilemma) simulator many times and
+  Use Flumina to analyze an ongoing relationship or repeated strategic situation
+  by running it through a game-theory simulator many times and
   drawing robust conclusions. Use when the user describes a situation with 2+
   parties who interact repeatedly — negotiations, partnerships, rivalries, team
   dynamics, alliances, deterrence, price wars — and wants to know what will
@@ -11,10 +11,10 @@ description: >
   "model these players", "should I cooperate/defect", "war-game this".
 ---
 
-# IPD (Game-Theory Scenarios) — scenario simulator
+# Flumina — scenario simulator
 
-Turn a prose situation into a repeated-game model, Monte-Carlo it, and report
-**only what survives the uncertainty**. The engine is `src/cli.ts` on the
+Flumina turns a prose situation into a repeated-game model, runs a Monte Carlo
+simulation, and reports **only what survives the uncertainty**. The engine is `src/cli.ts` on the
 [`teob-ts`](https://github.com/lambda-house/teob-ts) kernel — **Type-safe Event-sourcing Over Behaviours** (pure `Aggregate`/`Effect`/`Codec`/`Projection`, TEOB: DDD + Event Sourcing + CQRS + Actor) — (`src/kernel.ts` + `src/analysis.ts` + `src/rng.ts`, background in `GAME_THEORY.md` and `PROJECT_ARCHITECTURE.md`). Your job is the two ends the engine can't do: honest elicitation (stage 1) and honest interpretation (stage 3).
 
 Plain version of what this does: someone describes a situation where 2–10 sides

@@ -1,6 +1,6 @@
-# Game Theory Implemented in Code
+# Game Theory in Flumina
 
-> Exhaustive mapping from game-theoretic concepts to live implementation in `src/`. Every rule cites its source file and line. Companion to `PROJECT_ARCHITECTURE.md` (TEOB side). Domain references: `src/domain.ts`, `src/kernel.ts`, `src/analysis.ts`, `src/spatial.ts`, `src/evolution.ts`, `src/tournament.ts`, `src/predictive.ts`, `src/rng.ts`, `src/feedback.ts`, `src/cli.ts`.
+> Exhaustive mapping from Flumina's game-theoretic concepts to their live implementation in `src/`. Every rule cites its source file and line. Companion to `PROJECT_ARCHITECTURE.md` (TEOB side). Domain references: `src/domain.ts`, `src/kernel.ts`, `src/analysis.ts`, `src/spatial.ts`, `src/evolution.ts`, `src/tournament.ts`, `src/predictive.ts`, `src/rng.ts`, `src/feedback.ts`, `src/cli.ts`.
 
 ---
 
@@ -438,4 +438,3 @@ src/cli.ts           pnpm scenario entry (--seed/--build/--evolve/--heatmap/--to
 src/projections.ts   (TEOB side, read companion)
 src/run.ts           (TEOB side, write companion)
 ```
-

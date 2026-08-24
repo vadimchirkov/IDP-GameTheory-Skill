@@ -155,6 +155,8 @@ export interface ScenarioModel {
     cheapTalk?: CheapTalkConfig;
   };
   topology?: { type: "lattice" | "small_world" | "scale_free"; size?: number; K?: number };
+  /** Human-readable elicitation notes; ignored by the simulation kernel. */
+  rationale?: Record<string, string>;
 }
 
 export const strategyIds = [
@@ -207,6 +209,74 @@ export function assertRange(range: Range, label: string, upper = Number.POSITIVE
   }
 }
 
+function assertFiniteRange(range: Range, label: string): void {
+  if (!Array.isArray(range) || range.length !== 2 || !Number.isFinite(range[0]) || !Number.isFinite(range[1]) || range[0] > range[1]) {
+    throw new Error(`${label} must be an ordered finite range`);
+  }
+}
+
+function nextUp(value: number): number {
+  if (value === Number.POSITIVE_INFINITY) return value;
+  if (Object.is(value, -0) || value === 0) return Number.MIN_VALUE;
+  const floats = new Float64Array(1);
+  const bits = new BigUint64Array(floats.buffer);
+  floats[0] = value;
+  bits[0] = bits[0]! + (value > 0 ? 1n : -1n);
+  return floats[0]!;
+}
+
+function feasiblePayoff(ranges: PayoffRanges, game: GameType): boolean {
+  const chooseChain = (ordered: readonly (keyof Payoff)[]): Payoff | undefined => {
+    const picked = {} as Payoff;
+    let previous: number | undefined;
+    for (const key of ordered) {
+      const range = ranges[key];
+      const value = previous === undefined ? range[0] : Math.max(range[0], nextUp(previous));
+      if (value > range[1]) return undefined;
+      picked[key] = value;
+      previous = value;
+    }
+    return picked;
+  };
+  if (game === "chicken" || game === "snowdrift") return chooseChain(["P", "S", "R", "T"]) !== undefined;
+  if (game === "stag_hunt") return chooseChain(["S", "P", "T", "R"]) !== undefined;
+
+  const S = ranges.S[0];
+  const P = Math.max(ranges.P[0], nextUp(S));
+  if (P > ranges.P[1]) return false;
+  const R = Math.max(ranges.R[0], nextUp(P), nextUp((ranges.T[0] + S) / 2));
+  if (R > ranges.R[1]) return false;
+  const T = Math.max(ranges.T[0], nextUp(R));
+  return T <= ranges.T[1] && isValidPayoff(game, { T, R, P, S });
+}
+
+function assertPayoffRanges(ranges: PayoffRanges, game: GameType, label: string): void {
+  const keys = Object.keys(ranges);
+  if (keys.length !== 4 || keys.some((key) => key !== "T" && key !== "R" && key !== "P" && key !== "S")) {
+    throw new Error(`${label} must contain exactly T, R, P and S`);
+  }
+  for (const key of ["T", "R", "P", "S"] as const) assertFiniteRange(ranges[key], `${label}.${key}`);
+  if (!feasiblePayoff(ranges, game)) throw new Error(`${label} ranges cannot satisfy ${game}`);
+}
+
+function assertScenarioPayoffs(model: ScenarioModel): void {
+  const game = model.game ?? "prisoners_dilemma";
+  const shared = model.payoffs as Partial<PayoffRanges>;
+  if (shared.T !== undefined || shared.R !== undefined || shared.P !== undefined || shared.S !== undefined) {
+    assertPayoffRanges(model.payoffs as PayoffRanges, game, "payoffs");
+    return;
+  }
+  const asymmetric = model.payoffs as Record<string, PayoffRanges>;
+  const playerNames = new Set(model.players.map((player) => player.name));
+  const payoffNames = Object.keys(asymmetric);
+  for (const name of playerNames) {
+    if (!asymmetric[name]) throw new Error(`Missing payoffs for ${name}`);
+    assertPayoffRanges(asymmetric[name], game, `payoffs.${name}`);
+  }
+  const extra = payoffNames.find((name) => !playerNames.has(name));
+  if (extra) throw new Error(`Payoffs provided for unknown player ${extra}`);
+}
+
 /** Window keys look like `CC` (memory-1) or `CC|DD` (memory-2); all keys must share one width. */
 export function assertMemoryTable(table: Record<string, number>, label: string): void {
   const keys = Object.keys(table);
@@ -226,9 +296,13 @@ export function assertScenario(model: ScenarioModel): void {
   for (const key of Object.keys(model)) {
     if (!MODEL_KEYS.has(key)) throw new Error(`Unknown scenario field "${key}" — expected one of ${[...MODEL_KEYS].join(", ")}`);
   }
-  if (model.players.length < 2) throw new Error("A scenario needs at least two players");
-  for (const player of model.players) {
+  if (typeof model.situation !== "string" || !model.situation.trim()) throw new Error("Scenario situation is required");
+  if (!Array.isArray(model.players) || model.players.length < 2 || model.players.length > 10) throw new Error("A scenario needs 2..10 players");
+  const names = new Set<string>();
+  for (const player of model.players as readonly ScenarioPlayer[]) {
     if (!player.name || player.dispositions.length === 0) throw new Error("Every player needs a name and disposition");
+    if (names.has(player.name)) throw new Error(`Duplicate player name ${player.name}`);
+    names.add(player.name);
     for (const key of Object.keys(player)) {
       if (!PLAYER_KEYS.has(key)) throw new Error(`Unknown field "${key}" for ${player.name} — expected one of ${[...PLAYER_KEYS].join(", ")}`);
     }
@@ -240,6 +314,7 @@ export function assertScenario(model: ScenarioModel): void {
     if (player.betrayalProb !== undefined && (!Number.isFinite(player.betrayalProb) || player.betrayalProb < 0 || player.betrayalProb > 1)) throw new Error(`betrayalProb for ${player.name} must be 0..1`);
     if (player.memory !== undefined) assertMemoryTable(player.memory, player.name);
   }
+  assertScenarioPayoffs(model);
   for (const key of Object.keys(model.structure)) {
     if (!STRUCTURE_KEYS.has(key)) throw new Error(`Unknown structure field "${key}" — expected one of ${[...STRUCTURE_KEYS].join(", ")}`);
   }
@@ -268,6 +343,16 @@ export function assertScenario(model: ScenarioModel): void {
     assertRange(c.credibility, "cheapTalk.credibility", 1);
     assertRange(c.lieCost, "cheapTalk.lieCost");
   }
+  if (model.topology !== undefined) {
+    const topology = model.topology;
+    for (const key of Object.keys(topology)) if (key !== "type" && key !== "size" && key !== "K") throw new Error(`Unknown topology field "${key}"`);
+    if (!["lattice", "small_world", "scale_free"].includes(topology.type)) throw new Error("Unknown topology type");
+    if (topology.size !== undefined && (!Number.isInteger(topology.size) || topology.size < 2)) throw new Error("topology.size must be an integer >= 2");
+    if (topology.K !== undefined && (!Number.isInteger(topology.K) || topology.K < 1)) throw new Error("topology.K must be a positive integer");
+  }
+  if (model.rationale !== undefined) {
+    if (!model.rationale || Array.isArray(model.rationale) || Object.values(model.rationale).some((value) => typeof value !== "string")) throw new Error("rationale must contain string notes");
+  }
 }
 
 function assertPunishment(model: ScenarioModel): void {
@@ -289,10 +374,7 @@ function assertTransitions(model: ScenarioModel): void {
   const names = Object.keys(t.states);
   if (names.length < 2) throw new Error("transitions.states needs at least two named game states");
   for (const [name, ranges] of Object.entries(t.states)) {
-    for (const key of ["T", "R", "P", "S"] as const) {
-      const r = ranges[key];
-      if (!Number.isFinite(r[0]) || !Number.isFinite(r[1]) || r[0] > r[1]) throw new Error(`transitions.states.${name}.${key} must be an ordered finite range`);
-    }
+    assertPayoffRanges(ranges, model.game ?? "prisoners_dilemma", `transitions.states.${name}`);
   }
   if (!(t.start in t.states)) throw new Error(`transitions.start "${t.start}" is not a defined state`);
   for (const outcome of ["CC", "CD", "DD"] as const) {
@@ -326,11 +408,7 @@ function assertEco(model: ScenarioModel): void {
   }
   const shared = model.payoffs as Partial<PayoffRanges>;
   if (shared.T === undefined) throw new Error("eco feedback requires a shared payoff table (A0), not per-player payoffs");
-  // A1 entries are payoffs (S may be negative), so only require ordered finite ranges — validity is enforced at sample time.
-  for (const key of ["T", "R", "P", "S"] as const) {
-    const r = eco.A1[key];
-    if (!Number.isFinite(r[0]) || !Number.isFinite(r[1]) || r[0] > r[1]) throw new Error(`eco.A1.${key} must be an ordered finite range`);
-  }
+  assertPayoffRanges(eco.A1, eco.game1 ?? "prisoners_dilemma", "eco.A1");
   assertRange(eco.theta, "eco.theta", 100);
   assertRange(eco.epsilon, "eco.epsilon", 1);
   assertRange(eco.n0, "eco.n0", 1);
