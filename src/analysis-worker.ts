@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { analyzeScenario, scenarioReport } from "./analysis.js";
 import type { ScenarioModel } from "./domain.js";
+import { KERNEL_VERSION } from "./kernel.js";
 import { generateWorldsVisual, visibleWorldLabelNodes } from "./worlds-report.js";
 
 interface Work { model: ScenarioModel; trials: number; seed: number }
@@ -12,10 +13,11 @@ try {
     ok: true,
     html: generateWorldsVisual(model, trials, seed, result),
     labelNodes: visibleWorldLabelNodes(model, result),
-    artifact: { schemaVersion: 1, model, seed, trials: result.trials },
+    artifact: { schemaVersion: 1, kernelVersion: KERNEL_VERSION, model, seed, trials: result.trials },
     summary: {
       trials,
       seed,
+      kernelVersion: KERNEL_VERSION,
       report: scenarioReport(result),
       winPct: result.winPct,
       winPctTeam: result.winPctTeam,

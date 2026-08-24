@@ -3,9 +3,9 @@ import {
   tagCodec, type Aggregate, type Effect, upcast,
 } from "@lambda-house/teob-ts/core";
 import { assertRunConfig, normalizeShares, type RunConfig, type Shares } from "./domain.js";
-import { stepGeneration, type Generation } from "./kernel.js";
+import { KERNEL_VERSION, stepGeneration, type Generation } from "./kernel.js";
 
-export const KERNEL_VERSION = "1";
+export { KERNEL_VERSION };
 export const runCategory = categoryTypes<RunCommand, RunReply>(CategoryId("game-run"));
 
 export type RunStatus = "new" | "running" | "paused" | "finished";

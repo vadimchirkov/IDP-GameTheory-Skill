@@ -40,6 +40,8 @@ export interface TaskAnalysis {
   revision: number;
   trials: number;
   seed: number;
+  /** Engine that computed this analysis; absent on analyses recorded before provenance stamping. */
+  kernelVersion?: string;
   report: string;
   winPct: Record<string, number>;
   winPctTeam: Record<string, number>;
