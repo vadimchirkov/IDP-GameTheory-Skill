@@ -1,9 +1,9 @@
 import type { AgentSelection } from "../../src/agent-contracts";
 import type { ScenarioModel } from "../../src/domain";
-import type { TaskDecision, TaskReply, TaskState } from "../../src/task";
+import type { Fact, FactKind, OpenQuestion, TaskState } from "../../src/task";
 import type { TaskSummary } from "../../src/task-projections";
 
-export type { AgentSelection, ScenarioModel, TaskDecision, TaskState, TaskSummary };
+export type { AgentSelection, Fact, FactKind, OpenQuestion, ScenarioModel, TaskState, TaskSummary };
 
 export interface AgentStatus {
   available: boolean;
@@ -21,16 +21,6 @@ export interface AgentModelStatus {
   name: string;
   reasoning: boolean;
   thinkingLevels: AgentSelection["thinkingLevel"][];
-}
-
-export interface AgentRequest {
-  message: string;
-  remember?: boolean;
-  research?: boolean;
-  operation?: "understand" | "build-model" | "revise-model";
-  decisions?: readonly TaskDecision[];
-  agent?: AgentSelection;
-  baseRevision: number;
 }
 
 export interface RiverSelection {
@@ -68,6 +58,29 @@ export interface WorldReplay {
   };
 }
 
+/**
+ * Result of a run-scoped chat turn. The agent answers, reweights the run to a stated outcome, or
+ * proposes a model change — `message` (markdown) carries the reply, including any reweight summary.
+ */
+export type FactResult = { kind: "answer" | "observation" | "revision"; message: string };
+
+/** One side of a reweighted run — shares and belief, without the per-world weights. */
+export interface PosteriorView {
+  effectiveSampleSize: number;
+  fit: number;
+  winPct: Record<string, number>;
+  winPctTeam: Record<string, number>;
+  cooperation: { mean: number; std: number };
+  strategyPosterior: Record<string, Record<string, number>>;
+}
+
+/** A run reweighted by its accumulated outcome facts; baseline/posterior are null for legacy runs. */
+export interface RunPosterior {
+  usesTeams: boolean;
+  baseline: PosteriorView | null;
+  posterior: PosteriorView | null;
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -81,17 +94,59 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return value as T;
 }
 
+/** One side of a reweighted run — shares and belief, without the per-world weights. */
+export interface PosteriorView {
+  effectiveSampleSize: number;
+  fit: number;
+  winPct: Record<string, number>;
+  winPctTeam: Record<string, number>;
+  cooperation: { mean: number; std: number };
+  strategyPosterior: Record<string, Record<string, number>>;
+}
+
+/** A run reweighted by the outcome facts; both sides are null for runs saved before artifacts existed. */
+export interface RunPosterior {
+  usesTeams: boolean;
+  baseline: PosteriorView | null;
+  posterior: PosteriorView | null;
+}
+
+/** What a chat message turned out to be. `task` is present when a fact was filed. */
+export interface ChatResult {
+  kind: "answer" | "situation" | "outcome";
+  message: string;
+  task?: TaskState;
+}
+
+export interface ResearchResult {
+  answer: string;
+  confident: boolean;
+  sources: Array<{ title: string; url: string }>;
+}
+
+/** Every fact command returns the whole task, so the caller never reassembles state by hand. */
+export type FactCommand =
+  | { tag: "AddFact"; text: string; kind?: FactKind }
+  | { tag: "EditFact"; factId: string; text: string }
+  | { tag: "RemoveFact"; factId: string }
+  | { tag: "SetFactKind"; factId: string; kind: FactKind }
+  | { tag: "DismissQuestion"; questionId: string }
+  | { tag: "RemoveAnalysis"; analysisId: string }
+  | { tag: "CancelAnalysis" }
+  | { tag: "DeleteTask" };
+
+const post = <T>(path: string, value: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(value) });
+
 export const getTasks = () => api<TaskSummary[]>("/api/tasks");
 export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
+export const createTask = (text: string) => post<TaskState>("/api/tasks", { text });
+export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
+export const understandTask = (id: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
+export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
+export const chatTask = (id: string, message: string, agent?: AgentSelection) => post<ChatResult>(`/api/tasks/${id}/chat`, { message, agent });
+export const researchQuestion = (id: string, question: string, agent?: AgentSelection) => post<ResearchResult>(`/api/tasks/${id}/research`, { question, agent });
 export const getWorldReplay = (taskId: string, analysisId: string, index: number) => api<WorldReplay>(`/api/tasks/${taskId}/analyses/${analysisId}/worlds/${index}/replay`);
+export const getPosterior = (taskId: string, analysisId: string) => api<RunPosterior>(`/api/tasks/${taskId}/analyses/${analysisId}/posterior`);
 export const getAgentStatus = () => api<AgentStatus>("/api/agent/status");
-export const saveProviderKey = (provider: string, apiKey: string) => api<AgentStatus>("/api/agent/credentials", { method: "POST", body: JSON.stringify({ provider, apiKey }) });
+export const saveProviderKey = (provider: string, apiKey: string) => post<AgentStatus>("/api/agent/credentials", { provider, apiKey });
 export const removeProviderKey = (provider: string) => api<AgentStatus>("/api/agent/credentials", { method: "DELETE", body: JSON.stringify({ provider }) });
-export const chatAgent = (value: { message: string; context?: string; agent?: AgentSelection }) => api<{ text: string; suggestions: string[]; agent: AgentSelection }>("/api/agent/chat", { method: "POST", body: JSON.stringify(value) });
-export const getScenarioHints = (value: { text: string; agent?: AgentSelection }) => api<{ hints: string[]; agent: AgentSelection }>("/api/agent/hints", { method: "POST", body: JSON.stringify(value) });
-export const researchScenarioHint = (value: { question: string; context: string; agent?: AgentSelection }) => api<{ text: string; agent: AgentSelection }>("/api/agent/research", { method: "POST", body: JSON.stringify(value) });
-export const createTask = (brief: string) => api<TaskState>("/api/tasks", { method: "POST", body: JSON.stringify({ brief }) });
-export const sendCommand = (id: string, value: Record<string, unknown>) =>
-  api<TaskReply>(`/api/tasks/${id}/commands`, { method: "POST", body: JSON.stringify(value) });
-export const askAgent = (id: string, value: AgentRequest) =>
-  api<TaskState>(`/api/tasks/${id}/agent`, { method: "POST", body: JSON.stringify(value) });

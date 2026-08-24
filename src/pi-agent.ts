@@ -260,11 +260,45 @@ export function parseChatResponse(value: string): { text: string; suggestions: s
   return { text: (match ? value.slice(0, match.index ?? value.length) : value).trim(), suggestions: match ? parseScenarioHints(match[1] ?? "") : [] };
 }
 
-export async function chatWithAgent(message: string, selection?: AgentSelection, includeSuggestions = false): Promise<{ text: string; suggestions: string[]; agent: AgentSelection }> {
+export type ChatTurn = { role: "user" | "agent"; text: string };
+
+function toPiMessages(turns: ChatTurn[], currentMessage: string, context: string | undefined, model: { provider: string; api: string; id: string }) {
+  const messages: Array<{ role: "user" | "assistant"; content: string; timestamp: number }> = [];
+  if (context?.trim()) messages.push({ role: "user", content: `<context>${context.trim().slice(0, 8_000)}</context>`, timestamp: Date.now() });
+  for (const turn of turns.slice(-10)) {
+    const text = turn.text.trim();
+    if (!text) continue;
+    messages.push({ role: turn.role === "agent" ? "assistant" : "user", content: text.slice(0, 8_000), timestamp: Date.now() });
+  }
+  const last = messages.at(-1);
+  if (!last || last.role !== "user" || last.content !== currentMessage.trim().slice(0, 20_000)) {
+    messages.push({ role: "user", content: currentMessage.trim().slice(0, 20_000), timestamp: Date.now() });
+  }
+  return messages.map((m) => m.role === "user"
+    ? { role: "user" as const, content: m.content, timestamp: m.timestamp }
+    : { role: "assistant" as const, content: [{ type: "text" as const, text: m.content }], api: model.api as any, provider: model.provider as any, model: model.id, stopReason: "stop" as const, timestamp: m.timestamp, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as any });
+}
+
+export async function chatWithAgent(
+  message: string,
+  selection?: AgentSelection,
+  includeSuggestions = false,
+  history: ChatTurn[] = [],
+  context?: string,
+): Promise<{ text: string; suggestions: string[]; agent: AgentSelection }> {
+  // support new call shape chatWithAgent({message,history,context, selection}) via overload detection
+  if (typeof message === "object" && message !== null) {
+    const opts = message as unknown as { message: string; history?: ChatTurn[]; context?: string; selection?: AgentSelection; includeSuggestions?: boolean };
+    return chatWithAgent(opts.message, opts.selection, opts.includeSuggestions ?? false, opts.history ?? [], opts.context);
+  }
   const { runtime, model, selection: resolved } = await resolveModel(selection);
+  const messagesForModel = history.length
+    ? toPiMessages(history, message, context, model)
+    : [{ role: "user" as const, content: `${context ? `<context>${context}</context>\n\n` : ""}${message}`, timestamp: Date.now() }];
+  // pi-ai Context requires at least one user message; provide systemPrompt separately
   const response = await runtime.completeSimple(model, {
-    systemPrompt: `You are the assistant inside a game-theory application. Respond in English, concisely and practically. When structure helps, use standard Markdown with short headings, lists, links, and emphasis; do not use HTML or tables. Do not reveal hidden reasoning.${includeSuggestions ? " End the response with exactly three concise next questions derived from the conversation inside this machine-readable block: <followups>one question per line</followups>. Do not refer to the block in the answer." : ""}`,
-    messages: [{ role: "user", content: message, timestamp: Date.now() }],
+    systemPrompt: `You are the assistant inside a game-theory application. Respond in English, concisely and practically. When structure helps, use standard Markdown with short headings, lists, links, and emphasis; do not use HTML or tables. Do not reveal hidden reasoning.${includeSuggestions ? " End the response with exactly three concise next questions that naturally continue THIS conversation (use the last user+assistant turns, the situation and the current river scope). Put them inside this machine-readable block: <followups>one question per line</followups>. Do not refer to the block in the answer." : ""}`,
+    messages: messagesForModel as any,
   }, resolved.thinkingLevel === "off" ? {} : { reasoning: resolved.thinkingLevel });
   if (response.stopReason === "error") throw new Error(response.errorMessage ?? "Pi agent failed");
   const parsed = parseChatResponse(response.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n").trim());
