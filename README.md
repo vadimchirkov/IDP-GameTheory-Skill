@@ -29,12 +29,12 @@ AI.
 
 The three parts have distinct responsibilities:
 
-- **Game theory** supplies the repeated-game model, strategies, payoffs, reputation,
+- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** supplies the repeated-game model, strategies, payoffs, reputation,
   punishment, coalitions, and other interaction mechanisms.
-- **TEOB** supplies the experiment lifecycle: commands, immutable events, revision
+- **[TEOB](https://github.com/lambda-house/teob-ts)** supplies the experiment lifecycle: commands, immutable events, revision
   checks, durable history, recovery after restart, and projections for current
   views. It makes runs traceable and resumable rather than making the math loop fast.
-- **Pi** supplies the modeling agent: it turns prose into explicit assumptions,
+- **[Pi](https://github.com/earendil-works/pi)** supplies the modeling agent: it turns prose into explicit assumptions,
   builds a typed model, optionally researches missing facts, and labels the resulting
   branches in human terms.
 
