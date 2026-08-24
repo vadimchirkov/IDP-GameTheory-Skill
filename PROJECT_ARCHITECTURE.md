@@ -35,10 +35,10 @@ Declared in `package.json:16` (`@lambda-house/teob-ts: 0.2.2`). Exports (`node_m
 | `.` | root | re-export |
 | `./core` | `teob-core` | `Aggregate`, `Effect` (`persist/reply/andReply/andRun`), `EffectControl`, `CategoryId/EntityId/TimerId`, `tagCodec/objectCodec/codecWithUpcasts/upcast`, `AggregateTestKit`, `ReadModel` — **used** |
 | `./inmem` | `teob-inmem` | `createSingleRuntime` / `createInMemoryRuntime` — **current runtime** for tests/demo (`src/selfcheck.ts:4`, `src/run.ts:88`) |
-| `./sqlite` | `teob-sqlite` | `createSqliteRuntime({path})` WAL + snapshots — **planned next** (`PROJECT_ARCHITECTURE §7.4`) |
+| `./sqlite` | `teob-sqlite` | `createSqliteRuntime({path})` WAL + snapshots — **used** by the app server for the `Task` journal (`src/app-server.ts:31`, `data/app.db`). CLI/self-check still use `inmem`. |
 | `./postgres` | `teob-postgres` | `LISTEN/NOTIFY` production journal — **planned after sqlite** |
 | `./projection` | `teob-projection` | `projection()`, `createInMemoryProjectionStore`, `runProjection`, `rebuildProjection` — **used** (`src/projections.ts:1`) |
-| `./http` | `teob-http` | `aggregateRoutes/allAggregateRoutes`, `openApiSchema(describeAggregate(...))`, ETag/If-Match — **planned for envelope** |
+| `./http` | `teob-http` | `aggregateRoutes/allAggregateRoutes`, `openApiSchema(describeAggregate(...))`, ETag/If-Match — **not used**: the app server hand-rolls `node:http` (`src/app-server.ts:3`) + SSE and enforces optimistic concurrency inside the aggregate (`baseRevision` guards) instead of ETag/If-Match |
 | `./quickstart` | `teob-quickstart` | `quickstart({aggregates:[runAggregate]})` zero-config demo — **planned** |
 | `./service` | `teob-service` | layered startup/shutdown, health checks — **planned** |
 | `./saga` | `teob-saga` | `saga/statefulSaga`, `runSaga`, cross-entity choreography — **only if needed** (agent-mode orchestration) |
@@ -61,7 +61,7 @@ Dependency layering (`node_modules/@lambda-house/teob-ts/README.md:72`): `core` 
 * Single `Run` aggregate stores only experiment-level facts (`RunStarted`, `GenerationCompleted*`, `RunFinished`, `RunPaused/Resumed`). ~200 events per run, not 200M.
 * Used for Monte Carlo scenario analysis (`pnpm scenario model.json 600`), tournament, replicator/Moran evolution, spatial sweeps.
 
-### 3.2 Agent simulation — detailed participant mode (designed, not yet default)
+### 3.2 Agent simulation — detailed participant mode (Participant aggregate built; coordinator not wired)
 
 ```
 SimulationRun(runId)              Participant(runId:playerId)
@@ -74,9 +74,19 @@ broadcasts after commit           apply: updates private worldview
 
 `SimulationRun` coordinates: `RoundOpened` → `ctx.ask(Participant, RequestMove)` → collect `MoveSubmitted` → `persist(RoundResolved)` → `ctx.tell(Participant, ReceiveOutcome)`. Requires `ctx.ask/tell`, `ReplyDeferred` (`createDeferredReply`), `teob-ai:agentFlowAggregate`, `teob-saga statefulSaga`. Justified only for 2–10 human/LLM participants where per-move explainability matters. Not mixed into batch Monte Carlo — that would be slow without scientific value.
 
+**Current status.** The `Participant` aggregate itself is implemented (`src/participant.ts`: `Initialize/RequestMove/ReceiveOutcome/Gossip`, per-player event-sourced worldview) and exercised only by `src/selfcheck.ts:120` driving it externally via `runtime.ask`. The `SimulationRun` coordinator does **not** exist yet — `participant.decide` never calls `ctx.ask/tell` (the `ctx` argument is unused), so participants cannot play a match against each other; an external driver must sequence every move. The file also carries `// @ts-nocheck` (`src/participant.ts:9`) and a history cap (`slice(-20)` in `apply`, `src/participant.ts:243,254`). The cap replays deterministically (so it does not break TEOB replay) but truncates the state to the last 20 moves, silently changing the semantics of the long-memory strategies (`grim`, `detective`, `southampton`, `prober`) so a participant-mode match would diverge from the canonical `src/kernel.ts` result. So it is a design spike, not a wireable mode.
+
+### 3.3 App workflow — the shipping orchestration mode (implemented)
+
+The web application runs a **third** mode not covered by the batch/agent split above: the `Task` aggregate (`src/task.ts`) is the only aggregate the app server registers (`src/app-server.ts:31`). It event-sources the scenario lifecycle — `draft → ready → running → labeling → completed` — over a `teob-sqlite` journal, delegates the actual Monte Carlo to `src/analysis.ts` in a worker thread (off the TEOB hot path), and records only experiment-level facts (`AnalysisRequested/Calculated/LabelsCompleted/Completed/Failed`). Game theory here sits *inside* the aggregate's payload (`ScenarioModel`, validated by `assertScenario` before `persist`), never as per-move events. `Run` and `Participant` are not registered by the app server.
+
 ---
 
-## 4. The Only Aggregate: `Run` (`src/run.ts`)
+## 4. Aggregates: `Task` (shipping), `Run`, `Participant`
+
+Three aggregates exist. The app server registers only **`Task`** (`src/task.ts`, §3.3) — the scenario-workflow entity that is the product's real TEOB surface. **`Run`** (`src/run.ts`, this section) is the evolutionary/generational loop, exercised via `src/selfcheck.ts` (and available to a future `--evolve`/dashboard path) but not registered by the app. **`Participant`** (`src/participant.ts`, §3.2) is a per-player spike, self-check only. The detailed contract below documents `Run`; `Task`'s commands/events are typed in `src/task.ts` and its projections in `src/task-projections.ts`.
+
+### 4.0 `Run` (`src/run.ts`)
 
 ### 4.1 Type contract
 
@@ -125,14 +135,7 @@ stateCodec    = objectCodec<RunState>("RunState") // used in src/selfcheck.ts:60
 
 Current runtime: `createSingleRuntime(runAggregate, runEventCodec, stateCodec)` (`src/selfcheck.ts:60`). Each `EntityId` = one independent run journal. Snapshots every 10 events (`src/run.ts:117`) for fast replay (eco/transition cycles >500 gens).
 
-Planned upcasting for schema evolution (`node_modules/@lambda-house/teob-ts/README.md:551`):
-
-```ts
-codecWithUpcasts(baseCodec, [ upcast("RunStarted","RunStarted", old=>({...old, team:"solo"})) ])
-// also for RunStarted.config when adding drift/values/team without breaking old journals
-```
-
-In this repo the hook is documented but not yet needed for the current `RunStarted` shape; `PROJECT_ARCHITECTURE §5-6` mandates `codecWithUpcasts` when `team/colluder` and `values/drift` change `config`.
+Upcasting for schema evolution (`node_modules/@lambda-house/teob-ts/README.md:551`) is **shipped**, not just planned: `runEventCodec = codecWithUpcasts(runEventBaseCodec, [...])` (`src/run.ts:122`) backfills `kernelVersion` and `config.sigma/stepDelayMs` on old `RunStarted` events so pre-`sigma` journals still replay. `Participant` ships the same pattern (`src/participant.ts:282`, backfills `norm`). The next `config` fields (`team/colluder`, `values/drift`) extend this same upcast list rather than breaking old journals.
 
 ### 4.4 Determinism inside decide
 
@@ -173,15 +176,17 @@ store.get<RunSummaryView>("run-summary", entityId)
 
 Properties: resumable (only new events on next run), rebuildable via `rebuildProjection()`. Future stores: `createSqliteProjectionStore(db)` (`node_modules/@lambda-house/teob-ts/README.md:388`). No SQL in handlers — `evolve` is pure. Free views: `strategyShares` chart, `leaderboard`, `cooperationRate` time series, SSE live view + Delta export from the same events.
 
+The app server uses the same mechanism on the `Task` journal: `taskSummaryProjection` (list view) and `taskDetailProjection` (`src/task-projections.ts`) are rebuilt into an `createInMemoryProjectionStore()` on each mutation (`src/app-server.ts:41`) and pushed to the browser over SSE. Read models are in-memory even though the write journal is `sqlite` — projections are cheap to replay from the event stream on restart.
+
 ---
 
 ## 6. Runtime Envelope (current vs planned)
 
 | Concern | Current | Next | Why now / later |
 |---|---|---|---|
-| **Journal** | `teob-inmem` (`createSingleRuntime` / `createInMemoryRuntime`) — no Docker, ms tests | `teob-sqlite` (`createSqliteRuntime({path:"./data/journal.db"})` WAL, snapshots, recovery) → `teob-postgres` (LISTEN/NOTIFY) | `inmem` sufficient for CLI Monte Carlo; persistence only when runs need surviving reboot/sharing |
+| **Journal** | app server: `teob-sqlite` (`createSqliteRuntime({path:"data/app.db"})`, `src/app-server.ts:31`); CLI/self-check: `teob-inmem` (`createSingleRuntime`) | `teob-postgres` (LISTEN/NOTIFY) | `inmem` for headless Monte Carlo; `sqlite` already backs the app so tasks survive reboot; `postgres` only for multi-node sharing |
 | **Testing** | `createAggregateTestKit` + `extractEvents` (`src/selfcheck.ts:1`), `teob-core` invariants, `verify-pack.ts` | `fast-check` property-based + `verifyEntity/verifyAll` (`core.md: Invariants`) | Pure `decide/apply` already testable without runtime |
-| **HTTP** | CLI only (`src/cli.ts`) | `teob-http` `aggregateRoutes/allAggregateRoutes` (ETag/If-Match, OpenAPI `openApiSchema(describeAggregate(...))`) + `teob-quickstart` | Dashboard needs `Run` streaming; no HTTP required for scenario analysis |
+| **HTTP** | hand-rolled `node:http` + SSE (`src/app-server.ts`) driving `Task` via `runtime.ask`; CLI (`src/cli.ts`) for headless runs | optionally `teob-http` `aggregateRoutes` (ETag/If-Match, OpenAPI) + `teob-quickstart` | the app needs SSE live updates + report serving that `teob-http` does not cover; concurrency is enforced by `baseRevision` guards in the aggregate, not ETags |
 | **Saga** | none | `teob-saga` `statefulSaga` only for cross-aggregate orchestration (SimulationRun↔Participant) | Single `Run` aggregate has no cross-entity choreography |
 | **AI** | none — the `llm_agent` stub was removed rather than shipped as a fake strategy | `teob-ai` `agentFlowAggregate` + `ToolPermission.Confirm` | LLM moves justify per-agent entities + `ReplyDeferred` |
 | **Telemetry** | none | `teob-telemetry` `withTelemetry/withJournalTelemetry` | On measured CPU/IO limits |
@@ -258,8 +263,12 @@ src/domain.ts        — payoff validation, ScenarioModel/RunConfig, strategyIds
 src/rng.ts           — xorshift Rng + deriveSeed (determinism contract)
 src/kernel.ts        — Strategy, playMatch(lean→noise→drift), tournament, evolve, stepGeneration
 src/analysis.ts      — oneTrial/analyzeScenario/scenarioReport (batch Monte Carlo, team+perCapita, sensitivity)
-src/run.ts           — Run aggregate (only TEOB entity), EffectControl timers, codecs, snapshots
+src/run.ts           — Run aggregate (evolution loop), EffectControl timers, codecs, snapshots
 src/projections.ts   — runSummary + strategySeries (teob-projection)
+src/task.ts          — Task aggregate (scenario workflow; the aggregate the app registers)
+src/task-projections.ts — taskSummary + taskDetail read models (teob-projection)
+src/participant.ts   — Participant aggregate (per-player spike, self-check only; @ts-nocheck)
+src/app-server.ts    — node:http + SSE server, createSqliteRuntime(Task), worker-thread analysis
 src/spatial.ts       — lattice grid, imitate-best/fermi, coopRate/clusterCount (separate kernel)
 src/cli.ts           — scenario/evolve/heatmap/tournament entry, --seed/--build determinism
 src/feedback.ts      — buildSuggestions from winPct/cooperation/sensitivity
