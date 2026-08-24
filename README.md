@@ -2,6 +2,8 @@
 
 > **Map the currents. Choose your course.**
 
+![Flumina — a scenario river for "Competition in the AI Model Market in 2026", showing branching outcomes and the AI assistant panel](screenshot.png)
+
 Flumina is a local decision laboratory that combines a game-theory
 engine, an event-sourced TEOB workflow, and an AI agent built on headless Pi. It
 turns an ordinary description of a recurring conflict or partnership into hundreds
