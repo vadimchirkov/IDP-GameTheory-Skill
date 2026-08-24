@@ -5,34 +5,43 @@ import {
 import { assertScenario, type ScenarioModel } from "./domain.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 
-export type TaskStatus = "new" | "draft" | "ready" | "running" | "labeling" | "completed" | "failed";
+/**
+ * A scenario is one list of facts.
+ *
+ * `situation` facts say what the situation *is*; they define the model, so changing one bumps
+ * `revision` and leaves existing runs stale until the next Run. `outcome` facts say what already
+ * *happened*; they are evidence that reweights a finished run and never touch the model, so they
+ * leave `revision` alone. That single split is the only structure here — there is no separate brief,
+ * context list, assumption set, or per-run observation store.
+ */
+export type FactKind = "situation" | "outcome";
+export type FactSource = "user" | "agent";
 
-export interface TaskProposal {
+/** Structured reading of an `outcome` fact, used to reweight a run (see `fitPosterior`). */
+export interface FactObservation {
+  cooperation?: number;
+  winner?: string;
+  regime?: string;
+  playerCooperation?: Record<string, number>;
+}
+
+export interface Fact {
   id: string;
-  title?: string;
-  explanation: string;
-  questions: readonly string[];
-  decisions?: readonly TaskDecision[];
-  sources?: readonly TaskSource[];
-  agent?: AgentSelection;
-  agentMeta?: AgentRunMeta;
-  /** Legacy field retained so existing journals can still be replayed. */
-  claudeModel?: string;
-  model?: ScenarioModel;
+  text: string;
+  kind: FactKind;
+  /** `agent` marks an assumption the agent inferred rather than something the user stated. */
+  source: FactSource;
+  observation?: FactObservation;
   createdAt: string;
 }
 
-export interface TaskDecision {
+/** Something the agent is unsure about. Answering it adds a fact; ignoring it is always allowed. */
+export interface OpenQuestion {
   id: string;
   prompt: string;
-  answer: string;
-  alternatives: readonly string[];
 }
 
-export interface TaskSource {
-  title: string;
-  url: string;
-}
+export type TaskStatus = "new" | "ready" | "running" | "labeling" | "completed" | "failed";
 
 export interface TaskAnalysis {
   /** Stable identity for new runs; legacy journal entries are keyed by visualUrl. */
@@ -60,17 +69,17 @@ export interface TaskAnalysis {
 
 export interface TaskState {
   id: string;
-  status: TaskStatus;
+  /** Agent-owned; derived from the facts, not edited by hand. */
   title: string;
-  brief: string;
-  context: readonly string[];
-  assumptions?: readonly TaskDecision[];
+  facts: readonly Fact[];
+  openQuestions: readonly OpenQuestion[];
+  /** Bumped only by `situation` facts — it is the fingerprint a run is measured against. */
   revision: number;
-  agent?: AgentSelection;
-  /** Legacy field retained so existing journals can still be replayed. */
-  claudeModel?: string;
+  status: TaskStatus;
   model?: ScenarioModel;
-  pendingProposal?: TaskProposal;
+  /** `revision` the model was built from; a lower value means the model is stale. */
+  modelRevision?: number;
+  agent?: AgentSelection;
   analyses: readonly TaskAnalysis[];
   activeAnalysis?: { revision: number; trials: number; seed: number; agent?: AgentSelection; analysisId?: string };
   lastError?: string;
@@ -80,41 +89,57 @@ export interface TaskState {
 }
 
 export type TaskCommand =
-  | { tag: "CreateTask"; taskId: string; brief: string; now: string }
-  | { tag: "EditBrief"; brief: string; baseRevision: number; now: string }
-  | { tag: "AddContext"; text: string; baseRevision: number; now: string }
-  | { tag: "EditContext"; index: number; text: string; baseRevision: number; now: string }
-  | { tag: "RemoveAnalysis"; analysisId: string; baseRevision: number; now: string }
-  | { tag: "DeleteTask"; baseRevision: number; now: string }
-  | { tag: "ReplaceModel"; model: ScenarioModel; baseRevision: number; now: string }
-  | { tag: "RecordAgentProposal"; proposal: TaskProposal; baseRevision: number }
-  | { tag: "AcceptProposal"; proposalId: string; baseRevision: number; now: string }
-  | { tag: "RejectProposal"; proposalId: string; baseRevision: number; now: string }
-  | { tag: "RequestAnalysis"; trials: number; seed: number; agent?: AgentSelection; baseRevision: number; now: string }
+  | { tag: "CreateTask"; taskId: string; text: string; factId: string; now: string }
+  | { tag: "AddFact"; factId: string; text: string; kind: FactKind; source: FactSource; observation?: FactObservation; now: string }
+  | { tag: "EditFact"; factId: string; text: string; now: string }
+  | { tag: "RemoveFact"; factId: string; now: string }
+  | { tag: "SetFactKind"; factId: string; kind: FactKind; now: string }
+  | { tag: "SuggestQuestions"; questions: readonly OpenQuestion[]; now: string }
+  | { tag: "DismissQuestion"; questionId: string; now: string }
+  | { tag: "SetTitle"; title: string; now: string }
+  | { tag: "SetModel"; model: ScenarioModel; agent?: AgentSelection; now: string }
+  | { tag: "RemoveAnalysis"; analysisId: string; now: string }
+  | { tag: "DeleteTask"; now: string }
+  | { tag: "RequestAnalysis"; trials: number; seed: number; agent?: AgentSelection; now: string }
   | { tag: "RecordAnalysis"; analysis: TaskAnalysis }
   | { tag: "CompleteAnalysisLabels"; analysisId: string; worldLabels: NonNullable<TaskAnalysis["worldLabels"]>; agentMeta?: AgentRunMeta; now: string }
-  | { tag: "CancelAnalysis"; baseRevision: number; now: string }
-  | { tag: "CompleteAnalysis"; analysis: TaskAnalysis }
+  | { tag: "CancelAnalysis"; now: string }
   | { tag: "FailAnalysis"; revision: number; reason: string; now: string }
   | { tag: "GetTask" };
 
+/**
+ * Events tagged "legacy" are never emitted any more; `apply` still folds them so existing journals
+ * replay into the facts model without rewriting history.
+ */
 export type TaskEvent =
-  | { tag: "TaskCreated"; taskId: string; title: string; brief: string; now: string }
-  | { tag: "BriefEdited"; brief: string; revision: number; now: string }
-  | { tag: "ContextAdded"; text: string; revision: number; invalidatesModel?: boolean; now: string }
-  | { tag: "ContextEdited"; index: number; text: string; revision: number; now: string }
+  | { tag: "TaskCreated"; taskId: string; title: string; brief?: string; fact?: Fact; now: string }
+  | { tag: "FactAdded"; fact: Fact; revision: number; now: string }
+  | { tag: "FactEdited"; factId: string; text: string; revision: number; now: string }
+  | { tag: "FactRemoved"; factId: string; revision: number; now: string }
+  | { tag: "FactKindChanged"; factId: string; kind: FactKind; revision: number; now: string }
+  | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
+  | { tag: "QuestionDismissed"; questionId: string; now: string }
+  | { tag: "TitleSet"; title: string; now: string }
+  | { tag: "ModelBuilt"; model: ScenarioModel; revision: number; agent?: AgentSelection; now: string }
   | { tag: "AnalysisRemoved"; analysisId: string; now: string }
   | { tag: "TaskDeleted"; now: string }
-  | { tag: "ModelReplaced"; model: ScenarioModel; revision: number; now: string }
-  | { tag: "AgentProposalRecorded"; proposal: TaskProposal; now: string }
-  | { tag: "AgentProposalAccepted"; proposalId: string; model: ScenarioModel; assumptions?: readonly TaskDecision[]; agent?: AgentSelection; claudeModel?: string; revision: number; now: string }
-  | { tag: "AgentProposalRejected"; proposalId: string; now: string }
   | { tag: "AnalysisRequested"; revision: number; trials: number; seed: number; agent?: AgentSelection; now: string }
   | { tag: "AnalysisCalculated"; analysis: TaskAnalysis }
   | { tag: "AnalysisLabelsCompleted"; analysisId: string; worldLabels: NonNullable<TaskAnalysis["worldLabels"]>; agentMeta?: AgentRunMeta; now: string }
   | { tag: "AnalysisCancelled"; revision: number; hasResult: boolean; now: string }
   | { tag: "AnalysisCompleted"; analysis: TaskAnalysis }
-  | { tag: "AnalysisFailed"; revision: number; reason: string; now: string };
+  | { tag: "AnalysisFailed"; revision: number; reason: string; now: string }
+  // legacy — replay only
+  | { tag: "BriefEdited"; brief: string; revision: number; now: string }
+  | { tag: "ContextAdded"; text: string; revision: number; invalidatesModel?: boolean; now: string }
+  | { tag: "ContextEdited"; index: number; text: string; revision: number; now: string }
+  | { tag: "ContextRemoved"; index: number; revision: number; now: string }
+  | { tag: "ModelReplaced"; model: ScenarioModel; revision: number; now: string }
+  | { tag: "AgentProposalRecorded"; proposal: { title?: string }; now: string }
+  | { tag: "AgentProposalAccepted"; model: ScenarioModel; agent?: AgentSelection; revision: number; now: string }
+  | { tag: "AgentProposalRejected"; proposalId?: string; now: string }
+  | { tag: "ObservationRecorded"; analysisId: string; observation: { fact: string; observation: FactObservation; now: string }; now: string }
+  | { tag: "ObservationsCleared"; analysisId: string; now: string };
 
 export type TaskReply =
   | { tag: "Accepted"; revision: number }
@@ -122,15 +147,13 @@ export type TaskReply =
   | { tag: "Rejected"; reason: string; revision: number };
 
 export const taskCategory = categoryTypes<TaskCommand, TaskReply>(CategoryId("scenario-task"));
-const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", brief: "", context: [], revision: 0, analyses: [] });
-const titleFrom = (brief: string) => brief.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
+
+const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
+const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
+const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
 
 function rejected(state: TaskState, reason: string): Promise<Effect<TaskEvent, TaskReply>> {
   return Promise.resolve(reply({ tag: "Rejected", reason, revision: state.revision }));
-}
-
-function guardRevision(state: TaskState, revision: number): string | undefined {
-  return revision === state.revision ? undefined : `Task changed: expected revision ${revision}, current ${state.revision}`;
 }
 
 function omit<T extends object, K extends keyof T>(value: T, ...keys: K[]): Omit<T, K> {
@@ -139,30 +162,82 @@ function omit<T extends object, K extends keyof T>(value: T, ...keys: K[]): Omit
   return copy;
 }
 
+/** A model exists but the facts moved on since it was built. */
+export function isModelStale(state: TaskState): boolean {
+  return Boolean(state.model) && (state.modelRevision ?? -1) !== state.revision;
+}
+
+/** The run a user is looking at is stale when the facts have moved on since it was computed. */
+export function isRunStale(state: TaskState, analysis: TaskAnalysis): boolean {
+  return analysis.revision !== state.revision;
+}
+
+const readyStatus = (state: TaskState): TaskStatus => state.analyses.length ? "completed" : "ready";
+
 export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   switch (event.tag) {
-    case "TaskCreated": return { ...initialTask(event.taskId), status: "draft", title: event.title, brief: event.brief, createdAt: event.now, updatedAt: event.now };
-    case "BriefEdited": return { ...omit(state, "pendingProposal", "model", "assumptions", "lastError"), brief: event.brief, revision: event.revision, status: "draft", updatedAt: event.now };
-    case "ContextAdded": return event.invalidatesModel
-      ? { ...omit(state, "pendingProposal", "model", "assumptions", "lastError"), context: [...state.context, event.text], revision: event.revision, status: "draft", updatedAt: event.now }
-      : { ...omit(state, "pendingProposal"), context: [...state.context, event.text], revision: event.revision, status: state.model ? "ready" : "draft", updatedAt: event.now };
-    case "ContextEdited": return { ...omit(state, "pendingProposal", "model", "assumptions", "lastError"), context: state.context.map((text, index) => index === event.index ? event.text : text), revision: event.revision, status: "draft", updatedAt: event.now };
+    case "TaskCreated": {
+      const base = { ...initialTask(event.taskId), title: event.title, createdAt: event.now, updatedAt: event.now };
+      const fact = event.fact ?? (event.brief ? { id: legacyId("brief", event.now, 0), text: event.brief, kind: "situation" as const, source: "user" as const, createdAt: event.now } : undefined);
+      return fact ? { ...base, facts: [fact], revision: 1, status: "ready" } : base;
+    }
+    case "FactAdded": return { ...state, facts: [...state.facts, event.fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
+    case "FactEdited": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, text: event.text, source: "user" } : fact), revision: event.revision, updatedAt: event.now };
+    case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
+    case "FactKindChanged": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, kind: event.kind } : fact), revision: event.revision, updatedAt: event.now };
+    case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
+    case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
+    case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
+    // A run builds its model as its first step, so this must not disturb an in-flight run's status.
+    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, modelRevision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
-      return { ...state, analyses, status: state.status === "completed" && !analyses.length ? state.model ? "ready" : "draft" : state.status, updatedAt: event.now };
+      return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
     }
     case "TaskDeleted": return { ...state, deleted: true, updatedAt: event.now };
-    case "ModelReplaced": return { ...omit(state, "pendingProposal", "lastError"), model: event.model, revision: event.revision, status: "ready", updatedAt: event.now };
-    case "AgentProposalRecorded": return { ...state, title: event.proposal.title?.trim() || state.title, pendingProposal: event.proposal, updatedAt: event.now };
-    case "AgentProposalAccepted": return { ...omit(state, "pendingProposal", "lastError", "agent", "claudeModel"), model: event.model, assumptions: event.assumptions ?? [], ...(event.agent ? { agent: event.agent } : {}), ...(event.claudeModel ? { claudeModel: event.claudeModel } : {}), revision: event.revision, status: "ready", updatedAt: event.now };
-    case "AgentProposalRejected": return { ...omit(state, "pendingProposal"), updatedAt: event.now };
     case "AnalysisRequested": return { ...omit(state, "lastError"), status: "running", activeAnalysis: { revision: event.revision, trials: event.trials, seed: event.seed, ...(event.agent ? { agent: event.agent } : {}) }, updatedAt: event.now };
     case "AnalysisCalculated": return { ...state, analyses: [...state.analyses, event.analysis], status: "labeling", activeAnalysis: { ...state.activeAnalysis!, analysisId: event.analysis.id! }, updatedAt: event.analysis.completedAt };
-    case "AnalysisLabelsCompleted": return { ...omit(state, "activeAnalysis"), analyses: state.analyses.map((analysis) => analysis.id === event.analysisId ? { ...analysis, worldLabels: event.worldLabels, ...(event.agentMeta ? { agentMeta: event.agentMeta } : {}) } : analysis), status: state.model ? "completed" : "draft", updatedAt: event.now };
-    case "AnalysisCancelled": return { ...omit(state, "activeAnalysis", "lastError"), status: event.hasResult || state.analyses.length ? "completed" : state.model ? "ready" : "draft", updatedAt: event.now };
-    case "AnalysisCompleted": return { ...omit(state, "activeAnalysis"), analyses: [...state.analyses, event.analysis], status: event.analysis.revision === state.revision ? "completed" : state.model ? "ready" : "draft", updatedAt: event.analysis.completedAt };
-    case "AnalysisFailed": return { ...omit(state, "activeAnalysis"), status: event.revision === state.revision ? "failed" : state.status, lastError: event.reason, updatedAt: event.now };
+    case "AnalysisLabelsCompleted": return { ...omit(state, "activeAnalysis"), analyses: state.analyses.map((analysis) => analysis.id === event.analysisId ? { ...analysis, worldLabels: event.worldLabels, ...(event.agentMeta ? { agentMeta: event.agentMeta } : {}) } : analysis), status: "completed", updatedAt: event.now };
+    case "AnalysisCancelled": return { ...omit(state, "activeAnalysis", "lastError"), status: event.hasResult || state.analyses.length ? "completed" : "ready", updatedAt: event.now };
+    case "AnalysisCompleted": return { ...omit(state, "activeAnalysis"), analyses: [...state.analyses, event.analysis], status: "completed", updatedAt: event.analysis.completedAt };
+    case "AnalysisFailed": return { ...omit(state, "activeAnalysis"), status: "failed", lastError: event.reason, updatedAt: event.now };
+
+    // ── legacy journal events: fold the old brief/context/proposal/observation shape into facts ──
+    case "BriefEdited": {
+      const [first, ...rest] = state.facts;
+      const edited: Fact = first
+        ? { ...first, text: event.brief }
+        : { id: legacyId("brief", event.now, 0), text: event.brief, kind: "situation", source: "user", createdAt: event.now };
+      return { ...state, facts: [edited, ...rest], revision: event.revision, updatedAt: event.now };
+    }
+    case "ContextAdded": {
+      const fact: Fact = { id: legacyId("context", event.now, state.facts.length), text: event.text, kind: "situation", source: "user", createdAt: event.now };
+      return { ...state, facts: [...state.facts, fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
+    }
+    case "ContextEdited": {
+      const target = state.facts[event.index + 1];
+      return { ...state, facts: target ? state.facts.map((fact) => fact.id === target.id ? { ...fact, text: event.text } : fact) : state.facts, revision: event.revision, updatedAt: event.now };
+    }
+    case "ContextRemoved": {
+      const target = state.facts[event.index + 1];
+      return { ...state, facts: target ? state.facts.filter((fact) => fact.id !== target.id) : state.facts, revision: event.revision, updatedAt: event.now };
+    }
+    case "ModelReplaced":
+    case "AgentProposalAccepted":
+      return { ...omit(state, "lastError"), model: event.model, modelRevision: event.revision, revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
+    case "AgentProposalRecorded": return { ...state, title: event.proposal.title?.trim() || state.title, updatedAt: event.now };
+    case "AgentProposalRejected": return state;
+    case "ObservationRecorded": {
+      const fact: Fact = { id: legacyId("observation", event.now, state.facts.length), text: event.observation.fact, kind: "outcome", source: "user", observation: event.observation.observation, createdAt: event.observation.now };
+      return { ...state, facts: [...state.facts, fact], updatedAt: event.now };
+    }
+    case "ObservationsCleared": return { ...state, facts: state.facts.filter((fact) => fact.kind !== "outcome"), updatedAt: event.now };
   }
+}
+
+/** Only `situation` facts define the model, so only they move the fingerprint runs are compared against. */
+function revisionAfter(state: TaskState, kind: FactKind): number {
+  return kind === "situation" ? state.revision + 1 : state.revision;
 }
 
 export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskState> = {
@@ -172,89 +247,88 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
     if (command.tag === "GetTask") return reply({ tag: "State", state });
     if (command.tag === "CreateTask") {
       if (state.status !== "new") return rejected(state, "Task already exists");
-      if (!command.brief.trim()) return rejected(state, "Brief is required");
-      return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskCreated", taskId: command.taskId, title: titleFrom(command.brief), brief: command.brief.trim(), now: command.now }), { tag: "Accepted", revision: 0 });
+      const text = command.text.trim();
+      if (!text) return rejected(state, "Describe the situation first");
+      const fact: Fact = { id: command.factId, text, kind: "situation", source: "user", createdAt: command.now };
+      return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskCreated", taskId: command.taskId, title: titleFrom(text), fact, now: command.now }), { tag: "Accepted", revision: 1 });
     }
     if (state.status === "new") return rejected(state, "Task does not exist");
     if (state.deleted) return rejected(state, "Task is deleted");
-    if ((state.status === "running" || state.status === "labeling") && !["RecordAnalysis", "CompleteAnalysisLabels", "CancelAnalysis", "CompleteAnalysis", "FailAnalysis"].includes(command.tag)) {
-      return rejected(state, "Wait for the current analysis to finish");
-    }
+    const busy = state.status === "running" || state.status === "labeling";
+    // Facts stay editable while a run is in flight, and `SetModel` is the run's own first step —
+    // only starting a second run at the same time is blocked.
+    if (busy && command.tag === "RequestAnalysis") return rejected(state, "Wait for the current run to finish");
+
     switch (command.tag) {
-      case "EditBrief": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!command.brief.trim()) return rejected(state, "Brief is required");
+      case "AddFact": {
+        const text = command.text.trim();
+        if (!text) return rejected(state, "The fact is empty");
+        if (state.facts.some((fact) => fact.id === command.factId)) return rejected(state, "That fact already exists");
+        const fact: Fact = {
+          id: command.factId, text: text.slice(0, 2000), kind: command.kind, source: command.source,
+          ...(command.observation ? { observation: command.observation } : {}), createdAt: command.now,
+        };
+        const revision = revisionAfter(state, command.kind);
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactAdded", fact, revision, now: command.now }), { tag: "Accepted", revision });
+      }
+      case "EditFact": {
+        const target = state.facts.find((fact) => fact.id === command.factId);
+        if (!target) return rejected(state, "That fact no longer exists");
+        const text = command.text.trim();
+        if (!text) return rejected(state, "The fact is empty");
+        const revision = revisionAfter(state, target.kind);
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactEdited", factId: command.factId, text: text.slice(0, 2000), revision, now: command.now }), { tag: "Accepted", revision });
+      }
+      case "RemoveFact": {
+        const target = state.facts.find((fact) => fact.id === command.factId);
+        if (!target) return rejected(state, "That fact no longer exists");
+        const revision = revisionAfter(state, target.kind);
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactRemoved", factId: command.factId, revision, now: command.now }), { tag: "Accepted", revision });
+      }
+      case "SetFactKind": {
+        const target = state.facts.find((fact) => fact.id === command.factId);
+        if (!target) return rejected(state, "That fact no longer exists");
+        if (target.kind === command.kind) return reply({ tag: "Accepted", revision: state.revision });
+        // Either direction changes which facts define the model, so the fingerprint moves.
         const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "BriefEdited", brief: command.brief.trim(), revision, now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactKindChanged", factId: command.factId, kind: command.kind, revision, now: command.now }), { tag: "Accepted", revision });
       }
-      case "AddContext": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!command.text.trim()) return rejected(state, "Context is empty");
-        const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ContextAdded", text: command.text.trim(), revision, invalidatesModel: true, now: command.now }), { tag: "Accepted", revision });
+      case "SuggestQuestions":
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions: command.questions.slice(0, 5), now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "DismissQuestion":
+        if (!state.openQuestions.some((question) => question.id === command.questionId)) return rejected(state, "That question is already gone");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionDismissed", questionId: command.questionId, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "SetTitle": {
+        const title = command.title.trim().slice(0, 72);
+        if (!title) return rejected(state, "The title is empty");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "TitleSet", title, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
-      case "EditContext": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!Number.isInteger(command.index) || command.index < 0 || command.index >= state.context.length) return rejected(state, "Context item does not exist");
-        if (!command.text.trim()) return rejected(state, "Context is empty");
-        const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ContextEdited", index: command.index, text: command.text.trim(), revision, now: command.now }), { tag: "Accepted", revision });
-      }
-      case "RemoveAnalysis": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!state.analyses.some((analysis) => (analysis.id ?? analysis.visualUrl) === command.analysisId)) return rejected(state, "Analysis does not exist");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisRemoved", analysisId: command.analysisId, now: command.now }), { tag: "Accepted", revision: state.revision });
-      }
-      case "DeleteTask": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskDeleted", now: command.now }), { tag: "Accepted", revision: state.revision });
-      }
-      case "ReplaceModel": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
+      case "SetModel": {
         try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
-        const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelReplaced", model: command.model, revision, now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision: state.revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
       }
-      case "RecordAgentProposal": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (command.proposal.model) try { assertScenario(command.proposal.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid proposed model"); }
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "AgentProposalRecorded", proposal: command.proposal, now: command.proposal.createdAt }), { tag: "Accepted", revision: state.revision });
-      }
-      case "AcceptProposal": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!state.pendingProposal || state.pendingProposal.id !== command.proposalId || !state.pendingProposal.model) return rejected(state, "Proposal is missing or has no model");
-        const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "AgentProposalAccepted", proposalId: command.proposalId, model: state.pendingProposal.model, assumptions: state.pendingProposal.decisions ?? [], ...(state.pendingProposal.agent ? { agent: state.pendingProposal.agent } : {}), ...(state.pendingProposal.claudeModel ? { claudeModel: state.pendingProposal.claudeModel } : {}), revision, now: command.now }), { tag: "Accepted", revision });
-      }
-      case "RejectProposal": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!state.pendingProposal || state.pendingProposal.id !== command.proposalId) return rejected(state, "Proposal is missing");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "AgentProposalRejected", proposalId: command.proposalId, now: command.now }), { tag: "Accepted", revision: state.revision });
-      }
+      case "RemoveAnalysis":
+        if (!state.analyses.some((analysis) => (analysis.id ?? analysis.visualUrl) === command.analysisId)) return rejected(state, "That run no longer exists");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisRemoved", analysisId: command.analysisId, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "DeleteTask":
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskDeleted", now: command.now }), { tag: "Accepted", revision: state.revision });
       case "RequestAnalysis": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!state.model) return rejected(state, "Accept or enter a model first");
-        if (!Number.isInteger(command.trials) || command.trials < 1 || command.trials > 5000) return rejected(state, "Trials must be an integer within 1..5000");
-        if (!Number.isSafeInteger(command.seed) || command.seed < 1 || command.seed > 2_147_483_647) return rejected(state, "Seed must be an integer within 1..2147483647");
-        if (state.status === "running" || state.status === "labeling") return rejected(state, "Analysis is already running");
+        if (!state.facts.some((fact) => fact.kind === "situation")) return rejected(state, "Add at least one fact about the situation first");
+        if (!Number.isInteger(command.trials) || command.trials < 1 || command.trials > 5000) return rejected(state, "Worlds must be a whole number within 1..5000");
+        if (!Number.isSafeInteger(command.seed) || command.seed < 1 || command.seed > 2_147_483_647) return rejected(state, "Seed must be a whole number within 1..2147483647");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisRequested", revision: state.revision, trials: command.trials, seed: command.seed, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "RecordAnalysis":
-        if (!state.activeAnalysis || state.activeAnalysis.analysisId || state.activeAnalysis.revision !== command.analysis.revision || state.activeAnalysis.trials !== command.analysis.trials || state.activeAnalysis.seed !== command.analysis.seed || !command.analysis.id) return rejected(state, "Analysis result is stale");
+        if (!state.activeAnalysis || state.activeAnalysis.analysisId || state.activeAnalysis.revision !== command.analysis.revision || !command.analysis.id) return rejected(state, "That result belongs to an older run");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisCalculated", analysis: command.analysis }), { tag: "Accepted", revision: state.revision });
       case "CompleteAnalysisLabels":
-        if (!state.activeAnalysis?.analysisId || state.activeAnalysis.analysisId !== command.analysisId || !state.analyses.some((analysis) => analysis.id === command.analysisId)) return rejected(state, "Analysis labels are stale");
+        if (!state.activeAnalysis?.analysisId || state.activeAnalysis.analysisId !== command.analysisId || !state.analyses.some((analysis) => analysis.id === command.analysisId)) return rejected(state, "Those labels belong to an older run");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisLabelsCompleted", analysisId: command.analysisId, worldLabels: command.worldLabels, ...(command.agentMeta ? { agentMeta: command.agentMeta } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
-      case "CancelAnalysis": {
-        const conflict = guardRevision(state, command.baseRevision); if (conflict) return rejected(state, conflict);
-        if (!state.activeAnalysis) return rejected(state, "Analysis is not running");
+      case "CancelAnalysis":
+        if (!state.activeAnalysis) return rejected(state, "Nothing is running");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisCancelled", revision: state.activeAnalysis.revision, hasResult: !!state.activeAnalysis.analysisId, now: command.now }), { tag: "Accepted", revision: state.revision });
-      }
-      case "CompleteAnalysis":
-        if (!state.activeAnalysis || state.activeAnalysis.revision !== command.analysis.revision || state.activeAnalysis.trials !== command.analysis.trials || state.activeAnalysis.seed !== command.analysis.seed) return rejected(state, "Analysis result is stale");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisCompleted", analysis: command.analysis }), { tag: "Accepted", revision: state.revision });
       case "FailAnalysis":
-        if (!state.activeAnalysis || state.activeAnalysis.revision !== command.revision) return rejected(state, "Analysis failure is stale");
+        if (!state.activeAnalysis || state.activeAnalysis.revision !== command.revision) return rejected(state, "That failure belongs to an older run");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisFailed", revision: command.revision, reason: command.reason, now: command.now }), { tag: "Accepted", revision: state.revision });
     }
   },
@@ -262,5 +336,14 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
   snapshotEvery: 20,
 };
 
-export const taskEventCodec = tagCodec<TaskEvent>("TaskCreated", "BriefEdited", "ContextAdded", "ContextEdited", "AnalysisRemoved", "TaskDeleted", "ModelReplaced", "AgentProposalRecorded", "AgentProposalAccepted", "AgentProposalRejected", "AnalysisRequested", "AnalysisCalculated", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed");
+export const taskEventCodec = tagCodec<TaskEvent>(
+  "TaskCreated", "FactAdded", "FactEdited", "FactRemoved", "FactKindChanged",
+  "QuestionsSuggested", "QuestionDismissed", "TitleSet", "ModelBuilt",
+  "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
+  "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
+  // legacy tags kept readable so old journals still replay
+  "BriefEdited", "ContextAdded", "ContextEdited", "ContextRemoved", "ModelReplaced",
+  "AgentProposalRecorded", "AgentProposalAccepted", "AgentProposalRejected",
+  "ObservationRecorded", "ObservationsCleared",
+);
 export const taskStateCodec = objectCodec<TaskState>("ScenarioTaskState");

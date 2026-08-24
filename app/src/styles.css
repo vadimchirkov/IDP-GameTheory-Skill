@@ -158,15 +158,16 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .clarifications summary::after { width: 6px; height: 6px; margin-right: 5px; border-right: 1.4px solid var(--muted); border-bottom: 1.4px solid var(--muted); content: ""; transform: rotate(45deg); transition: transform 160ms ease }
 .clarifications[open] summary::after { transform: rotate(225deg) }
 .clarification-list { display: grid; gap: 2px }
-.clarification { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 6px; align-items: center; margin: 0 -6px; padding: 6px 6px; border-radius: 8px; transition: background-color 150ms ease }
+.clarification { display: grid; grid-template-columns: minmax(0, 1fr) 32px 32px; gap: 2px; align-items: center; margin: 0 -6px; padding: 6px 6px; border-radius: 8px; transition: background-color 150ms ease }
 .clarification:hover { background: rgba(255, 255, 255, .03) }
 .clarification small, .clarification span { display: block }
 .clarification small { margin-bottom: 2px; color: var(--muted) }
 .clarification span { overflow-wrap: anywhere; font-size: 11px }
-.inline-edit, .inline-refresh { width: 32px; min-height: 32px; padding: 0; background: transparent; color: var(--muted-strong) }
-.inline-edit { opacity: 0; transition: opacity 160ms ease, color 160ms ease }
-.editable-text:hover .inline-edit, .clarification:hover .inline-edit, .inline-edit:focus-visible { opacity: 1 }
+.inline-edit, .inline-refresh, .inline-delete { width: 32px; min-height: 32px; padding: 0; background: transparent; color: var(--muted-strong) }
+.inline-edit, .inline-delete { opacity: 0; transition: opacity 160ms ease, color 160ms ease, background-color 150ms ease }
+.editable-text:hover .inline-edit, .clarification:hover .inline-edit, .clarification:hover .inline-delete, .inline-edit:focus-visible, .inline-delete:focus-visible { opacity: 1 }
 .inline-edit:hover, .inline-refresh:hover { border-color: transparent; background: transparent; color: var(--ink) }
+.inline-delete:hover { border-color: transparent; background: rgba(226, 109, 101, .1); color: var(--bad) }
 .legacy-note { color: var(--muted) }
 @media (hover: none) { .inline-edit, .row-delete { opacity: 1 } .task-row .task-meta time { opacity: 0 } }
 
@@ -232,8 +233,19 @@ dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
 .hint-research .ui-icon { width: 14px; height: 14px }
 .dialog-actions { position: sticky; bottom: -22px; display: flex; justify-content: flex-end; gap: 8px; margin: 20px -22px -22px; padding: 12px 22px; background: rgba(32, 32, 32, .96) }
 .decision-grid { display: grid; gap: 9px }
-.decision { display: block; padding: 11px; border-radius: 11px; background: var(--bg) }
-.decision small { display: block; margin-bottom: 5px; color: var(--muted) }
+.decision { display: block; padding: 14px; border-radius: 11px; background: var(--bg) }
+.decision small { display: block; margin-bottom: 8px; color: var(--muted) }
+.decision-value { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 8px; align-items: start; margin: 0; padding: 8px 10px; border-radius: 8px; cursor: text; min-height: 36px; box-sizing: border-box; transition: background-color 150ms ease }
+.decision-value:hover { background: rgba(255, 255, 255, .03) }
+.decision-value span, .decision-input { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; line-height: 1.45; padding: 0; margin: 0; font-weight: 400; letter-spacing: 0; box-sizing: border-box }
+.decision-value span { display: block; color: var(--ink); min-height: 20px }
+.decision-value .inline-edit { opacity: 0; align-self: start; margin-top: 0 }
+.decision-value:hover .inline-edit, .decision-value:focus-within .inline-edit { opacity: 1 }
+.decision-value.is-editing { background: rgba(255, 255, 255, .03); cursor: text }
+.decision-input { display: block; width: 100%; min-width: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); box-shadow: none; outline: none; resize: none; overflow: hidden; field-sizing: content; min-height: 20px }
+.decision-input:focus { background: transparent; box-shadow: none; outline: none }
+.decision-input::placeholder { color: var(--muted) }
+.decision-placeholder { color: var(--muted) }
 .proposal-copy { margin-bottom: 14px }
 .model-dialog { width: min(680px, calc(100vw - 28px)) }
 .model-dialog textarea { min-height: min(48vh, 520px) }
@@ -290,6 +302,7 @@ label:has(> select:disabled)::after { opacity: .4 }
 .agent-drawer > header b { font-size: 12px }
 .agent-drawer > header span { max-width: 290px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
 .river-scope { margin: 2px 14px 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0 10px }
+.river-detail .river-scope { margin: 0; padding: 10px 12px 8px }
 .river-scope > div:first-child { min-width: 0 }
 .river-scope small, .river-scope b, .river-scope span { display: block }
 .river-scope small { margin-bottom: 2px; color: var(--muted); font-size: 8px; letter-spacing: .04em; text-transform: uppercase }
@@ -298,6 +311,8 @@ label:has(> select:disabled)::after { opacity: .4 }
 .river-scope > button { min-height: 32px; border-radius: 8px; background: transparent; color: var(--muted-strong); padding: 0 4px; font-size: 9px }
 .river-scope > button:hover { background: transparent; color: var(--ink) }
 .river-scope > .error { flex-basis: 100%; margin: 0 }
+.river-detail { border-top: 1px solid var(--line); background: #151515; padding-bottom: 4px }
+.river-detail .world-replay { margin: 0 12px 10px }
 .world-replay { margin: 0 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: #191919; padding: 10px }
 .replay-title { display: flex; align-items: center; justify-content: space-between; gap: 8px }
 .replay-title small, .replay-title b { display: block }
@@ -317,6 +332,24 @@ label:has(> select:disabled)::after { opacity: .4 }
 .replay-controls { margin-top: 8px; display: flex; align-items: center; gap: 8px }
 .replay-controls button { width: 44px; min-height: 28px; padding: 0; font-size: 9px }
 .replay-controls input { flex: 1; accent-color: var(--accent) }
+.observed { margin: 0 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: #191919; padding: 10px }
+.observed-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px }
+.observed-head small { display: block; color: var(--muted); font-size: 9px }
+.observed-head b { display: block; margin-top: 1px; font-size: 11px }
+.observed-head button { min-height: 26px; border-radius: 8px; background: transparent; color: var(--muted-strong); padding: 0 8px; font-size: 9px }
+.observed-head button:hover { color: var(--ink) }
+.observed-list { margin: 8px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px }
+.observed-list li { color: var(--muted-strong); font-size: 10px }
+.observed-result { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px }
+.observed-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.observed-stats small { display: block; color: var(--muted); font-size: 8px }
+.observed-stats b { font-size: 12px }
+.observed-note { border-radius: 8px; background: rgba(200, 117, 99, .12); color: #dc8b79; padding: 6px 8px; font-size: 9px }
+.observed-row { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 6px }
+.observed-name { overflow: hidden; color: var(--muted-strong); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
+.observed-bar { height: 7px; border-radius: 999px; background: rgba(255, 255, 255, .06); overflow: hidden }
+.observed-bar i { display: block; height: 100%; border-radius: 999px; background: var(--accent) }
+.observed-num { color: var(--muted); font-size: 8px; font-variant-numeric: tabular-nums }
 .replay-note { display: block; margin-top: 6px; color: var(--muted); font-size: 8px; line-height: 1.35 }
 .world-replay > p { margin: 8px 0 0; color: var(--muted); font-size: 9px }
 .chat-messages { min-height: 0; flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px }
@@ -399,3 +432,48 @@ label:has(> select:disabled)::after { opacity: .4 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important }
 }
+
+/* ── Facts: the single input surface ───────────────────────────────────────── */
+.facts-section .section-heading { align-items: baseline }
+.link-button { min-height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-strong); padding: 0 6px; font-size: 10px; cursor: pointer }
+.link-button:hover:not(:disabled) { background: rgba(255, 255, 255, .05); color: var(--ink) }
+.link-button:disabled { opacity: .4; cursor: default }
+
+.fact-list { display: grid; gap: 1px; margin: 6px 0 0; padding: 0; list-style: none }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; margin: 0 -6px; padding: 6px; border-radius: 8px; transition: background-color 150ms ease }
+.fact:hover { background: rgba(255, 255, 255, .03) }
+.fact-text { display: block; width: 100%; border: 0; background: transparent; color: var(--ink); padding: 0; font: inherit; font-size: 11.5px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; cursor: text }
+.fact.outcome .fact-text { color: var(--muted-strong) }
+.fact-input { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 5px 7px; font: inherit; font-size: 11.5px; line-height: 1.45 }
+.fact-tag { margin-left: 6px; border-radius: 999px; background: rgba(255, 255, 255, .07); color: var(--muted); padding: 1px 5px; font-size: 8px; vertical-align: middle }
+
+.fact-tools { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 150ms ease }
+.fact:hover .fact-tools, .fact:focus-within .fact-tools { opacity: 1 }
+.fact-kind { border: 0; border-radius: 999px; background: rgba(255, 255, 255, .06); color: var(--muted); padding: 2px 7px; font-size: 8px; white-space: nowrap; cursor: pointer }
+.fact-kind:hover:not(:disabled) { background: rgba(255, 255, 255, .12); color: var(--ink) }
+.fact-kind.outcome { background: rgba(93, 157, 132, .16); color: #82c5aa }
+.fact-remove { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
+.fact-remove:hover:not(:disabled) { background: rgba(200, 117, 99, .16); color: #dc8b79 }
+
+.fact-group-label { margin: 13px 0 3px; color: var(--muted-strong); font-size: 9px; text-transform: uppercase; letter-spacing: .04em }
+.fact-group-label span { margin-left: 6px; color: var(--muted); font-size: 9px; text-transform: none; letter-spacing: 0 }
+
+.fact-add { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end }
+.fact-add textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 7px 8px; font: inherit; font-size: 11px }
+.fact-add textarea::placeholder { color: var(--muted) }
+.fact-add button { min-height: 30px; border-radius: 8px; font-size: 10px }
+
+/* ── Open questions: always optional, never a gate ─────────────────────────── */
+.question-list { display: grid; gap: 4px; margin: 5px 0 0; padding: 0; list-style: none }
+.question { border: 1px solid var(--line); border-radius: 9px; padding: 8px }
+.question-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start }
+.question-prompt { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere }
+.question-dismiss { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
+.question-dismiss:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--ink) }
+.question-actions { margin-top: 6px; display: flex; gap: 5px }
+.question-actions button { min-height: 26px; border-radius: 7px; padding: 0 9px; font-size: 9.5px }
+.question-answer textarea { width: 100%; box-sizing: border-box; margin-top: 6px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 6px 8px; font: inherit; font-size: 11px }
+.question-sources { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px }
+.question-sources a { color: var(--muted); font-size: 9px; text-decoration: underline }
+
+.stale-hint { margin-top: 11px; border-radius: 8px; background: rgba(178, 140, 87, .13); color: #d8b071; padding: 6px 8px; font-size: 9.5px }

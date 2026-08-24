@@ -18,21 +18,45 @@ export const agentSelectionSchema = Type.Object({
 }, closed);
 export type AgentSelection = Static<typeof agentSelectionSchema>;
 
-export const decisionSchema = Type.Object({
-  id: Type.String({ minLength: 1, maxLength: 64 }),
-  prompt: Type.String({ minLength: 1, maxLength: 240 }),
-  answer: Type.String({ minLength: 1, maxLength: 180 }),
-  alternatives: Type.Array(Type.String({ minLength: 1, maxLength: 180 })),
+/**
+ * What the agent produces after reading a situation. Its confident guesses become facts the user can
+ * edit; the things it is genuinely unsure about become optional questions that never block a run.
+ * There is deliberately no "answer" field on a question — a pre-answered question is a fact.
+ */
+export const understandingOutputSchema = Type.Object({
+  title: Type.String({ minLength: 1, maxLength: 72 }),
+  assumedFacts: Type.Array(Type.String({ minLength: 1, maxLength: 300 })),
+  questions: Type.Array(Type.String({ minLength: 1, maxLength: 200 })),
 }, closed);
-export type AgentDecision = Static<typeof decisionSchema>;
+export type UnderstandingOutput = Static<typeof understandingOutputSchema>;
 
-export const proposalOutputSchema = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: 80 }),
-  explanation: Type.String({ minLength: 1, maxLength: 4000 }),
-  decisions: Type.Array(decisionSchema),
+/** A researched answer to one open question: a plain-language statement plus the sources behind it. */
+export const researchAnswerOutputSchema = Type.Object({
+  answer: Type.String({ minLength: 1, maxLength: 300 }),
+  confident: Type.Boolean(),
   sourceIds: Type.Array(Type.String({ minLength: 1, maxLength: 64 })),
 }, closed);
-export type ProposalOutput = Static<typeof proposalOutputSchema>;
+export type ResearchAnswerOutput = Static<typeof researchAnswerOutputSchema>;
+
+/**
+ * Router output for a chat turn. The agent decides whether the message is a plain question (`answer`),
+ * a fact about what the situation is (`situation`, rebuild on the next run), or a fact about what
+ * already happened (`outcome`, reweight now). `message` is always the reply to show.
+ */
+export const factRoutingOutputSchema = Type.Object({
+  kind: stringEnum(["answer", "situation", "outcome"] as const),
+  message: Type.String({ minLength: 1, maxLength: 2000 }),
+  observation: nullable(Type.Object({
+    cooperation: nullable(Type.Number({ minimum: 0, maximum: 1 })),
+    winner: nullable(Type.String({ minLength: 1, maxLength: 120 })),
+    regime: nullable(stringEnum(["cooperation", "oscillation", "fragile", "conflict", "exit"] as const)),
+    playerCooperation: nullable(Type.Array(Type.Object({
+      name: Type.String({ minLength: 1, maxLength: 120 }),
+      rate: Type.Number({ minimum: 0, maximum: 1 }),
+    }, closed))),
+  }, closed)),
+}, closed);
+export type FactRoutingOutput = Static<typeof factRoutingOutputSchema>;
 
 export const worldLabelsOutputSchema = Type.Object({
   labels: Type.Array(Type.Object({
@@ -205,7 +229,7 @@ export interface AgentUsage {
 
 export interface AgentRunMeta {
   runId: string;
-  operation: "understand" | "build-model" | "revise-model" | "labels";
+  operation: "understand" | "build-model" | "labels" | "route-fact" | "research";
   provider: string;
   model: string;
   thinkingLevel: AgentSelection["thinkingLevel"];

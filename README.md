@@ -45,25 +45,36 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 ## What the application does
 
+A scenario is **one list of facts** and **one Run button**.
+
 1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
-   shared resource, or another relationship in which 2–10 sides meet repeatedly.
-2. **Clarify the important unknowns.** The Pi agent identifies gaps, can research a
-   concrete fact, and presents its assumptions in plain language for confirmation.
-3. **Build a model.** Confirmed assumptions are converted into a closed, typed
-   `ScenarioModel`. The model must also pass the engine's domain validation.
-4. **Run possible worlds.** The engine rapidly samples payoff ranges, strategies,
-   noise, continuation probability, dispositions, and other enabled mechanisms.
-   One run can explore 1–5000 worlds; the default is 600.
+   shared resource, or another relationship in which 2–10 sides meet repeatedly. What
+   you write becomes the first fact.
+2. **Let the agent fill in the rest.** It adds the assumptions it can infer as ordinary
+   facts, marked *assumed* so you can edit or delete them, and raises what it cannot
+   infer as optional questions. Questions never block anything: answer one to replace
+   the assumption, ignore it to keep the default, or look it up on the web.
+3. **Keep adding facts.** A fact is either about **the situation** (it shapes the model)
+   or about **what already happened** (it is evidence). You can type facts directly or
+   just say them in the chat — the agent files them and flags which kind it chose, and
+   you can flip that with one click.
+4. **Press Run.** One action rebuilds the model from the situation facts, validates it
+   against the engine's domain rules, and explores 1–5000 worlds (default 600). Adding
+   facts never triggers a run by itself.
 5. **Explore the result.** An interactive river groups worlds by approach, opening,
    response, development, and outcome. Select a branch to inspect it or replay a
    representative pair round by round.
-6. **Compare runs.** Every run keeps its model revision, seed, metrics, visual report,
-   and replay artifact. Editing the situation marks older runs as stale without
-   erasing them.
+6. **Say what actually happened.** An outcome fact reweights the finished run instantly
+   — no re-run — to the worlds consistent with it, and reports how many still match.
+   Outcome facts never enter the model, so the analysis stays a forecast rather than a
+   restatement of the answer.
+7. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
+   seed, metrics, visual report, and replay artifact. New situation facts mark older
+   runs stale without erasing them.
 
-The application also includes provider/model selection, reasoning-level controls,
-an assistant chat scoped to the current situation or selected branch, cancellable
-background analysis, live updates, and undoable deletion.
+The application also includes provider/model selection, reasoning-level controls, a
+read-only view of the model built from your facts, cancellable background analysis,
+live updates, and undoable deletion.
 
 ## Quick start
 
