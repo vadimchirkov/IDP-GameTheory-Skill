@@ -6,7 +6,7 @@ import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
 import { createInMemoryProjectionStore, runProjection } from "@lambda-house/teob-ts/projection";
 import { analyzeScenario, replayScenarioWorld } from "./analysis.js";
 import { normalizeShares, type RunConfig, type ScenarioModel } from "./domain.js";
-import { playMatch, stepGeneration, strategies } from "./kernel.js";
+import { KERNEL_VERSION, playMatch, stepGeneration, strategies } from "./kernel.js";
 import { Rng } from "./rng.js";
 import { runAggregate, runCategory, runEventCodec, type RunCommand, type RunReply, type RunState } from "./run.js";
 import { runSummaryProjection, type RunSummaryView } from "./projections.js";
@@ -101,6 +101,9 @@ const initial = runAggregate.initial(EntityId("check"));
 const startEffect = await runAggregate.decide(initial, { tag: "StartRun", config, seed: 42 }, noOpContext);
 const startEvents = extractEvents(startEffect);
 assert.deepEqual(startEvents.map((event) => event.tag), ["RunStarted"]);
+// Provenance: the engine version is stamped from a single source (kernel) onto the event that fixes a run.
+assert.equal((startEvents[0] as { kernelVersion?: string }).kernelVersion, KERNEL_VERSION, "RunStarted records the engine version that will reproduce it");
+assert.ok(KERNEL_VERSION.length > 0, "engine version is non-empty");
 const started = startEvents.reduce((state, event) => runAggregate.apply(state, event), initial);
 const stepEffect = await runAggregate.decide(started, { tag: "StepGeneration", generation: 0 }, noOpContext);
 const stepped = extractEvents(stepEffect).reduce((state, event) => runAggregate.apply(state, event), started);

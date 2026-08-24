@@ -75,6 +75,8 @@ export interface TrialTrace {
 
 export interface RiverArtifact {
   schemaVersion: 1;
+  /** Engine that produced these worlds; absent on artifacts written before provenance stamping. */
+  kernelVersion?: string;
   model: ScenarioModel;
   seed: number;
   trials: readonly Trial[];
