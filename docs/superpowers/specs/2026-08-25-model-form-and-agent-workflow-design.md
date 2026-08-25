@@ -1,7 +1,7 @@
 # Redesign: the model is the object you edit; facts become outcome-only
 
 **Date:** 2026-08-25
-**Status:** Proposed
+**Status:** Implemented (2026-08-26). Section 9 records what shipped and what a live walkthrough caught.
 **Scope:** How a scenario is built and edited, and how the workspace is laid out. Touches the task
 aggregate (`src/task.ts`), the agent flow (`src/scenario-agent.ts`, `src/app-server.ts`), and the
 workspace UI (`app/src/workspace.tsx`, `app/src/facts.tsx`). Does **not** change the simulation
@@ -243,7 +243,43 @@ rather than per fact) so a guess is not mistaken for user input.
 
 ---
 
-## 9. Summary
+## 9. What shipped
+
+Built in three phases, `pnpm test` and `pnpm build` green at each step:
+
+1. **Aggregate** (`src/task.ts`) — `situation` prose seed + `SetSituation`; `SetModel` bumps `revision`
+   behind a deep-equal guard so re-saving an unchanged model does not stale a run; `AddFact` is
+   outcome-only and requires a model; `SetFactKind`/`FactKindChanged`/`modelRevision`/`isModelStale`
+   removed; `RequestAnalysis` requires a model. Legacy journals still replay untouched.
+2. **Agent and server** — `buildScenarioModel(situation, current, selection)` and
+   `understandSituation` build from the prose seed and return a model plus field-pointed questions;
+   `routeMessage` narrowed to `answer | outcome`; research deleted from the agent, the schemas and the
+   routes (`src/web-research.ts` stays in the repo, unreferenced).
+3. **Frontend** — `app/src/model-form.tsx` (445 lines) is the grouped form; `Model | River` tabs
+   replace the middle pane; `facts.tsx` shrank to an outcome-only list (202 → 19 lines).
+
+**Deviation from the plan:** the middle pane's removal collapsed the two-pane show/hide machinery into
+a single situations rail toggle, and the saved-runs strip moved under the river rather than into a new
+pane. Custom `memory` tables and `topology` remain raw-JSON-only, as designed.
+
+**A live walkthrough caught four defects, all fixed in `fb62042`:**
+
+- Journals whose prose only ever lived inside the model opened with a blank situation, so the form was
+  empty and `understand` returned 409. Fixed at the root: any event carrying a model seeds `situation`
+  from `model.situation` when it is empty, so legacy tasks recover on replay with no migration.
+- Legacy `situation` facts were counted and listed as outcome evidence ("5 facts applied to this run").
+  The workspace now filters to `kind === "outcome"` for both the list and the count.
+- Switching the kind of standoff produced a model the engine rejects, because the payoff ordering no
+  longer matched — a dead control whose only feedback was an error far down the page. The form now
+  permutes the existing ranges into the roles the new ordering needs (verified against `assertScenario`
+  for all twelve transitions), carrying `eco.A1` and any transition states with it.
+- The posterior card and the chat still pointed at "situation facts" that no longer exist.
+
+**Verified end to end in the running app:** prose → model form → agent build → Run → simulation →
+labeling → river; then an outcome stated in chat filed an outcome fact and reweighted the run, with the
+engine honestly reporting a 0% fit for an outcome its assumptions cannot produce.
+
+## 10. Summary
 
 The model becomes the object you edit — a grouped Basics/Mechanisms/Advanced form the agent helps
 fill, in its own Model tab beside a River tab. Situation-facts disappear into the model; only outcome
