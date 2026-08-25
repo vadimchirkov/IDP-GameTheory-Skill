@@ -477,3 +477,44 @@ label:has(> select:disabled)::after { opacity: .4 }
 .question-sources a { color: var(--muted); font-size: 9px; text-decoration: underline }
 
 .stale-hint { margin-top: 11px; border-radius: 8px; background: rgba(178, 140, 87, .13); color: #d8b071; padding: 6px 8px; font-size: 9.5px }
+.question-field { display: block; margin-top: 3px; color: var(--muted); font-size: 9px }
+
+/* ── The model, edited directly: basics, opt-in mechanisms, advanced ───────── */
+.model-fields { min-width: 0; margin: 0; border: 0; padding: 0 }
+.model-fields:disabled { opacity: .55 }
+.model-block { display: block; margin-top: 14px }
+.model-block > .fact-group-label { margin-top: 0 }
+.model-form textarea, .model-form input, .model-form select { width: 100%; min-width: 0; min-height: 32px; border: 0; border-radius: 8px; background: #191919; padding: 6px 9px; font-size: 11px; box-shadow: inset 0 0 0 1px var(--line) }
+.model-form textarea { resize: vertical; line-height: 1.45 }
+.model-form label > span:first-child { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 5px }
+.mechanism-chip { min-height: 28px; flex-direction: column; gap: 0; border-radius: 999px; background: rgba(255, 255, 255, .05); padding: 0 11px; color: var(--muted-strong); font-size: 10px; white-space: nowrap }
+.mechanism-chip:hover:not(:disabled) { background: rgba(255, 255, 255, .1); color: var(--ink) }
+.mechanism-chip[aria-pressed=true] { background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong) }
+.mechanism-chip small { color: var(--muted); font-size: 8px }
+
+.player-row { margin-top: 5px }
+.player-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 20px; gap: 5px; align-items: center }
+.player-main label { position: relative; min-width: 0 }
+.player-main label::after { bottom: 14px }
+.player-spacer { display: block }
+.player-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 4px 0 8px }
+.player-row .fact-remove { opacity: .5 }
+.player-row:hover .fact-remove { opacity: 1 }
+
+.payoff-table { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.payoff-group { margin-bottom: 9px }
+.payoff-group small { display: block; margin-bottom: 4px; color: var(--muted-strong); font-size: 9px }
+.range-field > span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px }
+.range-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px }
+.model-warning { margin-top: 8px; border-radius: 8px; background: rgba(178, 140, 87, .13); color: #d8b071; padding: 6px 8px; font-size: 9.5px }
+
+.mechanism-panel { display: grid; gap: 7px; margin-top: 8px; border-radius: 10px; background: rgba(255, 255, 255, .025); padding: 10px }
+.mechanism-panel small { color: var(--muted); font-size: 9px; line-height: 1.4 }
+.check { display: flex; align-items: center; gap: 7px }
+.check > span:first-child, .model-form .check > span { margin: 0; color: var(--muted-strong); font-size: 10px }
+.check input[type=checkbox] { width: 15px; min-height: 15px; flex: 0 0 auto; accent-color: var(--accent) }
+.model-advanced { margin-top: 16px }
+.model-advanced > summary { padding: 4px 0 }
+.note-row { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) 20px; gap: 5px; align-items: center; margin-bottom: 5px }
