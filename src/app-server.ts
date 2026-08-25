@@ -181,10 +181,9 @@ const factKind = (value: unknown): FactKind => {
 function commandFrom(input: Record<string, unknown>): TaskCommand {
   const now = new Date().toISOString();
   switch (input.tag) {
-    case "AddFact": return { tag: "AddFact", factId: randomUUID(), text: String(input.text ?? ""), kind: factKind(input.kind ?? "situation"), source: "user", now };
+    case "AddFact": return { tag: "AddFact", factId: randomUUID(), text: String(input.text ?? ""), kind: factKind(input.kind ?? "outcome"), source: "user", now };
     case "EditFact": return { tag: "EditFact", factId: String(input.factId ?? ""), text: String(input.text ?? ""), now };
     case "RemoveFact": return { tag: "RemoveFact", factId: String(input.factId ?? ""), now };
-    case "SetFactKind": return { tag: "SetFactKind", factId: String(input.factId ?? ""), kind: factKind(input.kind), now };
     case "DismissQuestion": return { tag: "DismissQuestion", questionId: String(input.questionId ?? ""), now };
     case "RemoveAnalysis": return { tag: "RemoveAnalysis", analysisId: String(input.analysisId ?? ""), now };
     case "DeleteTask": return { tag: "DeleteTask", now };
