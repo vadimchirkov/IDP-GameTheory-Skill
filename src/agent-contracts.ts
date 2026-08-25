@@ -19,14 +19,16 @@ export const agentSelectionSchema = Type.Object({
 export type AgentSelection = Static<typeof agentSelectionSchema>;
 
 /**
- * What the agent produces after reading a situation. Its confident guesses become facts the user can
- * edit; the things it is genuinely unsure about become optional questions that never block a run.
- * There is deliberately no "answer" field on a question — a pre-answered question is a fact.
+ * What the agent produces after reading a situation: a title and the questions it genuinely cannot
+ * answer, each optionally pointing at the model field the answer would fill. The model itself is built
+ * separately (see buildScenarioModel), so there is no assumptions field here.
  */
 export const understandingOutputSchema = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 72 }),
-  assumedFacts: Type.Array(Type.String({ minLength: 1, maxLength: 300 })),
-  questions: Type.Array(Type.String({ minLength: 1, maxLength: 200 })),
+  questions: Type.Array(Type.Object({
+    prompt: Type.String({ minLength: 1, maxLength: 200 }),
+    field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+  }, closed)),
 }, closed);
 export type UnderstandingOutput = Static<typeof understandingOutputSchema>;
 
@@ -39,12 +41,12 @@ export const researchAnswerOutputSchema = Type.Object({
 export type ResearchAnswerOutput = Static<typeof researchAnswerOutputSchema>;
 
 /**
- * Router output for a chat turn. The agent decides whether the message is a plain question (`answer`),
- * a fact about what the situation is (`situation`, rebuild on the next run), or a fact about what
- * already happened (`outcome`, reweight now). `message` is always the reply to show.
+ * Router output for a chat turn. The agent decides whether the message is a plain question or a
+ * statement about what the situation is (`answer`, replied to and left for the user to edit the model),
+ * or a fact about what already happened (`outcome`, reweight now). `message` is always the reply to show.
  */
 export const factRoutingOutputSchema = Type.Object({
-  kind: stringEnum(["answer", "situation", "outcome"] as const),
+  kind: stringEnum(["answer", "outcome"] as const),
   message: Type.String({ minLength: 1, maxLength: 2000 }),
   observation: nullable(Type.Object({
     cooperation: nullable(Type.Number({ minimum: 0, maximum: 1 })),
