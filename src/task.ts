@@ -95,7 +95,6 @@ export type TaskCommand =
   | { tag: "AddFact"; factId: string; text: string; kind: FactKind; source: FactSource; observation?: FactObservation; now: string }
   | { tag: "EditFact"; factId: string; text: string; now: string }
   | { tag: "RemoveFact"; factId: string; now: string }
-  | { tag: "SetFactKind"; factId: string; kind: FactKind; now: string }
   | { tag: "SuggestQuestions"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "DismissQuestion"; questionId: string; now: string }
   | { tag: "SetTitle"; title: string; now: string }
@@ -119,7 +118,6 @@ export type TaskEvent =
   | { tag: "FactAdded"; fact: Fact; revision: number; now: string }
   | { tag: "FactEdited"; factId: string; text: string; revision: number; now: string }
   | { tag: "FactRemoved"; factId: string; revision: number; now: string }
-  | { tag: "FactKindChanged"; factId: string; kind: FactKind; revision: number; now: string }
   | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "QuestionDismissed"; questionId: string; now: string }
   | { tag: "TitleSet"; title: string; now: string }
@@ -183,13 +181,12 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "FactAdded": return { ...state, facts: [...state.facts, event.fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
     case "FactEdited": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, text: event.text, source: "user" } : fact), revision: event.revision, updatedAt: event.now };
     case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
-    case "FactKindChanged": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, kind: event.kind } : fact), revision: event.revision, updatedAt: event.now };
     case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
       return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
@@ -235,11 +232,6 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   }
 }
 
-/** Only `situation` facts define the model, so only they move the fingerprint runs are compared against. */
-function revisionAfter(state: TaskState, kind: FactKind): number {
-  return kind === "situation" ? state.revision + 1 : state.revision;
-}
-
 export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskState> = {
   category: CategoryId("scenario-task"),
   initial: (id: EntityId) => initialTask(String(id)),
@@ -261,37 +253,25 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
     switch (command.tag) {
       case "AddFact": {
+        if (command.kind !== "outcome") return rejected(state, "Situations are edited in the model now; only what happened is filed as a fact");
         const text = command.text.trim();
         if (!text) return rejected(state, "The fact is empty");
+        if (!state.model) return rejected(state, "Build a model before recording what happened");
         if (state.facts.some((fact) => fact.id === command.factId)) return rejected(state, "That fact already exists");
-        const fact: Fact = {
-          id: command.factId, text: text.slice(0, 2000), kind: command.kind, source: command.source,
-          ...(command.observation ? { observation: command.observation } : {}), createdAt: command.now,
-        };
-        const revision = revisionAfter(state, command.kind);
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactAdded", fact, revision, now: command.now }), { tag: "Accepted", revision });
+        const fact: Fact = { id: command.factId, text: text.slice(0, 2000), kind: "outcome", source: command.source, ...(command.observation ? { observation: command.observation } : {}), createdAt: command.now };
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactAdded", fact, revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "EditFact": {
         const target = state.facts.find((fact) => fact.id === command.factId);
         if (!target) return rejected(state, "That fact no longer exists");
         const text = command.text.trim();
         if (!text) return rejected(state, "The fact is empty");
-        const revision = revisionAfter(state, target.kind);
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactEdited", factId: command.factId, text: text.slice(0, 2000), revision, now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactEdited", factId: command.factId, text: text.slice(0, 2000), revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "RemoveFact": {
         const target = state.facts.find((fact) => fact.id === command.factId);
         if (!target) return rejected(state, "That fact no longer exists");
-        const revision = revisionAfter(state, target.kind);
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactRemoved", factId: command.factId, revision, now: command.now }), { tag: "Accepted", revision });
-      }
-      case "SetFactKind": {
-        const target = state.facts.find((fact) => fact.id === command.factId);
-        if (!target) return rejected(state, "That fact no longer exists");
-        if (target.kind === command.kind) return reply({ tag: "Accepted", revision: state.revision });
-        // Either direction changes which facts define the model, so the fingerprint moves.
-        const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactKindChanged", factId: command.factId, kind: command.kind, revision, now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "FactRemoved", factId: command.factId, revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "SuggestQuestions":
         return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions: command.questions.slice(0, 5), now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -305,7 +285,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       }
       case "SetModel": {
         try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision: state.revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
+        const changed = JSON.stringify(state.model) !== JSON.stringify(command.model);
+        const revision = changed ? state.revision + 1 : state.revision;
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
       }
       case "SetSituation": {
         const text = command.text.trim();
@@ -319,7 +301,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "DeleteTask":
         return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskDeleted", now: command.now }), { tag: "Accepted", revision: state.revision });
       case "RequestAnalysis": {
-        if (!state.facts.some((fact) => fact.kind === "situation")) return rejected(state, "Add at least one fact about the situation first");
+        if (!state.model) return rejected(state, "Build a model before running");
         if (!Number.isInteger(command.trials) || command.trials < 1 || command.trials > 5000) return rejected(state, "Worlds must be a whole number within 1..5000");
         if (!Number.isSafeInteger(command.seed) || command.seed < 1 || command.seed > 2_147_483_647) return rejected(state, "Seed must be a whole number within 1..2147483647");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisRequested", revision: state.revision, trials: command.trials, seed: command.seed, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -343,7 +325,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 };
 
 export const taskEventCodec = tagCodec<TaskEvent>(
-  "TaskCreated", "FactAdded", "FactEdited", "FactRemoved", "FactKindChanged",
+  "TaskCreated", "FactAdded", "FactEdited", "FactRemoved",
   "QuestionsSuggested", "QuestionDismissed", "TitleSet", "SituationSet", "ModelBuilt",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
