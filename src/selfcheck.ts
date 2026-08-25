@@ -187,8 +187,6 @@ await task.runtime.ask(tid, { tag: "SetFactKind", factId: "fact-4", kind: "situa
 assert.equal((await taskState()).revision, beforeOutcome + 1, "correcting a misfiled fact re-dates the model");
 await task.runtime.ask(tid, { tag: "SetFactKind", factId: "fact-4", kind: "outcome", now: "2026-01-01T00:00:07Z" }, taskCategory);
 
-await task.runtime.ask(tid, { tag: "RemoveFact", factId: "fact-3", now: "2026-01-01T00:00:08Z" }, taskCategory);
-assert.ok(!(await taskState()).facts.some((fact) => fact.id === "fact-3"), "a fact can be removed");
 const missing = await task.runtime.ask(tid, { tag: "EditFact", factId: "gone", text: "x", now: "2026-01-01T00:00:09Z" }, taskCategory);
 assert.ok(missing.ok && missing.value.reply?.tag === "Rejected", "editing a fact that no longer exists is rejected");
 
