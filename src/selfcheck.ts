@@ -136,7 +136,7 @@ await participant.runtime.shutdown();
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
-const state0: TaskState = { id: "legacy", status: "ready", title: "Legacy", facts: [], openQuestions: [], revision: 0, analyses: [] };
+const state0: TaskState = { id: "legacy", status: "ready", title: "Legacy", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] };
 const legacyJournal: TaskEvent[] = [
   { tag: "TaskCreated", taskId: "legacy", title: "Legacy", brief: "A legacy brief", now: "2025-01-01T00:00:00Z" },
   { tag: "ContextAdded", text: "a legacy clarification", revision: 2, now: "2025-01-01T00:00:01Z" },

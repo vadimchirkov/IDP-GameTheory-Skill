@@ -6,13 +6,11 @@ import { assertScenario, type ScenarioModel } from "./domain.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 
 /**
- * A scenario is one list of facts.
- *
- * `situation` facts say what the situation *is*; they define the model, so changing one bumps
- * `revision` and leaves existing runs stale until the next Run. `outcome` facts say what already
- * *happened*; they are evidence that reweights a finished run and never touch the model, so they
- * leave `revision` alone. That single split is the only structure here — there is no separate brief,
- * context list, assumption set, or per-run observation store.
+ * The model (built from the `situation` prose seed) is the source of truth for the scenario.
+ * Editing the model or the situation prose bumps `revision` and leaves existing runs stale until
+ * the next Run. `outcome` facts say what already *happened*; they are evidence that reweights a
+ * finished run and never touch the model, so they leave `revision` alone. There is no separate
+ * brief, context list, assumption set, or per-run observation store.
  */
 export type FactKind = "situation" | "outcome";
 export type FactSource = "user" | "agent";
@@ -77,7 +75,7 @@ export interface TaskState {
   situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
-  /** Bumped only by `situation` facts — it is the fingerprint a run is measured against. */
+  /** Bumped when the model or situation prose changes — the fingerprint a run is measured against. */
   revision: number;
   status: TaskStatus;
   model?: ScenarioModel;

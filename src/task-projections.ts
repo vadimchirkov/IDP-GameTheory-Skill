@@ -2,7 +2,7 @@ import { projection } from "@lambda-house/teob-ts/projection";
 import type { TaskEvent, TaskState } from "./task.js";
 import { applyTaskEvent } from "./task.js";
 
-const empty = (): TaskState => ({ id: "", status: "new", title: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
+const empty = (): TaskState => ({ id: "", status: "new", title: "", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
 
 export const taskDetailProjection = projection<TaskEvent, TaskState>({
   projectionId: "scenario-task-detail",
@@ -39,7 +39,7 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
       case "ObservationRecorded": return { ...at(event.now), factCount: view.factCount + 1 };
       case "FactRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
       case "ContextRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
-      case "FactEdited": case "FactKindChanged": case "BriefEdited": case "ContextEdited":
+      case "FactEdited": case "BriefEdited": case "ContextEdited":
         return { ...at(event.now), revision: event.revision };
       case "ModelBuilt": case "ModelReplaced": case "AgentProposalAccepted":
         return { ...at(event.now), revision: event.tag === "ModelBuilt" ? view.revision : event.revision };
