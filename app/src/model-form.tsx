@@ -54,6 +54,23 @@ function orderingHint(game: GameType, ranges: PayoffRanges): string | undefined 
   return isValidPayoff(game, corner) ? undefined : `A ${game.replace(/_/g, " ")} needs ${ORDERING[game]}`;
 }
 
+/** Slots from best to worst payoff for each ordering — the shape that defines the game. */
+const RANKED: Record<GameType, readonly (keyof PayoffRanges)[]> = {
+  prisoners_dilemma: ["T", "R", "P", "S"],
+  chicken: ["T", "R", "S", "P"],
+  snowdrift: ["T", "R", "S", "P"],
+  stag_hunt: ["R", "T", "P", "S"],
+};
+
+/**
+ * Changing the kind of standoff keeps the numbers and moves them into the roles the new ordering
+ * needs — otherwise every switch would be rejected until the four ranges are re-typed by hand.
+ */
+function reorderPayoffs(ranges: PayoffRanges, from: GameType, to: GameType): PayoffRanges {
+  const sorted = RANKED[from].map((key) => ranges[key]);
+  return RANKED[to].reduce((table, key, rank) => ({ ...table, [key]: sorted[rank]! }), {} as PayoffRanges);
+}
+
 function useDraft(value: string, commit: (next: string) => void) {
   const [draft, setDraft] = useState(value);
   useEffect(() => { setDraft(value); }, [value]);
@@ -283,7 +300,17 @@ export function ModelForm(props: ModelFormProps) {
         <div className="chip-row">
           {GAMES.map(([id, label]) => <button key={id} type="button" className="mechanism-chip"
             aria-pressed={id === game || (id === "chicken" && game === "snowdrift")}
-            onClick={() => patch({ game: id, structure: structure.eco ? { ...structure, eco: { ...structure.eco, game1: id } } : structure })}
+            onClick={() => patch({
+              game: id,
+              payoffs: asymmetric
+                ? Object.fromEntries(Object.entries(asymmetric).map(([name, ranges]) => [name, reorderPayoffs(ranges, game, id)]))
+                : reorderPayoffs(table, game, id),
+              structure: {
+                ...structure,
+                ...(structure.eco ? { eco: { ...structure.eco, A1: reorderPayoffs(structure.eco.A1, game, id), game1: id } } : {}),
+                ...(structure.transitions ? { transitions: { ...structure.transitions, states: Object.fromEntries(Object.entries(structure.transitions.states).map(([name, ranges]) => [name, reorderPayoffs(ranges, game, id)])) } } : {}),
+              },
+            })}
           >{label}</button>)}
         </div>
       </div>
