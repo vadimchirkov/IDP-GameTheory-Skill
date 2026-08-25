@@ -149,6 +149,15 @@ assert.equal(legacyReplay.situation, "A legacy brief", "the old brief becomes th
 assert.equal(legacyReplay.facts.filter((fact) => fact.kind === "outcome").length, 1, "an old observation replays as an outcome fact");
 assert.ok(legacyReplay.model, "an accepted legacy proposal still carries its model");
 
+// A journal whose prose only ever lived inside the model still opens with an editable situation —
+// without this the form is blank and the agent refuses to run ("Describe the situation first").
+const modelOnlyJournal: TaskEvent[] = [
+  { tag: "TaskCreated", taskId: "model-only", title: "Model only", now: "2025-01-01T00:00:00Z" },
+  { tag: "ModelBuilt", model: scenario, revision: 1, now: "2025-01-01T00:00:01Z" },
+];
+const modelOnlyReplay = modelOnlyJournal.reduce(applyTaskEvent, { ...state0, id: "model-only" });
+assert.equal(modelOnlyReplay.situation, scenario.situation, "a model-only journal recovers its situation from the model");
+
 const removable = { id: "run-1", visualUrl: "/reports/tasks/run-1.html" } as TaskAnalysis;
 assert.equal(applyTaskEvent({ ...state0, status: "completed", analyses: [removable] }, { tag: "AnalysisRemoved", analysisId: "run-1", now: "2025-01-01T00:00:04Z" }).analyses.length, 0, "a saved run can be removed");
 assert.equal(applyTaskEvent(state0, { tag: "TaskDeleted", now: "2025-01-01T00:00:05Z" }).deleted, true, "a world can be deleted without rewriting its journal");

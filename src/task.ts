@@ -169,6 +169,12 @@ export function isRunStale(state: TaskState, analysis: TaskAnalysis): boolean {
 
 const readyStatus = (state: TaskState): TaskStatus => state.analyses.length ? "completed" : "ready";
 
+/**
+ * Journals written before the situation prose existed carry it only inside the model. Seeding it back
+ * on replay keeps those tasks editable — without it the form opens blank and the agent refuses to run.
+ */
+const situationFor = (state: TaskState, model: ScenarioModel): string => state.situation || model.situation;
+
 export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   switch (event.tag) {
     case "TaskCreated": {
@@ -184,7 +190,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
       return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
@@ -219,7 +225,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     }
     case "ModelReplaced":
     case "AgentProposalAccepted":
-      return { ...omit(state, "lastError"), model: event.model, revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
+      return { ...omit(state, "lastError"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
     case "AgentProposalRecorded": return { ...state, title: event.proposal.title?.trim() || state.title, updatedAt: event.now };
     case "AgentProposalRejected": return state;
     case "ObservationRecorded": {

@@ -173,8 +173,9 @@ function notify(id: string): void {
   for (const response of listeners.get(id) ?? []) response.write(payload);
 }
 
+/** Facts are evidence about what happened; what the situation *is* lives in the model. */
 const factKind = (value: unknown): FactKind => {
-  if (value !== "situation" && value !== "outcome") throw new Error("A fact is either about the situation or about what happened");
+  if (value !== "outcome") throw new Error("A fact records what already happened; edit the situation in the model instead");
   return value;
 };
 
@@ -461,7 +462,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         const shares = Object.keys(postWin).sort((a, b) => (postWin[b] ?? 0) - (postWin[a] ?? 0))
           .map((name) => `- ${name}: ${Math.round(baseWin[name] ?? 0)}% → ${Math.round(postWin[name] ?? 0)}%`).join("\n");
         const count = fresh.facts.filter((fact) => fact.kind === "outcome").length;
-        const fit = view.posterior.fit < 0.05 ? `\n\n_Unlikely under the current facts (${Math.round(view.posterior.fit * 100)}% fit) — the situation facts may be worth revisiting._` : "";
+        const fit = view.posterior.fit < 0.05 ? `\n\n_Unlikely under the current model (${Math.round(view.posterior.fit * 100)}% fit) — the assumptions in the Model tab may be worth revisiting._` : "";
         note = `\n\n**Reweighted** — ${Math.round(view.posterior.effectiveSampleSize)} of ${analysis.trials} worlds match${count > 1 ? ` across ${count} outcome facts` : ""}. Cooperation ${Math.round(view.baseline.cooperation.mean * 100)}% → ${Math.round(view.posterior.cooperation.mean * 100)}%.\n${shares}${fit}`;
       }
       send(res, 200, { kind: routed.kind, message: `${routed.message}${note}`, task: detail(id) }); return;
