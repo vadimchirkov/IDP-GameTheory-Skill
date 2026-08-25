@@ -16,7 +16,6 @@
   --good: #67b99f;
   --bad: #e47972;
   --situations: 252px;
-  --runs: 320px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -54,11 +53,9 @@ button:disabled { opacity: .42; cursor: not-allowed; transform: none }
 .icon { width: 34px; padding: 0; flex: 0 0 auto }
 .ui-icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round }
 
-.app { height: 100%; display: grid; grid-template-columns: var(--situations) var(--runs) minmax(0, 1fr); padding-right: 0; transition: grid-template-columns 180ms cubic-bezier(.2, .8, .2, 1), padding-right 200ms ease-out }
+.app { height: 100%; display: grid; grid-template-columns: var(--situations) minmax(0, 1fr); padding-right: 0; transition: grid-template-columns 180ms cubic-bezier(.2, .8, .2, 1), padding-right 200ms ease-out }
 .app.agent-open { padding-right: 398px }
-.app.hide-situations { grid-template-columns: 0 var(--runs) minmax(0, 1fr) }
-.app.hide-runs { grid-template-columns: var(--situations) 0 minmax(0, 1fr) }
-.app.hide-situations.hide-runs { grid-template-columns: 0 0 minmax(0, 1fr) }
+.app.hide-situations { grid-template-columns: 0 minmax(0, 1fr) }
 .pane { min-width: 0; height: 100%; overflow: hidden; box-shadow: 1px 0 var(--line); transition: visibility 0s }
 .pane-head { height: 52px; display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: center; gap: 6px; padding: 0 8px }
 .pane-title { min-width: 0 }
@@ -68,8 +65,7 @@ button:disabled { opacity: .42; cursor: not-allowed; transform: none }
 .situations { display: flex; flex-direction: column; background: var(--sidebar) }
 .situations > .pane-head, .situations > .tasks, .situations > .sidebar-footer { width: var(--situations); flex: 0 0 auto }
 .situations > .tasks { flex-grow: 1 }
-.run-pane > .pane-head, .run-pane > .run-scroll { width: var(--runs) }
-.hide-situations .situations, .hide-runs .run-pane { visibility: hidden; transition-delay: 180ms }
+.hide-situations .situations { visibility: hidden; transition-delay: 180ms }
 .brand { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 620; letter-spacing: -.01em }
 .situations .pane-head .primary { border-radius: 50% }
 .tasks { flex: 1; min-height: 0; padding: 4px 7px 10px; overflow: auto; overscroll-behavior: contain }
@@ -97,8 +93,6 @@ button:disabled { opacity: .42; cursor: not-allowed; transform: none }
 .settings-link { width: 100%; display: flex; align-items: center; gap: 9px; justify-content: flex-start; border-color: transparent; background: transparent; color: var(--muted-strong) }
 .settings-link:hover { color: var(--ink) }
 
-.run-pane { background: var(--panel) }
-.run-scroll { height: calc(100% - 52px); overflow: auto; overscroll-behavior: contain; padding: 8px 13px 18px }
 .section { position: relative; padding: 17px 2px }
 .section + .section::before { content: ""; position: absolute; inset: 0 4px auto; height: 1px; background: var(--line) }
 .section:first-child { padding-top: 2px }
@@ -117,7 +111,7 @@ button:disabled { opacity: .42; cursor: not-allowed; transform: none }
 input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .run-form .primary { grid-column: 1 / -1 }
 .run-form.single { grid-template-columns: 1fr }
-.run-hint { color: var(--muted); font-size: 10px }
+.run-hint { margin-top: 9px; color: var(--muted); font-size: 10px }
 .section-heading { display: flex; align-items: center; justify-content: space-between }
 .section-heading > span { min-width: 20px; border-radius: 999px; background: var(--surface); padding: 2px 6px; color: var(--muted); font-size: 9px; text-align: center }
 .runs { display: grid; gap: 4px; margin-top: 10px }
@@ -175,13 +169,25 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .river-toolbar { position: relative; z-index: 2; flex: 0 0 52px; display: flex; align-items: center; gap: 6px; padding: 0 12px; box-shadow: 0 1px var(--line) }
 .toggle { display: inline-flex; align-items: center; gap: 7px; border-color: transparent; background: transparent; color: var(--muted-strong) }
 .toggle[aria-pressed=true] { border-color: var(--line); background: var(--surface); color: var(--ink) }
-.app:not(.hide-situations) .open-situations, .app:not(.hide-runs) .open-runs { display: none }
+.app:not(.hide-situations) .open-situations { display: none }
 .river-heading { min-width: 0; flex: 1; text-align: center }
 .river-heading b, .river-heading span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .river-heading b { font-size: 11px; font-weight: 590 }
 .river-heading span { color: var(--muted); font-size: 9px }
 .agent-tools { display: flex; gap: 2px }
 .agent-tools button { position: relative; background: transparent }
+
+/* ── Model | River: the two faces of the centre pane ───────────────────────── */
+.center-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 6px 12px; box-shadow: 0 1px var(--line) }
+.center-tabs button { min-height: 28px; border-radius: 8px; background: transparent; color: var(--muted); padding: 0 13px; font-size: 11px }
+.center-tabs button:hover { background: var(--surface-hover); color: var(--muted-strong) }
+.center-tabs button.on { background: var(--surface); color: var(--ink); font-weight: 570 }
+.model-pane { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 16px 32px }
+.model-pane > * { max-width: 640px; margin: 0 auto }
+.river-below { flex: 0 0 auto; max-height: 44%; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); background: var(--panel) }
+.river-below:empty { display: none }
+.river-below > .river-detail { border-top: 0 }
+.river-below > .section { padding: 13px 14px }
 .river-frame { width: 100%; height: 100%; border: 0; background: var(--bg); transition: opacity 200ms ease }
 .river-host { position: relative; flex: 1; min-height: 0; display: flex }
 .river-host.processing .river-frame { opacity: .28 }
@@ -255,9 +261,6 @@ dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
 .advanced-field small { display: block; margin-top: 5px; color: var(--muted) }
 .agent-picker-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.35fr) minmax(0, .8fr); gap: 7px }
 .agent-picker-grid label > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 500 }
-.model-label { margin: 14px 0 6px }
-.developer-settings { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 13px }
-.developer-settings summary { color: var(--muted-strong); cursor: pointer; user-select: none }
 .sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 15px }
 .sources a { border-radius: 999px; background: var(--surface); padding: 4px 9px; color: var(--muted); font-size: 10px; text-decoration: none }
 .sources a:hover { color: var(--ink) }
@@ -409,12 +412,13 @@ label:has(> select:disabled)::after { opacity: .4 }
 @keyframes undo-timeout { to { transform: scaleX(0) } }
 
 @media (max-width: 900px) {
-  .app, .app.agent-open, .app.hide-situations, .app.hide-runs, .app.hide-situations.hide-runs { display: block; padding-right: 0 }
+  .app, .app.agent-open, .app.hide-situations { display: block; padding-right: 0 }
   .pane { position: fixed; inset: 0 auto 0 0; z-index: 20; width: min(86vw, 330px); visibility: visible !important; box-shadow: 16px 0 44px rgba(0, 0, 0, .42); transform: translateX(-105%); transition: transform 200ms ease }
-  .run-pane { width: min(90vw, 390px) }
-  .app.mobile-situations .situations, .app.mobile-runs .run-pane { transform: none }
+  .app.mobile-situations .situations { transform: none }
   .river-pane { height: 100% }
-  .app:not(.hide-situations) .open-situations, .app:not(.hide-runs) .open-runs { display: inline-flex }
+  .app:not(.hide-situations) .open-situations { display: inline-flex }
+  .model-pane { padding: 4px 12px 24px }
+  .river-below { max-height: 52% }
   .toggle { padding: 0 9px }
   .toggle .ui-icon { display: none }
   .agent-tools { margin-left: auto }
@@ -433,8 +437,8 @@ label:has(> select:disabled)::after { opacity: .4 }
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important }
 }
 
-/* ── Facts: the single input surface ───────────────────────────────────────── */
-.facts-section .section-heading { align-items: baseline }
+/* ── Outcome facts: what already happened, reweighting the current run ─────── */
+.outcome-facts .eyebrow { color: var(--muted-strong) }
 .link-button { min-height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-strong); padding: 0 6px; font-size: 10px; cursor: pointer }
 .link-button:hover:not(:disabled) { background: rgba(255, 255, 255, .05); color: var(--ink) }
 .link-button:disabled { opacity: .4; cursor: default }
@@ -444,24 +448,11 @@ label:has(> select:disabled)::after { opacity: .4 }
 .fact:hover { background: rgba(255, 255, 255, .03) }
 .fact-text { display: block; width: 100%; border: 0; background: transparent; color: var(--ink); padding: 0; font: inherit; font-size: 11.5px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; cursor: text }
 .fact.outcome .fact-text { color: var(--muted-strong) }
-.fact-input { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 5px 7px; font: inherit; font-size: 11.5px; line-height: 1.45 }
-.fact-tag { margin-left: 6px; border-radius: 999px; background: rgba(255, 255, 255, .07); color: var(--muted); padding: 1px 5px; font-size: 8px; vertical-align: middle }
-
-.fact-tools { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 150ms ease }
-.fact:hover .fact-tools, .fact:focus-within .fact-tools { opacity: 1 }
-.fact-kind { border: 0; border-radius: 999px; background: rgba(255, 255, 255, .06); color: var(--muted); padding: 2px 7px; font-size: 8px; white-space: nowrap; cursor: pointer }
-.fact-kind:hover:not(:disabled) { background: rgba(255, 255, 255, .12); color: var(--ink) }
-.fact-kind.outcome { background: rgba(93, 157, 132, .16); color: #82c5aa }
 .fact-remove { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
 .fact-remove:hover:not(:disabled) { background: rgba(200, 117, 99, .16); color: #dc8b79 }
 
 .fact-group-label { margin: 13px 0 3px; color: var(--muted-strong); font-size: 9px; text-transform: uppercase; letter-spacing: .04em }
 .fact-group-label span { margin-left: 6px; color: var(--muted); font-size: 9px; text-transform: none; letter-spacing: 0 }
-
-.fact-add { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end }
-.fact-add textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 7px 8px; font: inherit; font-size: 11px }
-.fact-add textarea::placeholder { color: var(--muted) }
-.fact-add button { min-height: 30px; border-radius: 8px; font-size: 10px }
 
 /* ── Open questions: always optional, never a gate ─────────────────────────── */
 .question-list { display: grid; gap: 4px; margin: 5px 0 0; padding: 0; list-style: none }
@@ -470,13 +461,6 @@ label:has(> select:disabled)::after { opacity: .4 }
 .question-prompt { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere }
 .question-dismiss { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
 .question-dismiss:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--ink) }
-.question-actions { margin-top: 6px; display: flex; gap: 5px }
-.question-actions button { min-height: 26px; border-radius: 7px; padding: 0 9px; font-size: 9.5px }
-.question-answer textarea { width: 100%; box-sizing: border-box; margin-top: 6px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(255, 255, 255, .04); color: var(--ink); padding: 6px 8px; font: inherit; font-size: 11px }
-.question-sources { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px }
-.question-sources a { color: var(--muted); font-size: 9px; text-decoration: underline }
-
-.stale-hint { margin-top: 11px; border-radius: 8px; background: rgba(178, 140, 87, .13); color: #d8b071; padding: 6px 8px; font-size: 9.5px }
 .question-field { display: block; margin-top: 3px; color: var(--muted); font-size: 9px }
 
 /* ── The model, edited directly: basics, opt-in mechanisms, advanced ───────── */

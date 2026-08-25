@@ -58,12 +58,6 @@ export interface WorldReplay {
   };
 }
 
-/**
- * Result of a run-scoped chat turn. The agent answers, reweights the run to a stated outcome, or
- * proposes a model change — `message` (markdown) carries the reply, including any reweight summary.
- */
-export type FactResult = { kind: "answer" | "observation" | "revision"; message: string };
-
 /** One side of a reweighted run — shares and belief, without the per-world weights. */
 export interface PosteriorView {
   effectiveSampleSize: number;
@@ -94,42 +88,20 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return value as T;
 }
 
-/** One side of a reweighted run — shares and belief, without the per-world weights. */
-export interface PosteriorView {
-  effectiveSampleSize: number;
-  fit: number;
-  winPct: Record<string, number>;
-  winPctTeam: Record<string, number>;
-  cooperation: { mean: number; std: number };
-  strategyPosterior: Record<string, Record<string, number>>;
-}
-
-/** A run reweighted by the outcome facts; both sides are null for runs saved before artifacts existed. */
-export interface RunPosterior {
-  usesTeams: boolean;
-  baseline: PosteriorView | null;
-  posterior: PosteriorView | null;
-}
-
-/** What a chat message turned out to be. `task` is present when a fact was filed. */
+/** What a chat message turned out to be. `task` is present when an outcome fact was filed. */
 export interface ChatResult {
-  kind: "answer" | "situation" | "outcome";
+  kind: "answer" | "outcome";
   message: string;
   task?: TaskState;
 }
 
-export interface ResearchResult {
-  answer: string;
-  confident: boolean;
-  sources: Array<{ title: string; url: string }>;
-}
-
-/** Every fact command returns the whole task, so the caller never reassembles state by hand. */
+/** Every command returns the whole task, so the caller never reassembles state by hand. */
 export type FactCommand =
-  | { tag: "AddFact"; text: string; kind?: FactKind }
+  | { tag: "AddFact"; text: string; kind: "outcome" }
   | { tag: "EditFact"; factId: string; text: string }
   | { tag: "RemoveFact"; factId: string }
-  | { tag: "SetFactKind"; factId: string; kind: FactKind }
+  | { tag: "SetSituation"; text: string }
+  | { tag: "SetModel"; model: ScenarioModel }
   | { tag: "DismissQuestion"; questionId: string }
   | { tag: "RemoveAnalysis"; analysisId: string }
   | { tag: "CancelAnalysis" }
@@ -144,7 +116,6 @@ export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`
 export const understandTask = (id: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
 export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
 export const chatTask = (id: string, message: string, agent?: AgentSelection) => post<ChatResult>(`/api/tasks/${id}/chat`, { message, agent });
-export const researchQuestion = (id: string, question: string, agent?: AgentSelection) => post<ResearchResult>(`/api/tasks/${id}/research`, { question, agent });
 export const getWorldReplay = (taskId: string, analysisId: string, index: number) => api<WorldReplay>(`/api/tasks/${taskId}/analyses/${analysisId}/worlds/${index}/replay`);
 export const getPosterior = (taskId: string, analysisId: string) => api<RunPosterior>(`/api/tasks/${taskId}/analyses/${analysisId}/posterior`);
 export const getAgentStatus = () => api<AgentStatus>("/api/agent/status");
