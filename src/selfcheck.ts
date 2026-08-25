@@ -15,7 +15,6 @@ import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
 import { normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
 import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
-import { situationFacts } from "./scenario-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 
 const payoff = { T: 5, R: 3, P: 1, S: 0 };
@@ -163,7 +162,7 @@ const taskState = async (): Promise<TaskState> => {
 };
 await task.runtime.ask(tid, { tag: "CreateTask", taskId: "task-check", text: "Two suppliers meet every quarter", factId: "fact-1", now: "2026-01-01T00:00:00Z" }, taskCategory);
 const created = await taskState();
-assert.equal(created.revision, 1, "a situation fact moves the fingerprint");
+assert.equal(created.revision, 1, "the situation seed sets the initial fingerprint");
 assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
@@ -178,26 +177,34 @@ if (sitReply.ok && sitReply.value.reply?.tag === "State") {
 }
 await sit.runtime.shutdown();
 
-await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-2", text: "They expect to keep dealing for years", kind: "situation", source: "agent", now: "2026-01-01T00:00:01Z" }, taskCategory);
-const assumed = await taskState();
-assert.equal(assumed.facts[0]?.source, "agent", "an inferred assumption is visible in the same list");
-assert.equal(assumed.revision, 2, "an agent assumption is still a situation fact");
+// The model is the source of truth: setting it stores the model and bumps the fingerprint.
+await task.runtime.ask(tid, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:01Z" }, taskCategory);
+const withModel = await taskState();
+assert.ok(withModel.model, "SetModel stores the model");
+assert.equal(withModel.revision, 2, "setting the first model moves the fingerprint");
+await task.runtime.ask(tid, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:02Z" }, taskCategory);
+assert.equal((await taskState()).revision, 2, "re-persisting an identical model does not move the fingerprint");
 
-// Outcome facts are evidence: they never move the fingerprint, so a finished run stays current.
+// Editing the model on a fresh task bumps the fingerprint so runs go stale.
+const edit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
+const editId = EntityId("model-edit");
+await edit.runtime.ask(editId, { tag: "CreateTask", taskId: "model-edit", text: "seed", factId: "e0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await edit.runtime.ask(editId, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:01Z" }, taskCategory);
+await edit.runtime.ask(editId, { tag: "SetModel", model: { ...scenario, structure: { ...scenario.structure, noise: [0, 0.1] as const } }, now: "2026-01-01T00:00:02Z" }, taskCategory);
+const editReply = await edit.runtime.ask(editId, { tag: "GetTask" }, taskCategory);
+assert.ok(editReply.ok && editReply.value.reply?.tag === "State" && editReply.value.reply.state.revision === 3, "editing the model moves the fingerprint");
+await edit.runtime.shutdown();
+
+// Outcome facts are evidence: they need a model to attach to, and they never move the fingerprint.
 const beforeOutcome = (await taskState()).revision;
 await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-4", text: "Cooperation collapsed", kind: "outcome", source: "user", observation: { cooperation: 0.1 }, now: "2026-01-01T00:00:04Z" }, taskCategory);
 await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-5", text: "The leader came out ahead", kind: "outcome", source: "user", observation: { winner: "Northwind" }, now: "2026-01-01T00:00:05Z" }, taskCategory);
 const withOutcomes = await taskState();
 assert.equal(withOutcomes.revision, beforeOutcome, "outcome facts do not move the fingerprint");
 assert.equal(withOutcomes.facts.filter((fact) => fact.kind === "outcome").length, 2, "outcome facts accumulate");
-// The model is built from situation facts only — feeding an observed result back in would make the
-// simulation reproduce the answer it was told instead of predicting it.
-assert.ok(!situationFacts(withOutcomes.facts).some((fact) => fact.kind === "outcome"), "outcome facts never reach the model builder");
-
-// Flipping a fact's kind changes which facts define the model, so it does move the fingerprint.
-await task.runtime.ask(tid, { tag: "SetFactKind", factId: "fact-4", kind: "situation", now: "2026-01-01T00:00:06Z" }, taskCategory);
-assert.equal((await taskState()).revision, beforeOutcome + 1, "correcting a misfiled fact re-dates the model");
-await task.runtime.ask(tid, { tag: "SetFactKind", factId: "fact-4", kind: "outcome", now: "2026-01-01T00:00:07Z" }, taskCategory);
+// A situation statement is no longer a fact — AddFact only accepts outcomes.
+const situationRejected = await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-sit", text: "Prices are public", kind: "situation", source: "user", now: "2026-01-01T00:00:06Z" }, taskCategory);
+assert.ok(situationRejected.ok && situationRejected.value.reply?.tag === "Rejected", "situation statements are edited in the model, not filed as facts");
 
 const missing = await task.runtime.ask(tid, { tag: "EditFact", factId: "gone", text: "x", now: "2026-01-01T00:00:09Z" }, taskCategory);
 assert.ok(missing.ok && missing.value.reply?.tag === "Rejected", "editing a fact that no longer exists is rejected");
@@ -229,10 +236,10 @@ assert.equal(isRunStale(labeling, labeling.analyses[0]!), false, "a run computed
 await task.runtime.ask(tid, { tag: "CompleteAnalysisLabels", analysisId: "run-check", worldLabels: { all: { short: "All worlds", detail: "Every calculated world." } }, now: "2026-01-01T00:00:14Z" }, taskCategory);
 assert.equal((await taskState()).status, "completed", "labeling completes the run");
 
-// A new situation fact leaves the finished run standing, but marks it stale.
-await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-6", text: "A third supplier joined", kind: "situation", source: "user", now: "2026-01-01T00:00:15Z" }, taskCategory);
+// Editing the model leaves the finished run standing, but marks it stale.
+await task.runtime.ask(tid, { tag: "SetModel", model: { ...scenario, structure: { ...scenario.structure, noise: [0, 0.2] as const } }, now: "2026-01-01T00:00:15Z" }, taskCategory);
 const staleRun = await taskState();
-assert.ok(isRunStale(staleRun, staleRun.analyses[0]!), "a new situation fact makes the saved run stale");
+assert.ok(isRunStale(staleRun, staleRun.analyses[0]!), "editing the model makes the saved run stale");
 assert.equal(staleRun.analyses.length, 1, "the stale run is kept, not erased");
 
 await task.runtime.ask(tid, { tag: "RequestAnalysis", trials: 10, seed: 43, now: "2026-01-01T00:00:16Z" }, taskCategory);
@@ -240,5 +247,13 @@ await task.runtime.ask(tid, { tag: "CancelAnalysis", now: "2026-01-01T00:00:17Z"
 const cancelled = await taskState();
 assert.ok(cancelled.status === "completed" && !cancelled.activeAnalysis, "cancelling a new run keeps the previous completed river available");
 await task.runtime.shutdown();
+
+// A run needs a model; a fresh task has none until one is built.
+const nm = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
+const nmId = EntityId("needs-model");
+await nm.runtime.ask(nmId, { tag: "CreateTask", taskId: "needs-model", text: "seed", factId: "n0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+const noModel = await nm.runtime.ask(nmId, { tag: "RequestAnalysis", trials: 10, seed: 1, now: "2026-01-01T00:00:01Z" }, taskCategory);
+assert.ok(noModel.ok && noModel.value.reply?.tag === "Rejected", "a run needs a model");
+await nm.runtime.shutdown();
 
 console.log("self-check OK");
