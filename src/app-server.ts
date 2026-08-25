@@ -9,7 +9,7 @@ import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite"
 import type { ScenarioModel } from "./domain.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildScenarioModel, labelWorlds, researchQuestion, routeMessage, understandSituation } from "./scenario-agent.js";
+import { buildScenarioModel, labelWorlds, routeMessage, understandSituation } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
@@ -184,6 +184,8 @@ function commandFrom(input: Record<string, unknown>): TaskCommand {
     case "AddFact": return { tag: "AddFact", factId: randomUUID(), text: String(input.text ?? ""), kind: factKind(input.kind ?? "outcome"), source: "user", now };
     case "EditFact": return { tag: "EditFact", factId: String(input.factId ?? ""), text: String(input.text ?? ""), now };
     case "RemoveFact": return { tag: "RemoveFact", factId: String(input.factId ?? ""), now };
+    case "SetSituation": return { tag: "SetSituation", text: String(input.text ?? ""), now };
+    case "SetModel": return { tag: "SetModel", model: input.model as ScenarioModel, now };
     case "DismissQuestion": return { tag: "DismissQuestion", questionId: String(input.questionId ?? ""), now };
     case "RemoveAnalysis": return { tag: "RemoveAnalysis", analysisId: String(input.analysisId ?? ""), now };
     case "DeleteTask": return { tag: "DeleteTask", now };
@@ -204,13 +206,6 @@ function agentSelection(input: unknown, fallback?: AgentSelection): AgentSelecti
 }
 
 const agentFor = (state: TaskState, input?: unknown): AgentSelection | undefined => agentSelection(input, state.agent);
-
-/** Facts the agent adds on the user's behalf; every one is visible and editable in the same list. */
-async function addAgentFacts(id: string, texts: readonly string[], now: string): Promise<void> {
-  for (const text of texts) {
-    await ask(id, { tag: "AddFact", factId: randomUUID(), text, kind: "situation", source: "agent", now });
-  }
-}
 
 function analysisWorker(model: ScenarioModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
@@ -395,7 +390,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     send(res, 200, view);
     return;
   }
-  const match = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)(?:\/(commands|chat|understand|run|research|events|activity))?$/);
+  const match = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)(?:\/(commands|chat|understand|run|events|activity))?$/);
   if (match) {
     const id = match[1] ?? ""; const action = match[2];
     if (req.method === "GET" && !action) { const state = detail(id); send(res, state && !state.deleted ? 200 : 404, state && !state.deleted ? state : { error: "Task not found" }); return; }
@@ -428,26 +423,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       startAnalysis(id, { revision: answer.revision, trials, seed, ...(agent ? { agent } : {}) });
       send(res, 200, detail(id)); return;
     }
-    // Read the facts and add what the agent can infer, plus the questions it cannot answer.
+    // Read the situation and let the agent build the model, plus the questions it cannot answer.
     if (req.method === "POST" && action === "understand") {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
-      if (!state.facts.length) { send(res, 409, { error: "Add a fact about the situation first" }); return; }
-      const understanding = await understandSituation(state.facts, agentFor(state, input.agent));
+      if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
+      const understanding = await understandSituation(state.situation, state.model, agentFor(state, input.agent));
       const now = new Date().toISOString();
       await ask(id, { tag: "SetTitle", title: understanding.title, now });
-      await addAgentFacts(id, understanding.assumedFacts, now);
-      await ask(id, { tag: "SuggestQuestions", questions: understanding.questions.map((prompt) => ({ id: randomUUID(), prompt })), now });
+      await ask(id, { tag: "SetModel", model: understanding.model, agent: understanding.agent, now });
+      await ask(id, { tag: "SuggestQuestions", questions: understanding.questions.map((q) => ({ id: randomUUID(), prompt: q.prompt, ...(q.field ? { field: q.field } : {}) })), now });
       send(res, 200, detail(id)); return;
-    }
-    // Optional helper on one open question; the drafted answer is returned, never stored on its own.
-    if (req.method === "POST" && action === "research") {
-      const input = await body(req); const state = detail(id);
-      if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
-      const question = String(input.question ?? "").trim();
-      if (!question || question.length > 500) { send(res, 422, { error: "The question is empty or too long" }); return; }
-      const researched = await researchQuestion(question, state.facts, agentFor(state, input.agent));
-      send(res, 200, { answer: researched.answer, confident: researched.confident, sources: researched.sources }); return;
     }
     // The single conversational entry point: a question is answered, a fact is filed by kind.
     if (req.method === "POST" && action === "chat") {
@@ -465,7 +451,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         : undefined;
       const added = await ask(id, { tag: "AddFact", factId: randomUUID(), text: message, kind: routed.kind, source: "user", ...(observation ? { observation } : {}), now });
       if (added.tag === "Rejected") { send(res, 409, added); return; }
-      let note = routed.kind === "situation" ? "\n\n_Added to the facts — press Run to fold it into a new set of worlds._" : "";
+      let note = "";
       if (routed.kind === "outcome" && analysis?.artifactUrl) {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         const fresh = detail(id)!;

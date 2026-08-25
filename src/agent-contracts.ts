@@ -32,14 +32,6 @@ export const understandingOutputSchema = Type.Object({
 }, closed);
 export type UnderstandingOutput = Static<typeof understandingOutputSchema>;
 
-/** A researched answer to one open question: a plain-language statement plus the sources behind it. */
-export const researchAnswerOutputSchema = Type.Object({
-  answer: Type.String({ minLength: 1, maxLength: 300 }),
-  confident: Type.Boolean(),
-  sourceIds: Type.Array(Type.String({ minLength: 1, maxLength: 64 })),
-}, closed);
-export type ResearchAnswerOutput = Static<typeof researchAnswerOutputSchema>;
-
 /**
  * Router output for a chat turn. The agent decides whether the message is a plain question or a
  * statement about what the situation is (`answer`, replied to and left for the user to edit the model),
@@ -231,7 +223,7 @@ export interface AgentUsage {
 
 export interface AgentRunMeta {
   runId: string;
-  operation: "understand" | "build-model" | "labels" | "route-fact" | "research";
+  operation: "understand" | "build-model" | "labels" | "route-fact";
   provider: string;
   model: string;
   thinkingLevel: AgentSelection["thinkingLevel"];
