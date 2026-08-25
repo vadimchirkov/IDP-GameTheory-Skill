@@ -31,8 +31,9 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
   evolve: (view, event, entityId) => {
     const at = (updatedAt: string) => ({ ...view, id: view.id || String(entityId), updatedAt });
     switch (event.tag) {
-      case "TaskCreated": return { ...at(event.now), id: String(entityId), title: event.title, status: "ready", revision: 1, factCount: 1 };
+      case "TaskCreated": return { ...at(event.now), id: String(entityId), title: event.title, status: "ready", revision: 1, factCount: 0 };
       case "TitleSet": return { ...at(event.now), title: event.title };
+      case "SituationSet": return { ...at(event.now), revision: event.revision };
       case "AgentProposalRecorded": return { ...at(event.now), title: event.proposal.title?.trim() || view.title };
       case "FactAdded": return { ...at(event.now), revision: event.revision, factCount: view.factCount + 1, status: view.status === "new" ? "ready" : view.status };
       case "ContextAdded": return { ...at(event.now), revision: event.revision, factCount: view.factCount + 1, status: view.status === "new" ? "ready" : view.status };
@@ -42,7 +43,7 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
       case "FactEdited": case "BriefEdited": case "ContextEdited":
         return { ...at(event.now), revision: event.revision };
       case "ModelBuilt": case "ModelReplaced": case "AgentProposalAccepted":
-        return { ...at(event.now), revision: event.tag === "ModelBuilt" ? view.revision : event.revision };
+        return { ...at(event.now), revision: event.revision };
       case "AnalysisRequested": return { ...at(event.now), status: "running" };
       case "AnalysisCalculated": return { ...at(event.analysis.completedAt), status: "labeling", hasRun: true, latestReport: event.analysis.report };
       case "AnalysisLabelsCompleted": return { ...at(event.now), status: "completed" };
