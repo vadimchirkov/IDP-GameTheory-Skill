@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  chatTask, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, removeProviderKey, researchQuestion, runTask, saveProviderKey, sendCommand, understandTask,
+  chatTask, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, removeProviderKey, runTask, saveProviderKey, sendCommand, understandTask,
   type AgentModelStatus, type AgentSelection, type FactCommand, type RiverSelection, type TaskState, type TaskSummary, type WorldReplay,
 } from "./api";
-import { FactsPanel } from "./facts";
+import { OutcomeFacts } from "./facts";
+import { ModelForm } from "./model-form";
 import { RiverActivity } from "./river-activity";
 import { relativeTime } from "./relative-time";
 
@@ -185,11 +186,9 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const queryClient = useQueryClient();
   const mobile = useMobile();
   const now = useMinuteClock();
-  const [hidden, setHidden] = useState(() => ({
-    situations: localStorage.getItem("pane-situations") === "hidden",
-    runs: localStorage.getItem("pane-runs") === "hidden",
-  }));
-  const [mobilePane, setMobilePane] = useState<"situations" | "runs" | null>(null);
+  const [hideSituations, setHideSituations] = useState(() => localStorage.getItem("pane-situations") === "hidden");
+  const [situationsOpen, setSituationsOpen] = useState(false);
+  const [centerTab, setCenterTab] = useState<"model" | "river">("model");
   const [prompt, setPrompt] = useState<PromptState>();
   const [draftText, setDraftText] = useState("");
   const [promptError, setPromptError] = useState("");
@@ -197,8 +196,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [streamError, setStreamError] = useState("");
   const [modelError, setModelError] = useState("");
   const [nextSeed, setNextSeed] = useState<number>();
-  const [modelText, setModelText] = useState("");
-  const [modelSnapshot, setModelSnapshot] = useState("");
   const [agentKey, setAgentKey] = useState(savedSelection);
   const [runAgentKey, setRunAgentKey] = useState("");
   const [settingsAgentKey, setSettingsAgentKey] = useState("");
@@ -240,6 +237,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setNextSeed(undefined);
     setRunError("");
     setTrials(current?.analyses.at(-1)?.trials ?? 600);
+    setCenterTab(current?.analyses.length ? "river" : "model");
   }, [taskId, current?.id]);
 
   useEffect(() => {
@@ -389,14 +387,13 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
 
   const openModel = () => {
     if (!current) return;
-    const value = current.model ? JSON.stringify(current.model, null, 2) : "{}";
-    setModelText(value); setModelSnapshot(value); setModelError("");
+    setModelError("");
     setRunAgentKey(selectedAgent ? selectionValue(selectedAgent) : agentKey);
     openDialog(modelDialog.current);
   };
 
   const openSettings = () => {
-    setMobilePane(null);
+    setSituationsOpen(false);
     setAgentPanel(false);
     setSettingsAgentKey(selectedAgent ? selectionValue(selectedAgent) : agentKey);
     setKeyProvider(agent.data?.authProviders.find((provider) => provider.id === "openai")?.id ?? agent.data?.authProviders[0]?.id ?? "");
@@ -485,21 +482,11 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     } catch (error) { setModelError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const togglePane = (name: "situations" | "runs") => {
-    if (mobile) { setMobilePane((value) => value === name ? null : name); return; }
-    setHidden((value) => {
-      const next = { ...value, [name]: !value[name] };
-      localStorage.setItem(`pane-${name}`, next[name] ? "hidden" : "shown");
-      return next;
-    });
-  };
-
-  const openScenario = () => {
-    if (mobile) { setMobilePane("runs"); return; }
-    setHidden((value) => {
-      if (!value.runs) return value;
-      localStorage.setItem("pane-runs", "shown");
-      return { ...value, runs: false };
+  const toggleSituations = () => {
+    if (mobile) { setSituationsOpen((value) => !value); return; }
+    setHideSituations((value) => {
+      localStorage.setItem("pane-situations", value ? "shown" : "hidden");
+      return !value;
     });
   };
 
@@ -537,6 +524,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     void sendChatMessage("Summarize the river that just finished. Use Markdown: a short heading, then three bullets — the main outcome, the key risk, and the most useful action. Do not repeat technical parameters or mention this request.", false);
   }, [current?.status, selectedAnalysisId]);
 
+  useEffect(() => { if (current?.status === "completed" && selectedAnalysis) setCenterTab("river"); }, [current?.status, selectedAnalysisId]);
+
   useEffect(() => {
     setRiverSelection(undefined);
     setWorldReplay(undefined);
@@ -571,53 +560,59 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     try { setWorldReplay(await replayMutation.mutateAsync({ taskId, analysisId: selectedAnalysis.id, index })); }
     catch (error) { setReplayError(error instanceof Error ? error.message : String(error)); }
   };
-  const appClass = ["app", hidden.situations && "hide-situations", hidden.runs && "hide-runs", agentPanel && "agent-open", mobilePane && `mobile-${mobilePane}`].filter(Boolean).join(" ");
+  const appClass = ["app", hideSituations && "hide-situations", agentPanel && "agent-open", situationsOpen && "mobile-situations"].filter(Boolean).join(" ");
   const promptTitle = "New situation";
   const promptHint = "Describe the situation in your own words: who is involved, what they want, which choices they have, and what makes it hard. The agent will fill in the rest and ask about anything it cannot infer.";
   const workingLabel = "Reading the situation";
 
   return <div className={appClass}>
     <aside className="pane situations" aria-label="Situations">
-      <header className="pane-head"><button className="icon quiet" onClick={() => togglePane("situations")} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create" })} aria-label="New situation"><Icon name="plus" /></button></header>
+      <header className="pane-head"><button className="icon quiet" onClick={toggleSituations} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create" })} aria-label="New situation"><Icon name="plus" /></button></header>
       <nav className="tasks">
         {tasks.isPending && <div className="empty-runs">Loading situations…</div>}
         {tasks.isError && <ErrorState error={tasks.error} retry={() => void tasks.refetch()} />}
-        {visibleTasks?.map((item) => <WorldRow key={item.id} item={item} now={now} onOpen={openScenario} onDelete={() => removeTask(item)} />)}
+        {visibleTasks?.map((item) => <WorldRow key={item.id} item={item} now={now} onOpen={() => setSituationsOpen(false)} onDelete={() => removeTask(item)} />)}
         {visibleTasks?.length === 0 && <div className="list-empty"><Icon name="worlds" /><b>No worlds yet</b><span>Create your first situation to begin.</span></div>}
       </nav>
       <footer className="sidebar-footer"><button className="settings-link" onClick={openSettings}><Icon name="settings" /><span>Settings</span></button></footer>
     </aside>
 
-    <aside className="pane run-pane" aria-label="Scenario">
-      <header className="pane-head"><button className="icon quiet" onClick={() => togglePane("runs")} aria-label="Collapse scenario panel"><Icon name="collapse" /></button><div className="pane-title"><b>Scenario</b><span>{current ? `${current.facts.length} ${word(current.facts.length, "fact", "facts", "facts")}` : "Select a situation"}</span></div><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button></header>
-      <div className="run-scroll">
+    <main className="river-pane">
+      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && situationsOpen} onClick={toggleSituations}><Icon name="situations" /><span>Situations</span></button><div className="river-heading"><b>{current?.title ?? "River of possibilities"}</b><span>{current?.status === "running" ? "Calculating possible worlds…" : current?.status === "labeling" ? "The river is ready; Pi is labeling its branches…" : selectedAnalysis ? `${selectedAnalysis.trials} possible worlds · ${compactDate(selectedAnalysis.completedAt)} · model r${selectedAnalysis.revision}` : current?.model ? "Start the first run" : "Clarify the situation with the agent first"}</span></div><div className="agent-tools"><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
+
+      <div className="center-tabs" role="tablist">
+        <button role="tab" aria-selected={centerTab === "model"} className={centerTab === "model" ? "on" : ""} onClick={() => setCenterTab("model")}>Model</button>
+        <button role="tab" aria-selected={centerTab === "river"} className={centerTab === "river" ? "on" : ""} onClick={() => setCenterTab("river")}>River</button>
+      </div>
+
+      {centerTab === "model" ? <div className="model-pane">
         {task.isPending && taskId && <div className="empty-runs">Loading situation…</div>}
         {task.isError && <ErrorState error={task.error} retry={() => void task.refetch()} />}
         {!taskId && <div className="empty-runs">Select a situation or create a new one.</div>}
         {current && <>
-          <FactsPanel
-            task={current}
+          <ModelForm
+            situation={current.situation}
+            model={current.model}
+            questions={current.openQuestions}
             busy={busy}
-            canResearch={Boolean(selectedAgent)}
-            staleRun={Boolean(selectedAnalysis && selectedAnalysis.revision !== current.revision)}
-            onCommand={(value) => void runCommand(value)}
-            onAddFact={(text) => void runCommand({ tag: "AddFact", text })}
+            onSituation={(text) => void runCommand({ tag: "SetSituation", text })}
+            onModel={(model) => void runCommand({ tag: "SetModel", model })}
             onUnderstand={() => void reviewWithAgent()}
-            onResearch={(question) => researchQuestion(current.id, question, selectedAgent)}
+            onDismissQuestion={(questionId) => void runCommand({ tag: "DismissQuestion", questionId })}
           />
-          <section className="section"><div className="eyebrow">Run</div><div className="run-form single"><label><span>Worlds</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label>{analysisActive ? <button onClick={() => cancelAnalysis()} disabled={busy}>{current.status === "running" ? "Cancel" : "Stop labeling"}</button> : <button className="primary" onClick={() => void runAnalysis()} disabled={!current.facts.some((fact) => fact.kind === "situation") || busy}>{selectedAnalysis && selectedAnalysis.revision !== current.revision ? "Run again" : "Run"}</button>}</div>{current.status === "running" && <RiverActivity compact label="Building the worlds" detail="Turning the facts into a model, then exploring how it plays out" />}{current.status === "labeling" && <RiverActivity compact label="Naming the branches" detail="Turning the results into plain language" />}{current.lastError && <div className="error" role="alert"><b>The last run did not finish:</b> {current.lastError}</div>}{runError && <div className="error" role="alert">{runError}</div>}{streamError && <div className="error" role="status">{streamError}</div>}</section>
-          <section className="section"><div className="section-heading"><div className="eyebrow">Runs</div>{analyses.length > 0 && <span>{uniqueRuns(analyses).length}</span>}</div><div className="runs">{uniqueRuns(analyses).map((analysis) => <RunCard key={analysisKey(analysis)} analysis={analysis} currentRevision={current.revision} selected={Boolean(selectedAnalysis && analysisKey(analysis) === analysisKey(selectedAnalysis))} onClick={() => { onSelectRun(analysisKey(analysis)); setMobilePane(null); }} onDelete={() => void removeAnalysis(analysis)} />)}{!analyses.length && <div className="runs-empty"><span className="runs-empty-icon"><Icon name="runs" /></span><b>Your runs will appear here</b><span>Run a simulation to compare saved rivers of worlds.</span></div>}</div></section>
+          <section className="section"><div className="eyebrow">Run</div><div className="run-form single"><label><span>Worlds</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label>{analysisActive ? <button onClick={() => cancelAnalysis()} disabled={busy}>{current.status === "running" ? "Cancel" : "Stop labeling"}</button> : <button className="primary" onClick={() => void runAnalysis()} disabled={!current.model || busy}>{selectedAnalysis && selectedAnalysis.revision !== current.revision ? "Run again" : "Run"}</button>}</div>{selectedAnalysis && selectedAnalysis.revision !== current.revision && <div className="run-hint">The model changed since the last run.</div>}{current.status === "running" && <RiverActivity compact label="Building the worlds" detail="Turning the model into worlds, then exploring how it plays out" />}{current.status === "labeling" && <RiverActivity compact label="Naming the branches" detail="Turning the results into plain language" />}{current.lastError && <div className="error" role="alert"><b>The last run did not finish:</b> {current.lastError}</div>}{runError && <div className="error" role="alert">{runError}</div>}{streamError && <div className="error" role="status">{streamError}</div>}</section>
         </>}
-      </div>
-    </aside>
-
-    <main className="river-pane">
-      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && mobilePane === "situations"} onClick={() => togglePane("situations")}><Icon name="situations" /><span>Situations</span></button><button className="toggle open-runs" aria-pressed={mobile && mobilePane === "runs"} onClick={() => togglePane("runs")}><Icon name="runs" /><span>Scenario</span></button><div className="river-heading"><b>{current?.title ?? "River of possibilities"}</b><span>{current?.status === "running" ? "Calculating possible worlds…" : current?.status === "labeling" ? "The river is ready; Pi is labeling its branches…" : selectedAnalysis ? `${selectedAnalysis.trials} possible worlds · ${compactDate(selectedAnalysis.completedAt)} · model r${selectedAnalysis.revision}` : current?.model ? "Start the first run" : "Clarify the situation with the agent first"}</span></div><div className="agent-tools"><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
-      {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : <><button className="empty-world-add" onClick={() => setPrompt({ mode: "create" })} aria-label="Create situation" title="Create situation"><Icon name="plus" /></button><h1>Worlds begin with a situation</h1><p>Describe it in your own words, then press Run.</p></>}</div></div>}
-      {selectedAnalysis && <div className="river-detail"><div className="river-scope"><div><small>River selection</small><b>{riverSelection?.label ?? "Entire river"}</b><span>{riverSelection?.worldIds.length ?? selectedAnalysis.trials} {word(riverSelection?.worldIds.length ?? selectedAnalysis.trials, "world", "worlds", "worlds")}</span></div><button type="button" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending || !selectedAnalysis.artifactUrl}>{replayMutation.isPending ? "Replaying…" : selectedAnalysis.artifactUrl ? `Replay world #${(riverSelection?.worldIds[0] ?? 0) + 1}` : "New run required"}</button></div>{replayError && <div className="error" role="alert">{replayError}</div>}{worldReplay && <WorldReplayCard value={worldReplay} />}{taskId && selectedAnalysis?.id && selectedAnalysis.artifactUrl && current?.facts.some((fact) => fact.kind === "outcome") && <RunPosteriorCard taskId={taskId} analysisId={selectedAnalysis.id} trials={selectedAnalysis.trials} outcomeCount={current.facts.filter((fact) => fact.kind === "outcome").length} />}</div>}
+      </div> : <>
+        {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : <><button className="empty-world-add" onClick={() => setPrompt({ mode: "create" })} aria-label="Create situation" title="Create situation"><Icon name="plus" /></button><h1>Worlds begin with a situation</h1><p>Describe it in your own words, then press Run.</p></>}</div></div>}
+        <div className="river-below">
+          {selectedAnalysis && <div className="river-detail"><div className="river-scope"><div><small>River selection</small><b>{riverSelection?.label ?? "Entire river"}</b><span>{riverSelection?.worldIds.length ?? selectedAnalysis.trials} {word(riverSelection?.worldIds.length ?? selectedAnalysis.trials, "world", "worlds", "worlds")}</span></div><button type="button" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending || !selectedAnalysis.artifactUrl}>{replayMutation.isPending ? "Replaying…" : selectedAnalysis.artifactUrl ? `Replay world #${(riverSelection?.worldIds[0] ?? 0) + 1}` : "New run required"}</button></div>{replayError && <div className="error" role="alert">{replayError}</div>}{worldReplay && <WorldReplayCard value={worldReplay} />}{taskId && selectedAnalysis?.id && selectedAnalysis.artifactUrl && current && current.facts.length > 0 && <RunPosteriorCard taskId={taskId} analysisId={selectedAnalysis.id} trials={selectedAnalysis.trials} outcomeCount={current.facts.length} />}</div>}
+          {current && <section className="section"><div className="section-heading"><div className="eyebrow">Runs</div>{analyses.length > 0 && <span>{uniqueRuns(analyses).length}</span>}</div><div className="runs">{uniqueRuns(analyses).map((analysis) => <RunCard key={analysisKey(analysis)} analysis={analysis} currentRevision={current.revision} selected={Boolean(selectedAnalysis && analysisKey(analysis) === analysisKey(selectedAnalysis))} onClick={() => onSelectRun(analysisKey(analysis))} onDelete={() => void removeAnalysis(analysis)} />)}{!analyses.length && <div className="runs-empty"><span className="runs-empty-icon"><Icon name="runs" /></span><b>Your runs will appear here</b><span>Run a simulation to compare saved rivers of worlds.</span></div>}</div></section>}
+          <OutcomeFacts facts={current?.facts ?? []} busy={busy} onRemove={(factId) => void runCommand({ tag: "RemoveFact", factId })} />
+        </div>
+      </>}
     </main>
 
-    {mobilePane && <button className="mobile-scrim" onClick={() => setMobilePane(null)} aria-label="Close side panel" />}
+    {situationsOpen && <button className="mobile-scrim" onClick={() => setSituationsOpen(false)} aria-label="Close side panel" />}
 
     <div className="toast-region" aria-label="Notifications" aria-live="polite">{pendingDeletes.filter((item) => !item.committing).map((item) => <div className="undo-toast" role="status" key={item.id}><span>{item.kind === "task" ? `World “${item.task.title}” deleted` : `Run with ${item.analysis.trials} ${word(item.analysis.trials, "world", "worlds", "worlds")} deleted`}</span><button onClick={() => undoDelete(item.id)}>Undo</button></div>)}</div>
 
@@ -638,7 +633,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     </dialog>
 
     <dialog className="model-dialog" ref={modelDialog}>
-      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><div className="advanced-field"><span>Pi for AI labeling</span><AgentPicker providers={agent.data?.providers ?? []} models={models} value={runAgentKey} onChange={setRunAgentKey} prefix="Labeling" /><small>The simulation remains deterministic; the selected Pi labels the resulting worlds.</small></div><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label><details className="developer-settings"><summary>The model built from your facts</summary><div className="eyebrow model-label">Model JSON</div><textarea className="code" value={modelText} readOnly spellCheck={false} aria-label="World model JSON" /><small>Read-only: this is derived from the facts. Change a fact and press Run to change the model.</small></details>{modelError && <div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending || !parseSelection(runAgentKey, models)}>Save</button></div></form>
+      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><div className="advanced-field"><span>Pi for AI labeling</span><AgentPicker providers={agent.data?.providers ?? []} models={models} value={runAgentKey} onChange={setRunAgentKey} prefix="Labeling" /><small>The simulation remains deterministic; the selected Pi labels the resulting worlds.</small></div><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label>{modelError &&<div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending || !parseSelection(runAgentKey, models)}>Save</button></div></form>
     </dialog>
 
     <dialog className="settings-dialog" ref={settingsDialog}>
