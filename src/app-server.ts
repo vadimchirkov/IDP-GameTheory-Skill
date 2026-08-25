@@ -258,9 +258,9 @@ async function resumeAnalysisLabels(id: string, analysis: TaskAnalysis, model: S
 }
 
 /**
- * One Run does everything the facts imply: rebuild the model when the situation facts have moved on
- * since it was last built, then simulate. Outcome facts are never part of the build — they reweight
- * the finished run instead.
+ * The stored model is the source of truth: if the task already has one, return it as-is. Only when
+ * the task has no model yet do we build one from the situation prose and store it. Outcome facts are
+ * never part of the build — they reweight the finished run instead.
  */
 async function modelForRun(id: string, agent: AgentSelection | undefined, now: string): Promise<ScenarioModel> {
   const state = detail(id);
@@ -417,7 +417,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       if (answer.tag === "Accepted" && command.tag === "CancelAnalysis") analysisJobs.get(id)?.abort();
       send(res, answer.tag === "Rejected" ? 409 : 200, answer.tag === "Rejected" ? answer : detail(id)); return;
     }
-    // One Run: rebuild the model if the situation facts moved on, then simulate and label.
+    // One Run: use the stored model (building it once from the situation prose if none exists), then simulate and label.
     if (req.method === "POST" && action === "run") {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
