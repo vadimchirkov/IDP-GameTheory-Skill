@@ -39,6 +39,8 @@ export interface Fact {
 export interface OpenQuestion {
   id: string;
   prompt: string;
+  /** Dotted model path the answer fills, e.g. "structure.w" — lets the form link a question to a field. */
+  field?: string;
 }
 
 export type TaskStatus = "new" | "ready" | "running" | "labeling" | "completed" | "failed";
@@ -71,14 +73,14 @@ export interface TaskState {
   id: string;
   /** Agent-owned; derived from the facts, not edited by hand. */
   title: string;
+  /** The prose seed the model is built from; edited in the Basics form as the situation field. */
+  situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
   /** Bumped only by `situation` facts — it is the fingerprint a run is measured against. */
   revision: number;
   status: TaskStatus;
   model?: ScenarioModel;
-  /** `revision` the model was built from; a lower value means the model is stale. */
-  modelRevision?: number;
   agent?: AgentSelection;
   analyses: readonly TaskAnalysis[];
   activeAnalysis?: { revision: number; trials: number; seed: number; agent?: AgentSelection; analysisId?: string };
@@ -148,7 +150,7 @@ export type TaskReply =
 
 export const taskCategory = categoryTypes<TaskCommand, TaskReply>(CategoryId("scenario-task"));
 
-const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
+const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
 const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
 const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
 
@@ -162,11 +164,6 @@ function omit<T extends object, K extends keyof T>(value: T, ...keys: K[]): Omit
   return copy;
 }
 
-/** A model exists but the facts moved on since it was built. */
-export function isModelStale(state: TaskState): boolean {
-  return Boolean(state.model) && (state.modelRevision ?? -1) !== state.revision;
-}
-
 /** The run a user is looking at is stale when the facts have moved on since it was computed. */
 export function isRunStale(state: TaskState, analysis: TaskAnalysis): boolean {
   return analysis.revision !== state.revision;
@@ -178,8 +175,8 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   switch (event.tag) {
     case "TaskCreated": {
       const base = { ...initialTask(event.taskId), title: event.title, createdAt: event.now, updatedAt: event.now };
-      const fact = event.fact ?? (event.brief ? { id: legacyId("brief", event.now, 0), text: event.brief, kind: "situation" as const, source: "user" as const, createdAt: event.now } : undefined);
-      return fact ? { ...base, facts: [fact], revision: 1, status: "ready" } : base;
+      const seed = event.fact?.text ?? event.brief ?? "";
+      return seed ? { ...base, situation: seed, revision: 1, status: "ready" } : base;
     }
     case "FactAdded": return { ...state, facts: [...state.facts, event.fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
     case "FactEdited": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, text: event.text, source: "user" } : fact), revision: event.revision, updatedAt: event.now };
@@ -189,7 +186,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, modelRevision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
       return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
@@ -224,7 +221,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     }
     case "ModelReplaced":
     case "AgentProposalAccepted":
-      return { ...omit(state, "lastError"), model: event.model, modelRevision: event.revision, revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
+      return { ...omit(state, "lastError"), model: event.model, revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
     case "AgentProposalRecorded": return { ...state, title: event.proposal.title?.trim() || state.title, updatedAt: event.now };
     case "AgentProposalRejected": return state;
     case "ObservationRecorded": {

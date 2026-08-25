@@ -13,7 +13,7 @@ import { buildScenarioModel, labelWorlds, researchQuestion, routeMessage, unders
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
-  isModelStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec,
+  taskAggregate, taskCategory, taskEventCodec, taskStateCodec,
   type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
@@ -265,8 +265,8 @@ async function resumeAnalysisLabels(id: string, analysis: TaskAnalysis, model: S
 async function modelForRun(id: string, agent: AgentSelection | undefined, now: string): Promise<ScenarioModel> {
   const state = detail(id);
   if (!state) throw new Error("Task not found");
-  if (state.model && !isModelStale(state)) return state.model;
-  const built = await buildScenarioModel(state.facts, agent);
+  if (state.model) return state.model;
+  const built = await buildScenarioModel(state.situation, undefined, agent);
   const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
   if (stored.tag === "Rejected") throw new Error(stored.reason);
   return built.model;

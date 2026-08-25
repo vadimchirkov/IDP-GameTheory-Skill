@@ -11,7 +11,7 @@ import { Rng } from "./rng.js";
 import { runAggregate, runCategory, runEventCodec, type RunCommand, type RunReply, type RunState } from "./run.js";
 import { runSummaryProjection, type RunSummaryView } from "./projections.js";
 import { participantAggregate, participantCategory, participantEventCodec, participantStateCodec } from "./participant.js";
-import { applyTaskEvent, isModelStale, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
+import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
 import { normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
 import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
@@ -145,8 +145,8 @@ const legacyJournal: TaskEvent[] = [
   { tag: "ObservationRecorded", analysisId: "run-1", observation: { fact: "cooperation collapsed", observation: { cooperation: 0.1 }, now: "2025-01-01T00:00:03Z" }, now: "2025-01-01T00:00:03Z" },
 ];
 const legacyReplay = legacyJournal.reduce(applyTaskEvent, state0);
-assert.equal(legacyReplay.facts.length, 3, "an old brief/context/observation journal replays into facts");
-assert.equal(legacyReplay.facts[0]?.text, "A legacy brief", "the old brief becomes the first situation fact");
+assert.equal(legacyReplay.facts.length, 2, "an old context/observation journal replays into facts");
+assert.equal(legacyReplay.situation, "A legacy brief", "the old brief becomes the situation seed");
 assert.equal(legacyReplay.facts.filter((fact) => fact.kind === "outcome").length, 1, "an old observation replays as an outcome fact");
 assert.ok(legacyReplay.model, "an accepted legacy proposal still carries its model");
 
@@ -163,20 +163,13 @@ const taskState = async (): Promise<TaskState> => {
 };
 await task.runtime.ask(tid, { tag: "CreateTask", taskId: "task-check", text: "Two suppliers meet every quarter", factId: "fact-1", now: "2026-01-01T00:00:00Z" }, taskCategory);
 const created = await taskState();
-assert.equal(created.facts.length, 1, "the opening description is the first fact");
 assert.equal(created.revision, 1, "a situation fact moves the fingerprint");
+assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
 
 await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-2", text: "They expect to keep dealing for years", kind: "situation", source: "agent", now: "2026-01-01T00:00:01Z" }, taskCategory);
 const assumed = await taskState();
-assert.equal(assumed.facts[1]?.source, "agent", "an inferred assumption is visible in the same list");
+assert.equal(assumed.facts[0]?.source, "agent", "an inferred assumption is visible in the same list");
 assert.equal(assumed.revision, 2, "an agent assumption is still a situation fact");
-
-await task.runtime.ask(tid, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:02Z" }, taskCategory);
-assert.equal(isModelStale(await taskState()), false, "a freshly built model matches the facts");
-await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-3", text: "Prices are public", kind: "situation", source: "user", now: "2026-01-01T00:00:03Z" }, taskCategory);
-const afterFact = await taskState();
-assert.ok(afterFact.model, "adding a fact keeps the previous model rather than destroying it");
-assert.ok(isModelStale(afterFact), "adding a situation fact marks the model stale");
 
 // Outcome facts are evidence: they never move the fingerprint, so a finished run stays current.
 const beforeOutcome = (await taskState()).revision;
