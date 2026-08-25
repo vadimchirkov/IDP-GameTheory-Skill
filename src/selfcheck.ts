@@ -44,8 +44,8 @@ const scenario: ScenarioModel = {
   payoffs: { T: [5, 5], R: [3, 3], P: [1, 1], S: [0, 0] },
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", assumedFacts: ["They meet quarterly"], questions: ["How long will it last?"] }), true, "the understanding contract accepts a closed result");
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", assumedFacts: [], questions: [], extra: true }), false, "agent contracts reject extra fields");
+assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [{ prompt: "How long will it last?", field: "structure.w" }] }), true, "the understanding contract accepts a closed result");
+assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
 const agentDraft = {
   mode: "shared" as const,
   shared: {
