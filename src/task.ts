@@ -99,6 +99,7 @@ export type TaskCommand =
   | { tag: "SuggestQuestions"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "DismissQuestion"; questionId: string; now: string }
   | { tag: "SetTitle"; title: string; now: string }
+  | { tag: "SetSituation"; text: string; now: string }
   | { tag: "SetModel"; model: ScenarioModel; agent?: AgentSelection; now: string }
   | { tag: "RemoveAnalysis"; analysisId: string; now: string }
   | { tag: "DeleteTask"; now: string }
@@ -122,6 +123,7 @@ export type TaskEvent =
   | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "QuestionDismissed"; questionId: string; now: string }
   | { tag: "TitleSet"; title: string; now: string }
+  | { tag: "SituationSet"; text: string; revision: number; now: string }
   | { tag: "ModelBuilt"; model: ScenarioModel; revision: number; agent?: AgentSelection; now: string }
   | { tag: "AnalysisRemoved"; analysisId: string; now: string }
   | { tag: "TaskDeleted"; now: string }
@@ -185,6 +187,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
+    case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
     case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "AnalysisRemoved": {
@@ -304,6 +307,12 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision: state.revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
       }
+      case "SetSituation": {
+        const text = command.text.trim();
+        if (!text) return rejected(state, "Describe the situation first");
+        const revision = state.revision + 1;
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "SituationSet", text: text.slice(0, 4000), revision, now: command.now }), { tag: "Accepted", revision });
+      }
       case "RemoveAnalysis":
         if (!state.analyses.some((analysis) => (analysis.id ?? analysis.visualUrl) === command.analysisId)) return rejected(state, "That run no longer exists");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisRemoved", analysisId: command.analysisId, now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -335,7 +344,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
 export const taskEventCodec = tagCodec<TaskEvent>(
   "TaskCreated", "FactAdded", "FactEdited", "FactRemoved", "FactKindChanged",
-  "QuestionsSuggested", "QuestionDismissed", "TitleSet", "ModelBuilt",
+  "QuestionsSuggested", "QuestionDismissed", "TitleSet", "SituationSet", "ModelBuilt",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay

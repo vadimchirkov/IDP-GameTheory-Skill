@@ -166,6 +166,18 @@ const created = await taskState();
 assert.equal(created.revision, 1, "a situation fact moves the fingerprint");
 assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
 
+const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
+const sitId = EntityId("situation-edit");
+await sit.runtime.ask(sitId, { tag: "CreateTask", taskId: "situation-edit", text: "Two suppliers meet every quarter", factId: "s0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await sit.runtime.ask(sitId, { tag: "SetSituation", text: "Two suppliers meet every month", now: "2026-01-01T00:00:01Z" }, taskCategory);
+const sitReply = await sit.runtime.ask(sitId, { tag: "GetTask" }, taskCategory);
+assert.ok(sitReply.ok && sitReply.value.reply?.tag === "State");
+if (sitReply.ok && sitReply.value.reply?.tag === "State") {
+  assert.equal(sitReply.value.reply.state.situation, "Two suppliers meet every month", "the situation prose can be edited");
+  assert.equal(sitReply.value.reply.state.revision, 2, "editing the situation moves the fingerprint");
+}
+await sit.runtime.shutdown();
+
 await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-2", text: "They expect to keep dealing for years", kind: "situation", source: "agent", now: "2026-01-01T00:00:01Z" }, taskCategory);
 const assumed = await taskState();
 assert.equal(assumed.facts[0]?.source, "agent", "an inferred assumption is visible in the same list");
