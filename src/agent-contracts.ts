@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import { strategyIds, type ScenarioModel } from "./domain.js";
+import { feasiblePayoffRanges, strategyIds, type GameType, type PayoffRanges, type ScenarioModel } from "./domain.js";
 
 const closed = { additionalProperties: false } as const;
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
@@ -84,7 +84,7 @@ const playerSchema = Type.Object({
   team: nullable(Type.String({ minLength: 1, maxLength: 120 })),
   values: nullable(rangeSchema),
   betrayalProb: nullable(Type.Number({ minimum: 0, maximum: 1 })),
-  memory: nullable(Type.Array(memoryEntrySchema, { minItems: 4 })),
+  memory: nullable(Type.Array(memoryEntrySchema, { minItems: 1 })),
   note: Type.String({ maxLength: 800 }),
 }, closed);
 
@@ -96,7 +96,7 @@ const ecoSchema = Type.Object({
   n0: rangeSchema,
 }, closed);
 const transitionSchema = Type.Object({
-  states: Type.Array(Type.Object({ name: Type.String({ minLength: 1, maxLength: 80 }), payoffs: payoffSchema }, closed), { minItems: 2 }),
+  states: Type.Array(Type.Object({ name: Type.String({ minLength: 1, maxLength: 80 }), payoffs: payoffSchema }, closed), { minItems: 1 }),
   start: Type.String({ minLength: 1, maxLength: 80 }),
   next: Type.Object({ CC: Type.String(), CD: Type.String(), DD: Type.String() }, closed),
 }, closed);
@@ -128,31 +128,99 @@ const rationaleSchema = Type.Array(Type.Object({ key: Type.String({ minLength: 1
 const scenarioBase = {
   situation: Type.String({ minLength: 1, maxLength: 1000 }),
   game: gameSchema,
-  players: Type.Array(playerSchema, { minItems: 2 }),
+  players: Type.Array(playerSchema, { minItems: 1 }),
   structure: structureSchema,
   topology: nullable(topologySchema),
   rationale: rationaleSchema,
 };
 
 export const sharedScenarioDraftSchema = Type.Object({ ...scenarioBase, payoffs: payoffSchema }, closed);
-export const asymmetricScenarioDraftSchema = Type.Object({
-  ...scenarioBase,
-  payoffsByPlayer: Type.Array(Type.Object({ player: Type.String({ minLength: 1, maxLength: 120 }), payoffs: payoffSchema }, closed), { minItems: 2 }),
-}, closed);
+export const asymmetricPayoffsSchema = Type.Array(Type.Object({ player: Type.String({ minLength: 1, maxLength: 120 }), payoffs: payoffSchema }, closed), { minItems: 1 });
+export const asymmetricScenarioDraftSchema = Type.Object({ ...scenarioBase, payoffsByPlayer: asymmetricPayoffsSchema }, closed);
 export type SharedScenarioDraft = Static<typeof sharedScenarioDraftSchema>;
 export type AsymmetricScenarioDraft = Static<typeof asymmetricScenarioDraftSchema>;
 
-export const scenarioDraftOutputSchema = Type.Object({
-  mode: stringEnum(["shared", "asymmetric"] as const),
-  shared: nullable(sharedScenarioDraftSchema),
-  asymmetric: nullable(asymmetricScenarioDraftSchema),
-}, closed);
+/** Keep one copy of the large model schema: asymmetric payoffs are the only shape difference. */
+export const scenarioDraftOutputSchema = Type.Object({ ...scenarioBase, payoffs: Type.Union([payoffSchema, asymmetricPayoffsSchema]) }, closed);
 export type ScenarioDraftOutput = Static<typeof scenarioDraftOutputSchema>;
 
+/** Fast first-pass contract; optional mechanisms are added only after the core is valid. */
+const corePlayerSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 120 }),
+  dispositions: Type.Array(stringEnum(strategyIds), { minItems: 1 }),
+  note: Type.String({ maxLength: 800 }),
+}, closed);
+export const scenarioCoreDraftSchema = Type.Object({
+  game: gameSchema,
+  players: Type.Array(corePlayerSchema, { minItems: 1 }),
+  w: rangeSchema,
+  noise: rangeSchema,
+  payoffs: Type.Union([payoffSchema, asymmetricPayoffsSchema]),
+  rationale: rationaleSchema,
+}, closed);
+export type ScenarioCoreDraft = Static<typeof scenarioCoreDraftSchema>;
+
+export function normalizeScenarioCoreDraft(output: ScenarioCoreDraft, situation: string): ScenarioModel {
+  const players = output.players.map((player) => ({ name: player.name.trim(), dispositions: player.dispositions, ...(player.note.trim() ? { note: player.note.trim() } : {}) }));
+  let repaired = false;
+  const normalizedPayoffs = (value: Static<typeof payoffSchema>) => {
+    const ranges = normalizePayoffs(value);
+    if (feasiblePayoffRanges(ranges, output.game)) return ranges;
+    repaired = true;
+    return canonicalPayoffs(ranges, output.game);
+  };
+  const payoffs = Array.isArray(output.payoffs)
+    ? Object.fromEntries(output.payoffs.map((item) => [item.player.trim(), normalizedPayoffs(item.payoffs)]))
+    : normalizedPayoffs(output.payoffs);
+  const rationale = Object.fromEntries(output.rationale.map((item) => [item.key, item.note]));
+  if (repaired) rationale["Payoff validation"] = "Ranges were normalized to preserve the selected game's required incentive ordering.";
+  return { situation, game: output.game, players, structure: { w: normalizeRange(output.w), noise: normalizeRange(output.noise) }, payoffs, ...(Object.keys(rationale).length ? { rationale } : {}) };
+}
+
+function canonicalPayoffs(ranges: PayoffRanges, game: GameType): PayoffRanges {
+  const values = Object.values(ranges).flat();
+  const low = Math.min(...values);
+  const span = Math.max(Math.max(...values) - low, 4);
+  const point = (share: number): readonly [number, number] => [low + span * share, low + span * share];
+  if (game === "chicken" || game === "snowdrift") return { P: point(0), S: point(0.3), R: point(0.65), T: point(1) };
+  if (game === "stag_hunt") return { S: point(0), P: point(0.3), T: point(0.65), R: point(1) };
+  return { S: point(0), P: point(0.25), R: point(0.65), T: point(1) };
+}
+
+/** A compact scope chosen before asking the model to emit the full ScenarioModel. */
+export const scenarioFrameOutputSchema = Type.Object({
+  decision: Type.String({ minLength: 1, maxLength: 500 }),
+  decisionMaker: Type.String({ minLength: 1, maxLength: 160 }),
+  players: Type.Array(Type.Object({
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+    role: Type.String({ minLength: 1, maxLength: 240 }),
+    choices: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { minItems: 1 }),
+  }, closed), { minItems: 1 }),
+  outcome: Type.String({ minLength: 1, maxLength: 800 }),
+  horizon: Type.String({ minLength: 1, maxLength: 160 }),
+  scope: Type.String({ minLength: 1, maxLength: 240 }),
+  mechanisms: Type.Array(Type.String({ minLength: 1, maxLength: 120 })),
+  unresolved: Type.Array(Type.String({ minLength: 1, maxLength: 240 })),
+}, closed);
+export type ScenarioFrameOutput = Static<typeof scenarioFrameOutputSchema>;
+
+/** A model review returns findings, never another competing full model. */
+export const scenarioCritiqueOutputSchema = Type.Object({
+  verdict: stringEnum(["pass", "repair", "clarify"] as const),
+  issues: Type.Array(Type.Object({
+    severity: stringEnum(["blocking", "warning"] as const),
+    path: Type.String({ minLength: 1, maxLength: 120 }),
+    problem: Type.String({ minLength: 1, maxLength: 400 }),
+    evidence: Type.String({ minLength: 1, maxLength: 400 }),
+    suggestedChange: Type.String({ minLength: 1, maxLength: 400 }),
+  }, closed)),
+  remainingQuestions: Type.Array(Type.String({ minLength: 1, maxLength: 240 })),
+}, closed);
+export type ScenarioCritiqueOutput = Static<typeof scenarioCritiqueOutputSchema>;
+
 export function normalizeScenarioDraft(output: ScenarioDraftOutput): ScenarioModel {
-  if (output.mode === "shared" && output.shared && output.asymmetric === null) return normalizeSharedDraft(output.shared);
-  if (output.mode === "asymmetric" && output.asymmetric && output.shared === null) return normalizeAsymmetricDraft(output.asymmetric);
-  throw new Error("Scenario draft mode must select exactly one matching payload");
+  if (Array.isArray(output.payoffs)) return normalizeAsymmetricDraft({ ...output, payoffsByPlayer: output.payoffs });
+  return normalizeSharedDraft({ ...output, payoffs: output.payoffs });
 }
 
 function normalizeBase(draft: SharedScenarioDraft | AsymmetricScenarioDraft): Omit<ScenarioModel, "payoffs"> {

@@ -13,7 +13,7 @@ import { runSummaryProjection, type RunSummaryView } from "./projections.js";
 import { participantAggregate, participantCategory, participantEventCodec, participantStateCodec } from "./participant.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
-import { normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
+import { normalizeScenarioCoreDraft, normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
 import { parseChatResponse, parseScenarioHints, parseStructuredJson } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 
@@ -49,23 +49,29 @@ assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", 
 assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
 assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
 const agentDraft = {
-  mode: "shared" as const,
-  shared: {
-    situation: "contract check",
-    game: "prisoners_dilemma" as const,
-    players: [
-      { name: "A", dispositions: ["provocable" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-      { name: "B", dispositions: ["exploitative" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-    ],
-    structure: { w: { min: 0.8, max: 0.9 }, noise: { min: 0, max: 0.05 }, drift: null, sigma: null, eco: null, transitions: null, reputation: null, punishment: null, cheapTalk: null },
-    topology: null,
-    rationale: [],
-    payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } },
-  },
-  asymmetric: null,
+  situation: "contract check",
+  game: "prisoners_dilemma" as const,
+  players: [
+    { name: "A", dispositions: ["provocable" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
+    { name: "B", dispositions: ["exploitative" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
+  ],
+  structure: { w: { min: 0.8, max: 0.9 }, noise: { min: 0, max: 0.05 }, drift: null, sigma: null, eco: null, transitions: null, reputation: null, punishment: null, cheapTalk: null },
+  topology: null,
+  rationale: [],
+  payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } },
 };
 assert.equal(Value.Check(scenarioDraftOutputSchema, agentDraft), true, "full Pi model contract is machine-validatable");
 assert.deepEqual(normalizeScenarioDraft(agentDraft).players.map((player) => player.name), ["A", "B"]);
+const repairedPayoffs = normalizeScenarioCoreDraft({
+  game: "prisoners_dilemma",
+  players: [{ name: "Symbioen", dispositions: ["provocable"], note: "" }, { name: "CPO", dispositions: ["exploitative"], note: "" }],
+  w: { min: 0.6, max: 0.8 }, noise: { min: 0.03, max: 0.12 }, rationale: [],
+  payoffs: [
+    { player: "Symbioen", payoffs: { T: { min: 1, max: 2 }, R: { min: 4, max: 5 }, P: { min: 2, max: 3 }, S: { min: 3, max: 4 } } },
+    { player: "CPO", payoffs: { T: { min: 4, max: 6 }, R: { min: 2, max: 3 }, P: { min: 0, max: 1 }, S: { min: -3, max: -0.5 } } },
+  ],
+}, "charging reliability");
+assert.doesNotThrow(() => analyzeScenario(repairedPayoffs, 2, 1), "invalid agent payoff ranges are normalized before simulation");
 assert.deepEqual(parseScenarioHints("1. Кто принимает решение?\n- Какой срок?\n• Что ограничивает выбор?"), ["Кто принимает решение?", "Какой срок?", "Что ограничивает выбор?"]);
 assert.deepEqual(parseChatResponse("Main answer.\n<followups>What should we verify next?\nWhich assumption matters most?\nHow could the outcome change?</followups>"), { text: "Main answer.", suggestions: ["What should we verify next?", "Which assumption matters most?", "How could the outcome change?"] });
 assert.equal(relativeTime("2026-08-24T10:00:00.000Z", Date.parse("2026-08-24T10:12:00.000Z")), "12m ago");

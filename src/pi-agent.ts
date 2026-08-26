@@ -115,6 +115,8 @@ export interface StructuredRunOptions<T extends TSchema> {
   toolName: string;
   toolDescription: string;
   selection?: AgentSelection;
+  /** Prefer a cheaper reasoning level when the caller does not provide a model selection. */
+  defaultThinkingLevel?: AgentSelection["thinkingLevel"];
   timeoutMs?: number;
   signal?: AbortSignal;
   onProgress?: (event: unknown) => void;
@@ -153,7 +155,7 @@ export function parseStructuredJson<T extends TSchema>(text: string, schema: T):
   throw new Error(`JSON does not match the required schema: ${validation}`);
 }
 
-async function resolveModel(selection?: AgentSelection) {
+async function resolveModel(selection?: AgentSelection, defaultThinkingLevel?: AgentSelection["thinkingLevel"]) {
   const runtime = await getRuntime();
   if (selection) {
     const model = runtime.getModel(selection.provider, selection.model);
@@ -173,13 +175,13 @@ async function resolveModel(selection?: AgentSelection) {
   const available = await runtime.getAvailable();
   const model = FALLBACK_MODELS.map(([provider, modelId]) => available.find((candidate) => candidate.provider === provider && candidate.id === modelId)).find(Boolean) ?? available[0];
   if (!model) throw new Error("No authenticated Pi model is available; configure Pi auth or PI_PROVIDER/PI_MODEL");
-  return { runtime, model, selection: selectionFor(model) };
+  return { runtime, model, selection: selectionFor(model, defaultThinkingLevel) };
 }
 
 export async function runStructured<T extends TSchema>(options: StructuredRunOptions<T>): Promise<StructuredRun<Static<T>>> {
   const startedAt = Date.now();
   const runId = randomUUID();
-  const { runtime, model, selection } = await resolveModel(options.selection);
+  const { runtime, model, selection } = await resolveModel(options.selection, options.defaultThinkingLevel);
   let value: Static<T> | undefined;
   let submissions = 0;
   const outputTool = defineTool({

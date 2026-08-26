@@ -52,7 +52,19 @@ export interface TaskMessage {
   createdAt: string;
 }
 
-export type TaskStatus = "new" | "ready" | "running" | "labeling" | "completed" | "failed";
+export type TaskStatus = "new" | "ready" | "building" | "running" | "labeling" | "completed" | "failed";
+
+export interface ActiveModelBuild {
+  buildId: string;
+  revision: number;
+  stage: string;
+  message: string;
+  attempt: number;
+  status: "running" | "failed";
+  error?: string;
+  startedAt: string;
+  updatedAt: string;
+}
 
 export interface TaskAnalysis {
   /** Stable identity for new runs; legacy journal entries are keyed by visualUrl. */
@@ -94,6 +106,7 @@ export interface TaskState {
   agent?: AgentSelection;
   analyses: readonly TaskAnalysis[];
   activeAnalysis?: { revision: number; trials: number; seed: number; agent?: AgentSelection; analysisId?: string };
+  activeBuild?: ActiveModelBuild;
   lastError?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -111,6 +124,10 @@ export type TaskCommand =
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
   | { tag: "SetModel"; model: ScenarioModel; agent?: AgentSelection; now: string }
+  | { tag: "StartModelBuild"; buildId: string; revision: number; now: string }
+  | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
+  | { tag: "CompleteModelBuild"; buildId: string; model: ScenarioModel; agent?: AgentSelection; now: string }
+  | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
   | { tag: "RemoveAnalysis"; analysisId: string; now: string }
   | { tag: "DeleteTask"; now: string }
   | { tag: "RequestAnalysis"; trials: number; seed: number; agent?: AgentSelection; now: string }
@@ -136,6 +153,9 @@ export type TaskEvent =
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
   | { tag: "ModelBuilt"; model: ScenarioModel; revision: number; agent?: AgentSelection; now: string }
+  | { tag: "ModelBuildStarted"; buildId: string; revision: number; now: string }
+  | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
+  | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
   | { tag: "AnalysisRemoved"; analysisId: string; now: string }
   | { tag: "TaskDeleted"; now: string }
   | { tag: "AnalysisRequested"; revision: number; trials: number; seed: number; agent?: AgentSelection; now: string }
@@ -208,7 +228,16 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
+    case "ModelBuildProgressed": {
+      if (state.activeBuild?.buildId !== event.buildId) return state;
+      return { ...state, status: "building", activeBuild: { ...state.activeBuild, stage: event.stage, message: event.message, attempt: event.attempt, status: "running", updatedAt: event.now }, updatedAt: event.now };
+    }
+    case "ModelBuildFailed": {
+      if (state.activeBuild?.buildId !== event.buildId) return state;
+      return { ...state, status: state.model ? readyStatus(state) : "failed", activeBuild: { ...state.activeBuild, status: "failed", error: event.reason, updatedAt: event.now }, lastError: event.reason, updatedAt: event.now };
+    }
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
       return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
@@ -322,6 +351,22 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         const revision = changed ? state.revision + 1 : state.revision;
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
       }
+      case "StartModelBuild":
+        if (state.activeBuild?.status === "running") return rejected(state, "A model build is already running");
+        if (command.revision !== state.revision) return rejected(state, "That build belongs to an older situation");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildStarted", buildId: command.buildId, revision: command.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "UpdateModelBuild":
+        if (state.activeBuild?.buildId !== command.buildId || state.activeBuild.status !== "running") return rejected(state, "That build is no longer active");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildProgressed", buildId: command.buildId, stage: command.stage.slice(0, 40), message: command.message.slice(0, 500), attempt: Math.max(1, command.attempt ?? state.activeBuild.attempt), now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "CompleteModelBuild": {
+        if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
+        try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
+        const revision = JSON.stringify(state.model) !== JSON.stringify(command.model) ? state.revision + 1 : state.revision;
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
+      }
+      case "FailModelBuild":
+        if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildFailed", buildId: command.buildId, reason: command.reason.slice(0, 1000), now: command.now }), { tag: "Accepted", revision: state.revision });
       case "SetSituation": {
         const text = command.text.trim();
         if (!text) return rejected(state, "Describe the situation first");
@@ -364,7 +409,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
 export const taskEventCodec = tagCodec<TaskEvent>(
   "TaskCreated", "FactAdded", "FactEdited", "FactRemoved",
-  "QuestionsSuggested", "QuestionDismissed", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt",
+  "QuestionsSuggested", "QuestionDismissed", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay

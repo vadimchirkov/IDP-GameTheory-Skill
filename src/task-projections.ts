@@ -44,6 +44,8 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
         return { ...at(event.now), revision: event.revision };
       case "ModelBuilt": case "ModelReplaced": case "AgentProposalAccepted":
         return { ...at(event.now), revision: event.revision };
+      case "ModelBuildStarted": case "ModelBuildProgressed": return { ...at(event.now), status: "building" };
+      case "ModelBuildFailed": return { ...at(event.now), status: "failed" };
       case "AnalysisRequested": return { ...at(event.now), status: "running" };
       case "AnalysisCalculated": return { ...at(event.analysis.completedAt), status: "labeling", hasRun: true, latestReport: event.analysis.report };
       case "AnalysisLabelsCompleted": return { ...at(event.now), status: "completed" };
