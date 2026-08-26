@@ -4,6 +4,7 @@ import {
 } from "@lambda-house/teob-ts/core";
 import { assertScenario, type ScenarioModel } from "./domain.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
+import type { ResearchSource } from "./web-research.js";
 
 /**
  * The model (built from the `situation` prose seed) is the source of truth for the scenario.
@@ -98,6 +99,8 @@ export interface TaskState {
   situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
+  /** Public sources used to fill model context; excerpts are bounded and treated as untrusted data. */
+  researchSources?: readonly ResearchSource[];
   messages: readonly TaskMessage[];
   /** Bumped when the model or situation prose changes — the fingerprint a run is measured against. */
   revision: number;
@@ -120,6 +123,7 @@ export type TaskCommand =
   | { tag: "RemoveFact"; factId: string; now: string }
   | { tag: "SuggestQuestions"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "DismissQuestion"; questionId: string; now: string }
+  | { tag: "RecordResearch"; sources: readonly ResearchSource[]; now: string }
   | { tag: "AddMessage"; message: TaskMessage }
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
@@ -149,6 +153,7 @@ export type TaskEvent =
   | { tag: "FactRemoved"; factId: string; revision: number; now: string }
   | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "QuestionDismissed"; questionId: string; now: string }
+  | { tag: "ResearchRecorded"; sources: readonly ResearchSource[]; now: string }
   | { tag: "MessageAdded"; message: TaskMessage }
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
@@ -184,9 +189,29 @@ export type TaskReply =
 
 export const taskCategory = categoryTypes<TaskCommand, TaskReply>(CategoryId("scenario-task"));
 
-const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], messages: [], revision: 0, analyses: [] });
+const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], researchSources: [], messages: [], revision: 0, analyses: [] });
 const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
 const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
+
+function boundedResearchSources(sources: readonly ResearchSource[]): ResearchSource[] {
+  return sources.slice(0, 12).flatMap((source, index) => {
+    try {
+      const url = new URL(source.url);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return [];
+      const clean = (value: string, limit: number) => value.trim().replace(/\s+/g, " ").slice(0, limit);
+      return [{
+        id: clean(source.id, 80) || `source-${index + 1}`,
+        title: clean(source.title, 160) || url.hostname,
+        url: url.href,
+        excerpt: clean(source.excerpt, 3_000),
+        query: clean(source.query, 240),
+        ...(source.purpose ? { purpose: clean(source.purpose, 240) } : {}),
+        ...(source.field ? { field: clean(source.field, 80) } : {}),
+        fetchedAt: source.fetchedAt,
+      }];
+    } catch { return []; }
+  });
+}
 
 function rejected(state: TaskState, reason: string): Promise<Effect<TaskEvent, TaskReply>> {
   return Promise.resolve(reply({ tag: "Rejected", reason, revision: state.revision }));
@@ -223,6 +248,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
     case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
+    case "ResearchRecorded": return { ...state, researchSources: event.sources, updatedAt: event.now };
     // ponytail: keep a bounded journal until long conversations justify summarization.
     case "MessageAdded": return { ...state, messages: [...(state.messages ?? []), event.message].slice(-200), updatedAt: event.message.createdAt };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
@@ -334,6 +360,8 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "DismissQuestion":
         if (!state.openQuestions.some((question) => question.id === command.questionId)) return rejected(state, "That question is already gone");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionDismissed", questionId: command.questionId, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "RecordResearch":
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ResearchRecorded", sources: boundedResearchSources(command.sources), now: command.now }), { tag: "Accepted", revision: state.revision });
       case "AddMessage": {
         const text = command.message.text.trim();
         if (!text) return rejected(state, "The message is empty");
@@ -409,7 +437,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
 export const taskEventCodec = tagCodec<TaskEvent>(
   "TaskCreated", "FactAdded", "FactEdited", "FactRemoved",
-  "QuestionsSuggested", "QuestionDismissed", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed",
+  "QuestionsSuggested", "QuestionDismissed", "ResearchRecorded", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay

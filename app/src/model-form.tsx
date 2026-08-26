@@ -2,6 +2,7 @@ import { useEffect, useState, type InputHTMLAttributes } from "react";
 import { assertScenario, isValidPayoff, strategyIds } from "../../src/domain";
 import type { GameType, PayoffRanges, Range, ReputationNorm, ScenarioPlayer, StrategyId } from "../../src/domain";
 import type { ScenarioModel } from "./api";
+import type { ResearchSource } from "../../src/web-research";
 
 /**
  * The typed model, edited directly. Three tiers: Basics (always there), Mechanisms (opt-in chips
@@ -181,6 +182,7 @@ export interface ModelFormProps {
   situation: string;
   model?: ScenarioModel;
   questions: readonly { id: string; prompt: string; field?: string }[];
+  sources?: readonly ResearchSource[];
   busy: boolean;
   error?: string;
   justRebuilt?: boolean;
@@ -293,6 +295,12 @@ export function ModelForm(props: ModelFormProps) {
       <span>The situation text changed — use the workflow card above to rebuild before running.</span>
     </div>}
     {props.error && !props.busy && <div className="model-error error" role="alert">{props.error}</div>}
+    {!!props.sources?.length && <section className="model-sources" aria-label="Public research sources">
+      <div className="fact-group-label">Found in public sources <span>{props.sources.length} · reviewed by the agent</span></div>
+      <div className="research-source-list">{props.sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}>
+        <span>{source.title}</span><small>{source.field ? `${source.field} · ` : ""}{source.purpose ?? new URL(source.url).hostname}</small>
+      </a>)}</div>
+    </section>}
 
     <fieldset className="model-fields" disabled={props.busy}>
       <div className="model-block">
