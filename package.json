@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && pnpm app:build",
-    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts",
+    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts",
     "demo": "tsx src/demo.ts",
     "scenario": "tsx src/cli.ts",
     "scenario:build": "tsx src/cli.ts --build",
@@ -15,6 +15,7 @@
     "app:server": "tsx watch src/app-server.ts",
     "verify": "tsx src/verify-pack.ts",
     "bench:engine": "tsx src/bench-engine.ts",
+    "bench:abc": "tsx src/abc-live.ts",
     "bench:live": "node scripts/live-bench.mjs",
     "bench:all": "pnpm bench:live && pnpm bench:engine && pnpm cross:validate",
     "cross:validate": "tsx src/cross_validate.ts && python3 scripts/cross_validate.py"

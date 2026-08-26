@@ -45,25 +45,36 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 ## What the application does
 
+A scenario is **one list of facts** and **one Run button**.
+
 1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
-   shared resource, or another relationship in which 2–10 sides meet repeatedly.
-2. **Clarify the important unknowns.** The Pi agent identifies gaps, can research a
-   concrete fact, and presents its assumptions in plain language for confirmation.
-3. **Build a model.** Confirmed assumptions are converted into a closed, typed
-   `ScenarioModel`. The model must also pass the engine's domain validation.
-4. **Run possible worlds.** The engine rapidly samples payoff ranges, strategies,
-   noise, continuation probability, dispositions, and other enabled mechanisms.
-   One run can explore 1–5000 worlds; the default is 600.
+   shared resource, or another relationship in which 2–10 sides meet repeatedly. What
+   you write becomes the first fact.
+2. **Let the agent fill in the rest.** It adds the assumptions it can infer as ordinary
+   facts, marked *assumed* so you can edit or delete them, and raises what it cannot
+   infer as optional questions. Questions never block anything: answer one to replace
+   the assumption, ignore it to keep the default, or look it up on the web.
+3. **Keep adding facts.** A fact is either about **the situation** (it shapes the model)
+   or about **what already happened** (it is evidence). You can type facts directly or
+   just say them in the chat — the agent files them and flags which kind it chose, and
+   you can flip that with one click.
+4. **Press Run.** One action rebuilds the model from the situation facts, validates it
+   against the engine's domain rules, and explores 1–5000 worlds (default 600). Adding
+   facts never triggers a run by itself.
 5. **Explore the result.** An interactive river groups worlds by approach, opening,
    response, development, and outcome. Select a branch to inspect it or replay a
    representative pair round by round.
-6. **Compare runs.** Every run keeps its model revision, seed, metrics, visual report,
-   and replay artifact. Editing the situation marks older runs as stale without
-   erasing them.
+6. **Say what actually happened.** An outcome fact reweights the finished run instantly
+   — no re-run — to the worlds consistent with it, and reports how many still match.
+   Outcome facts never enter the model, so the analysis stays a forecast rather than a
+   restatement of the answer.
+7. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
+   seed, metrics, visual report, and replay artifact. New situation facts mark older
+   runs stale without erasing them.
 
-The application also includes provider/model selection, reasoning-level controls,
-an assistant chat scoped to the current situation or selected branch, cancellable
-background analysis, live updates, and undoable deletion.
+The application also includes provider/model selection, reasoning-level controls, a
+read-only view of the model built from your facts, cancellable background analysis,
+live updates, and undoable deletion.
 
 ## Quick start
 
@@ -239,6 +250,51 @@ pnpm bench:all      # both layers plus cross-validation
 These checks validate implementation and calibration; they do not prove that an
 unobserved real-world situation will follow the model. Dataset sources, hashes, and
 known gaps are documented in [data/README.md](data/README.md).
+
+### What the benchmarks say about prediction
+
+Flumina is a conditional scenario forecaster. Its output is a distribution over
+possible worlds, together with the assumptions that move that distribution. The
+benchmarks support a modest standalone signal and a stronger case for updating a
+broad prior when partial observations are available.
+
+The current benchmark runs show:
+
+| Test | Result | Interpretation |
+|---|---:|---|
+| Synthetic winner holdout | 60.0% vs 50% coin | A modest signal in a one-trial-per-model test |
+| DF2011 cooperation rate | mean agreement 89.4% | MAE 10.6 percentage points across six treatments |
+| dilemmaRL cooperation rate | mean agreement 94.6% | MAE 5.4 percentage points across five non-zero-delta groups |
+| ABC partial observation | MAE 0.054 vs prior 0.293 | Conditioning selects worlds close to 40 observed rounds |
+| Hidden-strategy recovery | 20% top-1 vs 13% chance | Partial player-level outcomes contain information about latent dispositions |
+
+The treatment-level figures are agreement scores, calculated as
+`100 − absolute error in the observed cooperation rate`. They are not binary
+classification accuracy. The DF2011 and dilemmaRL mappings use treatment variables
+to set behavioral ranges, so these results measure calibration and model fit. They
+are not independent forecasts of previously unseen treatments.
+
+The move-level results require the same caution. Predicting the previous move again
+with a Tit-for-Tat-style rule reaches 82–91% on several datasets, but this mostly
+measures behavioral persistence. It is a useful baseline and implementation check,
+not the predictive accuracy of the full scenario engine. Class-imbalance metrics
+such as balanced accuracy, macro-F1, and transition accuracy are needed alongside
+raw accuracy.
+
+The ABC experiment gives the clearest picture of the product's intended use. A broad
+prior over repeated-game worlds has cooperation-rate MAE 0.293. Reweighting those
+worlds after observing 40 rounds reduces MAE to 0.054, while copying the short
+sample directly gives 0.046. The current result therefore supports posterior
+narrowing and hidden-state inference; it does not show that the model beats a raw
+sample estimate for the same quantity. The target rate includes the observed rounds,
+so this test should be read as partial-observation validation rather than a fully
+independent holdout.
+
+MID and TIES use simplified repeated-game proxies. Their results indicate how far a
+generic model can reproduce aggregate cooperation rates under those proxies. They
+do not validate forecasts of real conflicts or sanctions. The forecast remains
+conditional on the facts, payoff ranges, behavioral assumptions, and game class
+provided by the user.
 
 ## Command-line use
 

@@ -225,7 +225,7 @@ function nextUp(value: number): number {
   return floats[0]!;
 }
 
-function feasiblePayoff(ranges: PayoffRanges, game: GameType): boolean {
+export function feasiblePayoffRanges(ranges: PayoffRanges, game: GameType): boolean {
   const chooseChain = (ordered: readonly (keyof Payoff)[]): Payoff | undefined => {
     const picked = {} as Payoff;
     let previous: number | undefined;
@@ -256,7 +256,7 @@ function assertPayoffRanges(ranges: PayoffRanges, game: GameType, label: string)
     throw new Error(`${label} must contain exactly T, R, P and S`);
   }
   for (const key of ["T", "R", "P", "S"] as const) assertFiniteRange(ranges[key], `${label}.${key}`);
-  if (!feasiblePayoff(ranges, game)) throw new Error(`${label} ranges cannot satisfy ${game}`);
+  if (!feasiblePayoffRanges(ranges, game)) throw new Error(`${label} ranges cannot satisfy ${game}`);
 }
 
 function assertScenarioPayoffs(model: ScenarioModel): void {
