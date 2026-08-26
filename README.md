@@ -251,6 +251,51 @@ These checks validate implementation and calibration; they do not prove that an
 unobserved real-world situation will follow the model. Dataset sources, hashes, and
 known gaps are documented in [data/README.md](data/README.md).
 
+### What the benchmarks say about prediction
+
+Flumina is a conditional scenario forecaster. Its output is a distribution over
+possible worlds, together with the assumptions that move that distribution. The
+benchmarks support a modest standalone signal and a stronger case for updating a
+broad prior when partial observations are available.
+
+The current benchmark runs show:
+
+| Test | Result | Interpretation |
+|---|---:|---|
+| Synthetic winner holdout | 60.0% vs 50% coin | A modest signal in a one-trial-per-model test |
+| DF2011 cooperation rate | mean agreement 89.4% | MAE 10.6 percentage points across six treatments |
+| dilemmaRL cooperation rate | mean agreement 94.6% | MAE 5.4 percentage points across five non-zero-delta groups |
+| ABC partial observation | MAE 0.054 vs prior 0.293 | Conditioning selects worlds close to 40 observed rounds |
+| Hidden-strategy recovery | 20% top-1 vs 13% chance | Partial player-level outcomes contain information about latent dispositions |
+
+The treatment-level figures are agreement scores, calculated as
+`100 − absolute error in the observed cooperation rate`. They are not binary
+classification accuracy. The DF2011 and dilemmaRL mappings use treatment variables
+to set behavioral ranges, so these results measure calibration and model fit. They
+are not independent forecasts of previously unseen treatments.
+
+The move-level results require the same caution. Predicting the previous move again
+with a Tit-for-Tat-style rule reaches 82–91% on several datasets, but this mostly
+measures behavioral persistence. It is a useful baseline and implementation check,
+not the predictive accuracy of the full scenario engine. Class-imbalance metrics
+such as balanced accuracy, macro-F1, and transition accuracy are needed alongside
+raw accuracy.
+
+The ABC experiment gives the clearest picture of the product's intended use. A broad
+prior over repeated-game worlds has cooperation-rate MAE 0.293. Reweighting those
+worlds after observing 40 rounds reduces MAE to 0.054, while copying the short
+sample directly gives 0.046. The current result therefore supports posterior
+narrowing and hidden-state inference; it does not show that the model beats a raw
+sample estimate for the same quantity. The target rate includes the observed rounds,
+so this test should be read as partial-observation validation rather than a fully
+independent holdout.
+
+MID and TIES use simplified repeated-game proxies. Their results indicate how far a
+generic model can reproduce aggregate cooperation rates under those proxies. They
+do not validate forecasts of real conflicts or sanctions. The forecast remains
+conditional on the facts, payoff ranges, behavioral assumptions, and game class
+provided by the user.
+
 ## Command-line use
 
 Run an existing model without the web application:

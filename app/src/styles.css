@@ -174,19 +174,41 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .river-heading b, .river-heading span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .river-heading b { font-size: 11px; font-weight: 590 }
 .river-heading span { color: var(--muted); font-size: 9px }
-.agent-tools { display: flex; gap: 2px }
+.agent-tools { position: absolute; right: 12px; display: flex; gap: 2px }
 .agent-tools button { position: relative; background: transparent }
 
-/* ── Model | River: the two faces of the centre pane ───────────────────────── */
-.center-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 6px 12px; box-shadow: 0 1px var(--line) }
-.center-tabs button { min-height: 28px; border-radius: 8px; background: transparent; color: var(--muted); padding: 0 13px; font-size: 11px }
-.center-tabs button:hover { background: var(--surface-hover); color: var(--muted-strong) }
-.center-tabs button.on { background: var(--surface); color: var(--ink); font-weight: 570 }
+/* ── One connected workflow: stage navigation and current action ───────────── */
+.stage-switcher { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; padding: 0; }
+.stage-switcher button { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); padding: 0 8px; font-size: 10px }
+.stage-switcher button:hover { background: var(--surface-hover); color: var(--muted-strong) }
+.stage-switcher button.active { background: var(--surface); color: var(--ink); font-weight: 600 }
+.stage-switcher button.done { color: var(--accent) }
+.stage-switcher button i { width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: inherit; font-size: 8px; font-style: normal; font-variant-numeric: tabular-nums }
+.stage-switcher button.active i { border-color: var(--ink) }.stage-switcher button.done i { border-color: var(--accent) }
+.stage-switcher > b { width: 28px; height: 1px; background: var(--line-strong) }
 .model-pane { flex: 1; min-height: 0; display: flex; overflow: hidden }
-.model-workspace { width: min(640px, 100%); min-height: 0; display: flex; flex: 1; flex-direction: column; margin: 0 auto }
+.context-pane { flex: 1; min-height: 0; overflow: auto; padding: 28px 16px 40px }
+.context-workspace { width: min(640px, 100%); margin: 0 auto }
+.context-card { margin: 0; border: 0; border-radius: 0; background: transparent }
+.context-card h1 { margin: 4px 0 0; font-size: 20px; font-weight: 590; letter-spacing: -.02em }
+.context-intro { max-width: 520px; margin: 12px 0 16px; color: var(--muted-strong); font-size: 11px; line-height: 1.5 }
+.context-card textarea { width: 100%; min-height: 180px; resize: vertical; border: 0; border-radius: 9px; background: #191919; padding: 12px; color: var(--ink); box-shadow: none; line-height: 1.5 }
+.context-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px }.context-actions span { color: var(--muted); font-size: 10px; text-align: right }
+.context-questions { margin: 24px 0 0; border: 0; border-radius: 0; background: transparent }
+.model-workspace { width: min(672px, 100%); min-height: 0; display: flex; flex: 1; flex-direction: column; margin: 0 auto }
+.workflow-card { flex: 0 0 auto; margin: 12px 16px 0; padding: 0 0 4px; text-align: center }
+.workflow-card.toy { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 24px 16px 32px }
+.workflow-head { display:flex; align-items:center; justify-content:center; gap:12px }
+.workflow-head b { display:block; font-size:14px; font-weight:590 }
+.workflow-copy { max-width: 440px; margin:11px auto 0; color:var(--muted-strong); font-size:10px; line-height:1.4 }
+.workflow-live { margin-top:10px; padding:8px; border-radius:9px; background:rgba(255,255,255,.035) }
+.workflow-live .river-activity { justify-content:flex-start; gap:9px }.workflow-live .river-orbit { width:24px; height:24px }
+.workflow-live.spd-live { display: flex; justify-content: center; margin-top: 0; padding: 0; background: transparent }
+.workflow-run { display:grid; grid-template-columns:128px minmax(0, 1fr); gap:8px; align-items:end; margin:18px auto 0; max-width:360px; text-align:left }
+.workflow-run label span { display:block; margin-bottom:4px; color:var(--muted); font-size:10px }.workflow-run input { width:100%; min-height:36px; border:0; border-radius:8px; background:#191919; padding:8px 10px; box-shadow:inset 0 0 0 1px var(--line) }
+.workflow-run > button { min-height:36px }
+.workflow-action, .workflow-cancel { margin-top:10px }.workflow-action { width:auto; min-width:130px; margin-inline:auto }.workflow-cancel { width:100%; background:transparent; color:var(--muted-strong) }.model-run-error { margin:10px 16px }
 .model-scroll { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; padding: 4px 16px 32px }
-.model-run-dock { flex: 0 0 auto; margin: 0; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); box-shadow: 0 -10px 24px rgba(0, 0, 0, .16) }
-.model-run-dock .run-form { margin-top: 6px }
 .river-below { flex: 0 0 auto; max-height: 44%; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); background: var(--panel) }
 .river-below:empty { display: none }
 .river-below > .river-detail { border-top: 0 }
@@ -224,6 +246,26 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .river-activity.compact span { margin-top: 1px; font-size: 9px }
 @keyframes river-flow { to { transform: rotate(360deg) } }
 @keyframes river-flow-reverse { to { transform: rotate(-360deg) } }
+
+.spd { display: grid; gap: 12px; width: min(100%, 360px); color: var(--ink); text-align: left }
+.spd__intro { text-align: center }
+.spd__intro h2 { margin: 5px 0 0; font-size: 18px; font-weight: 590; letter-spacing: -.025em }
+.spd__intro p { margin: 7px auto 0; max-width: 340px; color: var(--muted); font-size: 10px; line-height: 1.5; text-wrap: pretty }
+.spd__canvas { display: block; width: 100%; height: auto; aspect-ratio: 1; overflow: hidden; border-radius: 12px; image-rendering: pixelated; background: var(--surface); box-shadow: 0 12px 30px rgba(0, 0, 0, .22), inset 0 0 0 1px var(--line) }
+.spd__story { border-radius: 10px; background: var(--surface); padding: 10px 12px }
+.spd__story > div { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.spd__story span { color: var(--muted); font-size: 9px; letter-spacing: .06em; text-transform: uppercase }
+.spd__story b { font-size: 10px; font-weight: 590 }
+.spd__story p { margin: 5px 0 0; color: var(--muted-strong); font-size: 10px; line-height: 1.45; text-wrap: pretty }
+.spd__legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 12px; color: var(--muted); font-size: 9px }
+.spd__chip { display: inline-flex; align-items: center; gap: 5px }
+.spd__swatch { width: 8px; height: 8px; border-radius: 2px }
+.spd__controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 12px; padding-top: 2px }
+.spd__actions { display: flex; gap: 6px }
+.spd__actions button { min-height: 32px; padding-inline: 10px; font-size: 10px }
+.spd__temptation { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 9px }
+.spd__temptation input { grid-column: 1 / -1; width: 100%; accent-color: var(--muted-strong) }
+.spd__temptation b { color: var(--ink); font-weight: 590 }
 
 dialog { width: min(600px, calc(100vw - 28px)); max-height: calc(100vh - 28px); overflow: auto; border: 0; border-radius: 18px; padding: 0; background: #202020; color: var(--ink); box-shadow: 0 28px 80px rgba(0, 0, 0, .52), 0 0 0 1px rgba(255, 255, 255, .07) }
 dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
@@ -436,7 +478,10 @@ label:has(> select:disabled)::after { opacity: .4 }
   .river-below { max-height: 52% }
   .toggle { padding: 0 9px }
   .toggle .ui-icon { display: none }
-  .agent-tools { margin-left: auto }
+  .river-toolbar .stage-switcher { left: 82px; right: 8px; justify-content: flex-end; transform: none; overflow: hidden }
+  .stage-switcher button { gap: 4px; padding-inline: 5px; font-size: 9px }
+  .stage-switcher > b { width: 14px; flex: 0 0 14px }
+  .agent-tools { right: 6px }
   .agent-drawer { inset: 6px; width: auto }
   .mobile-scrim { position: fixed; z-index: 19; inset: 0; display: block; width: 100%; min-height: 100%; border-radius: 0; background: rgba(0, 0, 0, .48); cursor: default }
   .settings-row { grid-template-columns: 1fr }
@@ -471,7 +516,7 @@ label:has(> select:disabled)::after { opacity: .4 }
 
 /* ── Open questions: always optional, never a gate ─────────────────────────── */
 .question-list { display: grid; gap: 4px; margin: 5px 0 0; padding: 0; list-style: none }
-.question { border: 1px solid var(--line); border-radius: 9px; padding: 8px }
+.question { border: 0; border-radius: 8px; background: rgba(255, 255, 255, .025); padding: 9px 10px }
 .question-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start }
 .question-prompt { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere }
 .question-dismiss { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
@@ -482,19 +527,20 @@ label:has(> select:disabled)::after { opacity: .4 }
 .model-fields { min-width: 0; min-inline-size: 0; min-height: 0; margin: 0; border: 0; padding: 0 }
 fieldset.model-fields { min-inline-size: 0 }
 .model-fields:disabled { opacity: .55 }
-.model-block { display: block; margin-top: 14px }
+.model-block { display: block; margin-top: 22px }
+.model-block + .model-block { padding-top: 18px; border-top: 1px solid var(--line) }
 .model-block > .fact-group-label { margin-top: 0 }
-.model-form textarea, .model-form input, .model-form select { width: 100%; min-width: 0; min-height: 32px; border: 0; border-radius: 8px; background: #191919; padding: 6px 9px; font-size: 11px; box-shadow: inset 0 0 0 1px var(--line) }
+.model-form textarea, .model-form input, .model-form select { width: 100%; min-width: 0; min-height: 34px; border: 0; border-radius: 9px; background: #191919; padding: 7px 10px; font-size: 11px; box-shadow: none }
 .model-form textarea { resize: vertical; line-height: 1.45 }
 .model-form label > span:first-child { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 5px }
-.mechanism-chip { min-height: 28px; flex-direction: column; gap: 0; border-radius: 999px; background: rgba(255, 255, 255, .05); padding: 0 11px; color: var(--muted-strong); font-size: 10px; white-space: nowrap }
+.mechanism-chip { min-height: 32px; flex-direction: column; gap: 0; border-radius: 8px; background: rgba(255, 255, 255, .05); padding: 0 10px; color: var(--muted-strong); font-size: 10px; white-space: nowrap }
 .mechanism-chip:hover:not(:disabled) { background: rgba(255, 255, 255, .1); color: var(--ink) }
 .mechanism-chip[aria-pressed=true] { background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong) }
 .mechanism-chip small { color: var(--muted); font-size: 8px }
 
-.player-row { margin-top: 5px }
+.player-row { margin-top: 7px }
 .player-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 20px; gap: 5px; align-items: center }
 .player-main label { position: relative; min-width: 0 }
 .player-main label::after { bottom: 14px }
@@ -503,14 +549,14 @@ fieldset.model-fields { min-inline-size: 0 }
 .player-row .fact-remove { opacity: .5 }
 .player-row:hover .fact-remove { opacity: 1 }
 
-.payoff-table { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.payoff-table { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
 .payoff-group { margin-bottom: 9px }
 .payoff-group small { display: block; margin-bottom: 4px; color: var(--muted-strong); font-size: 9px }
 .range-field > span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px }
 .range-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px }
 .model-warning { margin-top: 8px; border-radius: 8px; background: rgba(178, 140, 87, .13); color: #d8b071; padding: 6px 8px; font-size: 9.5px }
 
-.mechanism-panel { display: grid; gap: 7px; margin-top: 8px; border-radius: 10px; background: rgba(255, 255, 255, .025); padding: 10px }
+.mechanism-panel { display: grid; gap: 8px; margin-top: 10px; border-radius: 9px; background: rgba(255, 255, 255, .035); padding: 12px }
 .mechanism-panel small { color: var(--muted); font-size: 9px; line-height: 1.4 }
 .check { display: flex; align-items: center; gap: 7px }
 .check > span:first-child, .model-form .check > span { margin: 0; color: var(--muted-strong); font-size: 10px }
@@ -540,9 +586,6 @@ fieldset.model-fields { min-inline-size: 0 }
 .agent-log-line.muted { color:var(--muted); font-style:italic }
 .model-success { margin-top:10px; padding:8px 10px; border-radius:9px; background:rgba(103,185,159,.12); color:#7fd0b3; font-size:11px; border:1px solid rgba(103,185,159,.18) }
 .note-row { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) 20px; gap: 5px; align-items: center; margin-bottom: 5px }
-.agent-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; margin-right: 2px }
-.agent-status-dot.on { background: var(--good); box-shadow: 0 0 0 3px rgba(103,185,159,.15) }
-.agent-status-dot.off { background: #555; box-shadow: 0 0 0 3px rgba(255,255,255,.06) }
 .agent-drawer-banner { margin: 8px 12px; padding: 8px 10px; border-radius: 9px; background: rgba(210,154,58,.12); border: 1px solid rgba(210,154,58,.22); color: #e8c07a; font-size: 11px; display: flex; align-items: center; gap: 6px }
 .agent-draft-ready { margin-top: 8px; border-radius: 8px; background: rgba(103,185,159,.1); color: #8bd3bb; padding: 7px 8px; font-size: 10px; line-height: 1.35 }
 .pending-outcome { margin: 8px 12px; padding: 10px; border-radius: 10px; background: #191919; border: 1px solid var(--line-strong); display: grid; gap: 8px }
@@ -552,3 +595,15 @@ fieldset.model-fields { min-inline-size: 0 }
 .pending-actions { display: flex; gap: 6px; justify-content: flex-end }
 .river-scope-actions { display: flex; gap: 6px; align-items: center }
 .living-hint { font-size: 9px; color: var(--good); margin-top: 4px }
+.model-build-report { width: min(440px, 100%); flex: 0 0 auto; margin: 12px auto 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); text-align: left }
+.model-build-report-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 590 }
+.model-build-report-head small { color: var(--accent); font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em }
+.model-build-report ol { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none }
+.model-build-report li { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 10px; line-height: 1.35 }
+.model-build-report li i { width: 13px; height: 13px; flex: 0 0 13px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: transparent; font-size: 8px; font-style: normal }
+.model-build-report li.done { color: var(--muted-strong) }
+.model-build-report li.done i { border-color: var(--good); background: var(--good); color: #17211e }
+.model-build-report li.active { color: var(--ink) }
+.model-build-report li.active i { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(255,255,255,.06); animation: model-pulse 1.2s ease-in-out infinite }
+.model-build-report li.failed { color: #e8c07a }
+.model-build-report li.failed i { border-color: #d29a3a; color: #d29a3a }

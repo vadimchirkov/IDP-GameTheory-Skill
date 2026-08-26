@@ -201,7 +201,6 @@ export function ModelForm(props: ModelFormProps) {
   const game = model.game ?? "prisoners_dilemma";
   const asymmetric = asymmetricOf(model.payoffs);
   const table = asymmetric ? Object.values(asymmetric)[0] ?? DEFAULT_PAYOFFS : (model.payoffs as PayoffRanges);
-  const situation = useDraft(props.situation, props.onSituation);
 
   const emit = (next: ScenarioModel) => props.onModel(next);
   const patch = (next: Partial<ScenarioModel>) => emit({ ...model, ...next });
@@ -289,47 +288,13 @@ export function ModelForm(props: ModelFormProps) {
   const situationStale = Boolean(model.situation && props.situation.trim() && model.situation.trim() !== props.situation.trim());
 
   return <section className="section model-form">
-    <div className="section-heading">
-      <div className="eyebrow">Model</div>
-      <button type="button" className="link-button rebuild-button" disabled={props.busy || props.agentAvailable === false} onClick={props.onUnderstand}
-        title={props.agentAvailable === false ? props.agentStatusText ?? "Agent not configured" : `${props.model ? "Rebuild" : "Build"} the model from the collected context`}>{props.busy ? "Building…" : props.model ? "Rebuild model" : "Build model"}</button>
-    </div>
     {props.agentAvailable === false && <div className="model-warning" role="status">Agent not configured — add an API key in Settings to rebuild the model. You can still edit the model by hand.</div>}
     {situationStale && !props.busy && <div className="model-stale-banner" role="status">
-      <span>The situation text changed — rebuild to apply it to the model.</span>
-      <button type="button" className="primary" onClick={props.onUnderstand}>Rebuild now</button>
+      <span>The situation text changed — use the workflow card above to rebuild before running.</span>
     </div>}
-    {props.busy && <div className="agent-stream" role="status" aria-live="polite">
-      <div className="model-busy"><span className="model-busy-dot" aria-hidden /> Creating your model</div>
-      <ol className="model-progress">
-        {["Context captured", "Shaping the model", "Checking assumptions", "Saving the model"].map((label, index) => <li key={label} className={index < (props.buildStage ?? 0) ? "done" : index === (props.buildStage ?? 0) ? "active" : ""}><i aria-hidden>{index < (props.buildStage ?? 0) ? "✓" : ""}</i>{label}</li>)}
-      </ol>
-      {props.streaming && (props.buildElapsed ?? 0) >= 15 && <div className="agent-log-line muted">Still working — your context is saved.</div>}
-    </div>}
-    {props.justRebuilt && !props.busy && !props.error && <div className="model-success" role="status">Model ready ✓ — review the assumptions, then run it.</div>}
     {props.error && !props.busy && <div className="model-error error" role="alert">{props.error}</div>}
 
-    {props.questions.length > 0 && <div className="questions">
-      <div className="fact-group-label">Worth clarifying <span>optional — ignoring these keeps the agent's assumption</span></div>
-      <ul className="question-list">
-        {props.questions.map((question) => <li key={question.id} className="question">
-          <div className="question-head">
-            <span className="question-prompt">{question.prompt}
-              {question.field && <span className="question-field">→ {question.field}</span>}</span>
-            <button type="button" className="question-dismiss" disabled={props.busy}
-              aria-label={`Dismiss: ${question.prompt}`} onClick={() => props.onDismissQuestion(question.id)}>×</button>
-          </div>
-        </li>)}
-      </ul>
-    </div>}
-
     <fieldset className="model-fields" disabled={props.busy}>
-      <label className="model-block">
-        <span className="fact-group-label">The situation</span>
-        <textarea rows={4} value={situation.draft} placeholder="Describe the situation in your own words…"
-          onChange={(event) => situation.setDraft(event.target.value)} onBlur={situation.blur} />
-      </label>
-
       <div className="model-block">
         <div className="fact-group-label">Kind of standoff</div>
         <div className="chip-row">

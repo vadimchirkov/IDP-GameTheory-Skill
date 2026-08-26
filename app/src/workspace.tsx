@@ -8,11 +8,13 @@ import {
 import { OutcomeFacts } from "./facts";
 import { ModelForm } from "./model-form";
 import { RiverActivity } from "./river-activity";
+import { SpatialPrisonersDilemma } from "./spatial-prisoners-dilemma";
 import { relativeTime } from "./relative-time";
 
-const statusName = { ready: "Ready", running: "Running", labeling: "Labeling", completed: "Complete", failed: "Failed", new: "New" } as const;
+const statusName = { ready: "Ready", running: "Running", labeling: "Labeling", completed: "Complete", failed: "Failed", building: "Building", new: "New" } as const;
 type PromptState = { mode: "create" };
 type ModelOption = AgentModelStatus;
+type BuildActivityItem = { id: string; stage: string; message: string; status: "active" | "done" | "failed" };
 type PendingDelete =
   | { id: string; kind: "task"; task: TaskSummary; nextTaskId?: string; committing?: boolean }
   | { id: string; kind: "analysis"; taskId: string; revision: number; analysis: TaskState["analyses"][number]; wasSelected: boolean; committing?: boolean };
@@ -50,7 +52,7 @@ function openDialog(dialog: HTMLDialogElement | null) {
 
 function Icon({ name }: { name: "collapse" | "worlds" | "situations" | "runs" | "settings" | "plus" | "more" | "trash" | "chat" | "close" | "edit" | "refresh" | "search" | "send" }) {
   const paths = {
-    collapse: <path d="m14.5 6.5-5.5 5.5 5.5 5.5" />,
+    collapse: <><path d="M9 4v16" /><path d="m15 9-3 3 3 3" /></>,
     worlds: <><circle cx="12" cy="12" r="8.5" /><path d="M3.8 12h16.4M12 3.5c2.3 2.3 3.5 5.1 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.1-3.5-8.5S9.7 5.8 12 3.5z" /></>,
     situations: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="5" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="5" cy="18" r="1" fill="currentColor" stroke="none" /></>,
     runs: <><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="18" cy="18" r="2" /><path d="M8 5h8M6 7v5a6 6 0 0 0 6 6h4" /></>,
@@ -187,7 +189,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const now = useMinuteClock();
   const [hideSituations, setHideSituations] = useState(() => localStorage.getItem("pane-situations") === "hidden");
   const [situationsOpen, setSituationsOpen] = useState(false);
-  const [centerTab, setCenterTab] = useState<"model" | "river">("model");
+  const [centerTab, setCenterTab] = useState<"context" | "model" | "river">("context");
   const [pendingOutcome, setPendingOutcome] = useState<{ message: string; observation: Record<string, unknown>; display: string } | null>(null);
   const [prompt, setPrompt] = useState<PromptState>();
   const [draftText, setDraftText] = useState("");
@@ -196,6 +198,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [rebuildDone, setRebuildDone] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [modelBuildStage, setModelBuildStage] = useState(0);
+  const [buildActivity, setBuildActivity] = useState<BuildActivityItem[]>([]);
   const [streamError, setStreamError] = useState("");
   const [modelError, setModelError] = useState("");
   const [nextSeed, setNextSeed] = useState<number>();
@@ -227,9 +230,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId!), enabled: Boolean(taskId) });
   const agent = useQuery({ queryKey: ["agent-status"], queryFn: getAgentStatus, retry: 0 });
   const current = task.data;
-  const assistantMode: AgentMode = !current?.model ? "context" : centerTab === "model" ? "model" : "river";
+  const assistantMode: AgentMode = !current?.model || centerTab === "context" ? "context" : centerTab === "model" ? "model" : "river";
   const chatMessages = current?.messages ?? [];
-  const hasContextReply = chatMessages.some((message) => message.role === "user" && message.mode === "context");
 
   useEffect(() => {
     const first = tasks.data?.[0];
@@ -240,10 +242,11 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setNextSeed(undefined);
     setRunError("");
     setModelBuildStage(1);
+    setBuildActivity([]);
     setStreaming(false);
     setRebuildDone(false);
     setTrials(current?.analyses.at(-1)?.trials ?? 600);
-    setCenterTab(current?.analyses.length ? "river" : "model");
+    setCenterTab(current?.analyses.length ? "river" : current?.model ? "model" : "context");
   }, [taskId, current?.id]);
 
   useEffect(() => {
@@ -257,6 +260,13 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     stream.onerror = () => setStreamError("The live update connection was lost. Your browser will try to reconnect.");
     return () => stream.close();
   }, [queryClient, taskId]);
+
+  useEffect(() => {
+    const build = current?.activeBuild;
+    if (!build || streaming) return;
+    setModelBuildStage(build.stage === "frame" ? 0 : build.stage === "draft" ? 1 : 2);
+    setBuildActivity([{ id: build.buildId, stage: build.stage, message: build.error ?? build.message, status: build.status === "failed" ? "failed" : "active" }]);
+  }, [current?.activeBuild?.buildId, current?.activeBuild?.stage, current?.activeBuild?.message, current?.activeBuild?.status, current?.activeBuild?.error, current?.activeBuild?.updatedAt, streaming]);
 
   useEffect(() => {
     const dialog = promptDialog.current;
@@ -303,7 +313,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     },
   });
   const replayMutation = useMutation({ mutationFn: ({ taskId, analysisId, index }: { taskId: string; analysisId: string; index: number }) => getWorldReplay(taskId, analysisId, index) });
-  const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming;
+  const buildActive = current?.activeBuild?.status === "running" || current?.status === "building";
+  const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming || buildActive;
   const promptBusy = busy;
   const elapsed = useElapsed(busy);
 
@@ -329,11 +340,37 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setRunError("");
     setRebuildDone(false);
     setModelBuildStage(1);
+    setBuildActivity([]);
     setStreaming(true);
-    setAgentPanel(true);
+    setCenterTab("model");
     const advanceStage = (ev: Record<string, unknown>) => {
       const stage = String(ev.stage ?? "");
-      setModelBuildStage(stage === "check" ? 2 : stage === "save" ? 3 : 1);
+      const index = stage === "frame" ? 0
+        : stage === "draft" ? 1
+          : stage === "validate" || stage === "review" || stage === "repair" ? 2
+            : stage === "smoke" || stage === "check" || stage === "save" ? 3
+              : 1;
+      setModelBuildStage(index);
+      if (ev.kind === "error") {
+        const message = String(ev.error ?? "The model build stopped").trim();
+        setBuildActivity((items) => {
+          const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
+          const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
+          return next.slice(-6);
+        });
+        return;
+      }
+      if (ev.kind === "done") {
+        setBuildActivity((items) => items.map((item) => ({ ...item, status: "done" as const })));
+        return;
+      }
+      const message = String(ev.message ?? "").trim();
+      if (!message || !stage || stage === "shape" || stage === "save") return;
+      setBuildActivity((items) => {
+        const current = items.at(-1);
+        if (current?.stage === stage && current.message === message) return items;
+        return [...items.map((item) => ({ ...item, status: "done" as const })), { id: `${stage}-${items.length}`, stage, message, status: "active" as const }].slice(-6);
+      });
     };
     try {
       // Prefer streaming endpoint (shows live agent messages); fallback to classic
@@ -349,7 +386,15 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       if (selectedAgent) { const value = selectionValue(selectedAgent); saveSelection(value, models); setAgentKey(value); }
       setRebuildDone(true);
       window.setTimeout(() => setRebuildDone(false), 4000);
-    } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBuildActivity((items) => {
+        if (items.at(-1)?.status === "failed") return items;
+        const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
+        const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
+        return next.slice(-6);
+      });
+    }
     finally { setStreaming(false); }
   };
 
@@ -591,7 +636,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const outcomeFacts = (current?.facts ?? []).filter((fact) => fact.kind === "outcome");
   const situationStale = Boolean(current?.model && current.situation.trim() && current.model.situation.trim() !== current.situation.trim());
   const chatSuggestions = assistantMode === "context"
-    ? ["What else is missing?", "Can we build with reasonable assumptions?"]
+    ? []
     : assistantMode === "model"
       ? ["Which assumptions should I review?", "What could change the result most?"]
       : riverSelection && riverSelection.kind !== "all"
@@ -638,14 +683,17 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   };
   const appClass = ["app", hideSituations && "hide-situations", agentPanel && "agent-open", situationsOpen && "mobile-situations"].filter(Boolean).join(" ");
   const assistantTitle = assistantMode === "context" ? "Context guide" : assistantMode === "model" ? "Model copilot" : "River analyst";
-  const assistantHint = assistantMode === "context"
-    ? "Add what you know, answer only the questions that matter, then build the model."
-    : assistantMode === "model"
+  const assistantHint = assistantMode === "model"
       ? "Discuss assumptions here; rebuild explicitly when the context changes."
-      : "Ask about branches or tell me what actually happened.";
+      : assistantMode === "river" ? "Ask about branches or tell me what actually happened." : "";
   const promptTitle = "New situation";
   const promptHint = "Describe the situation in your own words: who is involved, what they want, which choices they have, and what makes it hard. The agent will fill in the rest and ask about anything it cannot infer.";
   const workingLabel = "Reading the situation";
+  const workflowRunning = current?.status === "running" || current?.status === "labeling";
+  const contextReady = Boolean(current?.situation.trim());
+  const modelReady = Boolean(current?.model);
+  const contextActive = centerTab === "context";
+  const worldsActive = centerTab === "river" || workflowRunning;
 
   return <div className={appClass}>
     <aside className="pane situations" aria-label="Situations">
@@ -660,24 +708,48 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     </aside>
 
     <main className="river-pane">
-      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && situationsOpen} onClick={toggleSituations}><Icon name="situations" /><span>Situations</span></button><div className="river-heading"><b>{current?.title ?? "River of possibilities"}</b><span>{current?.status === "running" ? "Calculating possible worlds…" : current?.status === "labeling" ? "The river is ready; Pi is labeling its branches…" : selectedAnalysis ? `${selectedAnalysis.trials} possible worlds · ${compactDate(selectedAnalysis.completedAt)} · model r${selectedAnalysis.revision}` : current?.model ? "Start the first run" : agentAvailable ? "Clarify the situation with the agent first" : "Agent not configured — open Settings"}</span></div><div className="agent-tools"><span className={`agent-status-dot ${agentAvailable ? "on" : "off"}`} title={agentStatusText} aria-label={agentStatusText} /><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
+      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && situationsOpen} onClick={toggleSituations}><Icon name="situations" /><span>Situations</span></button><nav className="stage-switcher" aria-label="Scenario stages">
+        <button type="button" className={`${contextActive ? "active" : ""} ${contextReady && !contextActive ? "done" : ""}`} aria-current={contextActive ? "step" : undefined} onClick={() => setCenterTab("context")}><i aria-hidden>{contextReady && !contextActive ? "✓" : "1"}</i><span>Context</span></button><b aria-hidden />
+        <button type="button" className={`${centerTab === "model" ? "active" : ""} ${modelReady && centerTab !== "model" ? "done" : ""}`} aria-current={centerTab === "model" ? "step" : undefined} onClick={() => setCenterTab("model")}><i aria-hidden>{modelReady && centerTab !== "model" ? "✓" : "2"}</i><span>Model</span></button><b aria-hidden />
+        <button type="button" className={`${worldsActive ? "active" : ""} ${selectedAnalysis && !worldsActive ? "done" : ""}`} aria-current={worldsActive ? "step" : undefined} onClick={() => setCenterTab("river")}><i aria-hidden>{selectedAnalysis && !worldsActive ? "✓" : "3"}</i><span>Worlds{selectedAnalysis ? ` · ${selectedAnalysis.trials}` : ""}</span></button>
+      </nav><div className="agent-tools"><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
 
-      <div className="center-tabs" role="tablist">
-        <button role="tab" aria-selected={centerTab === "model"} className={centerTab === "model" ? "on" : ""} onClick={() => setCenterTab("model")}>Model</button>
-        <button role="tab" aria-selected={centerTab === "river"} className={centerTab === "river" ? "on" : ""} onClick={() => setCenterTab("river")}>River</button>
-      </div>
-
-      {centerTab === "model" ? <div className="model-pane">
+      {centerTab === "context" ? <div className="context-pane">
+        {current && <div className="context-workspace">
+          <section className="section context-card">
+            <div className="section-heading"><div><div className="eyebrow">Context</div><h1>What is happening?</h1></div></div>
+            <p className="context-intro">Describe the situation in your own words. The assistant will turn it into explicit assumptions and ask about anything that matters.</p>
+            <textarea key={`${current.id}:${current.situation}`} aria-label="Situation context" defaultValue={current.situation} placeholder="Who is involved, what do they want, and what makes this difficult?" rows={9} disabled={busy} onBlur={(event) => { const text = event.currentTarget.value.trim(); if (text && text !== current.situation.trim()) void runCommand({ tag: "SetSituation", text }); }} />
+          </section>
+          {current.openQuestions.length > 0 && <section className="section context-questions questions">
+            <div className="fact-group-label">Worth clarifying <span>optional — ignoring these keeps the agent's assumption</span></div>
+            <ul className="question-list">
+              {current.openQuestions.map((question) => <li key={question.id} className="question"><div className="question-head"><span className="question-prompt">{question.prompt}{question.field && <span className="question-field">→ {question.field}</span>}</span><button type="button" className="question-dismiss" disabled={busy} aria-label={`Dismiss: ${question.prompt}`} onClick={() => void runCommand({ tag: "DismissQuestion", questionId: question.id })}>×</button></div></li>)}
+            </ul>
+          </section>}
+        </div>}
+      </div> : centerTab === "model" ? <div className="model-pane">
         {task.isPending && taskId && <div className="empty-runs">Loading situation…</div>}
         {task.isError && <ErrorState error={task.error} retry={() => void task.refetch()} />}
         {!taskId && <div className="empty-runs">Select a situation or create a new one.</div>}
         {current && <div className="model-workspace">
-          <div className="model-scroll"><ModelForm
+          <section className={`workflow-card ${streaming || buildActive || (current.model && !situationStale && !workflowRunning) ? "toy" : ""}`} aria-label="Scenario workflow">
+            {!streaming && !buildActive && workflowRunning && <div className="workflow-head"><b>{current.status === "labeling" ? "Naming the branches" : "Exploring possible worlds"}</b></div>}
+            {!streaming && workflowRunning && <div className="workflow-live"><RiverActivity compact label={current.status === "labeling" ? "Calculation complete" : "Building the worlds"} detail={current.status === "labeling" ? "Pi is adding clear names to the branches" : "Exploring the model with the selected number of worlds"} /></div>}
+            {!streaming && !workflowRunning && current.model && situationStale && <p className="workflow-copy">The situation changed. Rebuild the model before running it.</p>}
+            {workflowRunning && <button type="button" className="workflow-cancel" onClick={cancelAnalysis} disabled={busy}>Cancel</button>}
+            {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && <button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button>}
+            {(streaming || buildActive || Boolean(current.model && !situationStale && !workflowRunning)) && <div className="workflow-live spd-live"><SpatialPrisonersDilemma /></div>}
+            {buildActivity.length > 0 && (streaming || buildActive) && <BuildActivity items={buildActivity} active />}
+            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div>}
+            {runError && !streaming && <div className="error" role="alert">{runError}</div>}
+          </section>
+          {!streaming && !buildActive && (!current.model || situationStale) && <div className="model-scroll"><ModelForm
             situation={current.situation}
             model={current.model}
             questions={current.openQuestions}
             busy={busy}
-            error={runError}
+            error={undefined}
             justRebuilt={rebuildDone}
             streaming={streaming}
             buildStage={modelBuildStage}
@@ -688,8 +760,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             onModel={(model) => void runCommand({ tag: "SetModel", model })}
             onUnderstand={() => void reviewWithAgent()}
             onDismissQuestion={(questionId) => void runCommand({ tag: "DismissQuestion", questionId })}
-          /></div>
-          {current.model && <section className="section model-run-dock"><div className="eyebrow">Run this model</div><div className="run-form single"><label><span>Worlds</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label>{analysisActive ? <button onClick={() => cancelAnalysis()} disabled={busy}>{current.status === "running" ? "Cancel" : "Stop labeling"}</button> : <button className="primary" onClick={() => void runAnalysis()} disabled={busy || situationStale}>{situationStale ? "Rebuild needed" : selectedAnalysis && selectedAnalysis.revision !== current.revision ? "Run again" : "Run"}</button>}</div>{situationStale && <div className="run-hint">Situation changed — rebuild the model before the next run.</div>}{selectedAnalysis && !situationStale && selectedAnalysis.revision !== current.revision && <div className="run-hint">The model changed since the last run.</div>}{!agentAvailable && <div className="run-hint">Agent not configured — run will calculate worlds without branch labels.</div>}{current.status === "running" && <RiverActivity compact label="Building the worlds" detail="Turning the model into worlds, then exploring how it plays out" />}{current.status === "labeling" && <RiverActivity compact label="Naming the branches" detail="Turning the results into plain language" />}{current.lastError && <div className="error" role="alert"><b>The last run did not finish:</b> {current.lastError}</div>}{runError && <div className="error" role="alert">{runError}</div>}{streamError && <div className="error" role="status">{streamError}</div>}</section>}
+          /></div>}
+          {streamError && <div className="error model-run-error" role="status">{streamError}</div>}
         </div>}
       </div> : <>
         {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : current ? <><button className="empty-world-add" onClick={() => setCenterTab("model")} aria-label="Open model" title="Open model"><Icon name="edit" /></button><h1>{current.model ? "The model is ready" : "Build the model first"}</h1><p>{current.model ? "Review it if needed, then press Run to create the river." : "Answer any useful questions, then build a model from the context."}</p></> : <><button className="empty-world-add" onClick={() => setPrompt({ mode: "create" })} aria-label="Create situation" title="Create situation"><Icon name="plus" /></button><h1>Worlds begin with a situation</h1><p>Describe it in your own words to begin.</p></>}</div></div>}
@@ -708,15 +780,12 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     <aside className={`agent-drawer ${agentPanel ? "open" : ""}`} aria-label="Pi assistant" aria-hidden={!agentPanel}>
       <header><div><b>{assistantTitle}</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : agentAvailable ? "No model selected" : "Not configured"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
       {!agentAvailable && <div className="agent-drawer-banner" role="status">Agent not configured — <button className="link-button" onClick={openSettings}>open Settings</button> to add an API key.</div>}
-      {current && assistantMode !== "river" && <section className="agent-phase" aria-label="Agent workflow">
-        <div className="agent-steps"><span className={assistantMode === "context" ? "on" : "done"}>Context</span><i /><span className={assistantMode === "model" ? "on" : ""}>Model</span><i /><span>River</span></div>
-        <p>{assistantHint}</p>
+      {current && assistantMode !== "river" && <section className="agent-phase" aria-label="Assistant context">
+        {assistantHint && <p>{assistantHint}</p>}
         {current.openQuestions[0] && <div className="agent-next-question"><small>Useful next question</small><b>{current.openQuestions[0].prompt}</b></div>}
-        {!current.model && hasContextReply && <div className="agent-draft-ready">Enough for a first draft — you can refine it after you see it.</div>}
-        <button className="primary" onClick={() => void reviewWithAgent()} disabled={streaming || !agentAvailable}>{streaming ? "Building…" : current.model ? "Rebuild model" : hasContextReply ? "Draft model" : "Build a first draft"}</button>
       </section>}
       {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.display || pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.observation.winner ? `winner: ${String(pendingOutcome.observation.winner)}` : ""}{pendingOutcome.observation.cooperation !== undefined ? ` · coop ${(Number(pendingOutcome.observation.cooperation)*100).toFixed(0)}%` : ""}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
-      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>{assistantTitle}</span><p>{assistantHint}</p><div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>)}</div></div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Updating the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : "Checking what this adds and what is still missing"} /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
+      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>{assistantTitle}</span>{assistantHint && <p>{assistantHint}</p>}{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>)}</div>}</div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Updating the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : "Checking what this adds and what is still missing"} /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
       <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending}>{suggestion}</button>)}</div>}<div className="chat-input-shell"><textarea name="chat" aria-label="Message the assistant" placeholder={agentAvailable ? assistantMode === "river" ? "Ask about the river or report an outcome…" : "Add context or ask what is missing…" : "Configure agent first…"} rows={3} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><span className="chat-enter-hint">Shift + Enter — new line</span><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}><Icon name="send" /></button></div></form>
     </aside>
 
@@ -778,6 +847,16 @@ function WorldReplayCard({ value }: { value: WorldReplay }) {
   </section>;
 }
 
+function BuildActivity({ items, active }: { items: BuildActivityItem[]; active: boolean }) {
+  const failed = items.some((item) => item.status === "failed");
+  return <section className="model-build-report" aria-label="Live model build" aria-live="polite">
+    <div className="model-build-report-head"><span>{failed ? "Model build stopped" : active ? "Working on the model" : "Model build complete"}</span></div>
+    <ol>
+      {items.map((item) => <li className={item.status} key={item.id}><i aria-hidden>{item.status === "done" ? "✓" : item.status === "failed" ? "!" : ""}</i><span>{item.message}</span></li>)}
+    </ol>
+  </section>;
+}
+
 
 function AgentPicker({ providers, models, value, onChange, prefix }: { providers: Array<{ id: string; name: string }>; models: ModelOption[]; value: string; onChange: (value: string) => void; prefix: string }) {
   const selection = parseSelection(value, models) ?? (models[0] ? parseSelection(selectionValue({ provider: models[0].provider, model: models[0].model, thinkingLevel: "medium" }), models) : undefined);
@@ -797,7 +876,7 @@ function AgentPicker({ providers, models, value, onChange, prefix }: { providers
 }
 
 function WorldRow({ item, now, onOpen, onDelete }: { item: TaskSummary; now: number; onOpen: () => void; onDelete: () => void }) {
-  return <div className="task-row"><Link to="/tasks/$taskId" params={{ taskId: item.id }} search={{}} className="task" activeProps={{ "aria-current": "page" }} onClick={onOpen}><b className="task-title">{item.title}</b><div className="task-meta"><span><i className={`status-dot ${item.status}`} />{statusName[item.status]}</span><time dateTime={item.updatedAt} title={compactDate(item.updatedAt)}>{relativeTime(item.updatedAt, now)}</time></div></Link><button className="icon quiet row-delete" onClick={onDelete} aria-label={`Delete world “${item.title}”`} disabled={item.status === "running" || item.status === "labeling"}><Icon name="trash" /></button></div>;
+  return <div className="task-row"><Link to="/tasks/$taskId" params={{ taskId: item.id }} search={{}} className="task" activeProps={{ "aria-current": "page" }} onClick={onOpen}><b className="task-title">{item.title}</b><div className="task-meta"><span><i className={`status-dot ${item.status}`} />{statusName[item.status]}</span><time dateTime={item.updatedAt} title={compactDate(item.updatedAt)}>{relativeTime(item.updatedAt, now)}</time></div></Link><button className="icon quiet row-delete" onClick={onDelete} aria-label={`Delete world “${item.title}”`} disabled={item.status === "building" || item.status === "running" || item.status === "labeling"}><Icon name="trash" /></button></div>;
 }
 
 function ErrorState({ error, retry }: { error: Error; retry: () => void }) {

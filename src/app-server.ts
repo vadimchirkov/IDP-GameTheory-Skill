@@ -36,6 +36,7 @@ await runtime.start();
 const views = createInMemoryProjectionStore();
 const listeners = new Map<string, Set<ServerResponse>>();
 const analysisJobs = new Map<string, AbortController>();
+const modelBuildJobs = new Map<string, Promise<void>>();
 
 function refresh(): void {
   runProjection(taskDetailProjection, journal, views, { eventCodec: taskEventCodec });
@@ -317,6 +318,69 @@ function startAnalysis(id: string, requested: NonNullable<TaskState["activeAnaly
   void work.finally(() => { if (analysisJobs.get(id) === controller) analysisJobs.delete(id); });
 }
 
+async function runModelBuild(id: string, buildId: string, agent: AgentSelection | undefined): Promise<void> {
+  let progress = Promise.resolve();
+  const persistProgress = (event: unknown) => {
+    const value = event && typeof event === "object" ? event as Record<string, unknown> : {};
+    const stage = String(value.stage ?? "").trim();
+    const message = String(value.message ?? "").trim();
+    if (!stage || !message) return;
+    const attempt = /retry/i.test(stage) ? 2 : undefined;
+    progress = progress.then(async () => {
+      const answer = await ask(id, { tag: "UpdateModelBuild", buildId, stage, message, ...(attempt ? { attempt } : {}), now: new Date().toISOString() });
+      if (answer.tag === "Rejected") throw new Error(answer.reason);
+    });
+  };
+  const heartbeat = setInterval(() => {
+    const build = detail(id)?.activeBuild;
+    if (build?.buildId === buildId && build.status === "running") persistProgress({ stage: build.stage, message: build.message });
+  }, 15_000);
+  try {
+    const state = detail(id);
+    if (!state) throw new Error("Task not found");
+    const built = await buildScenarioModel(state.situation, state.model, agent, persistProgress);
+    await progress;
+    const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
+    if (completed.tag === "Rejected") throw new Error(completed.reason);
+    await ask(id, { tag: "SuggestQuestions", questions: [], now: new Date().toISOString() });
+    await addMessage(id, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
+  } catch (error) {
+    await progress.catch(() => {});
+    await ask(id, { tag: "FailModelBuild", buildId, reason: error instanceof Error ? error.message : String(error), now: new Date().toISOString() }).catch(() => {});
+  } finally {
+    clearInterval(heartbeat);
+  }
+}
+
+function startModelBuild(id: string, agent: AgentSelection | undefined, buildId: string = randomUUID()): string {
+  if (modelBuildJobs.has(id)) return detail(id)?.activeBuild?.buildId ?? buildId;
+  const state = detail(id);
+  if (!state) throw new Error("Task not found");
+  const started = state.activeBuild?.buildId === buildId
+    ? { tag: "Accepted" as const, revision: state.revision }
+    : undefined;
+  const job = (async () => {
+    if (!started) {
+      const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, now: new Date().toISOString() });
+      if (answer.tag === "Rejected") throw new Error(answer.reason);
+    }
+    await runModelBuild(id, buildId, agent);
+  })();
+  modelBuildJobs.set(id, job);
+  void job.finally(() => { if (modelBuildJobs.get(id) === job) modelBuildJobs.delete(id); });
+  return buildId;
+}
+
+async function waitForModelBuild(id: string, buildId: string): Promise<TaskState> {
+  while (true) {
+    const state = detail(id);
+    if (!state || state.deleted) throw new Error("Task not found");
+    if (state.activeBuild?.buildId !== buildId) return state;
+    if (state.activeBuild.status === "failed") throw new Error(state.activeBuild.error ?? "Model build failed");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (req.method === "GET" && (url.pathname === "/" || /^\/tasks\/[a-f0-9-]+$/.test(url.pathname))) {
@@ -435,32 +499,26 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const sendEvent = (payload: unknown) => { try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {} };
-    const abort = new AbortController();
-    req.on("close", () => abort.abort());
-    sendEvent({ kind: "start", stage: "shape", message: "Shaping players, choices and incentives…" });
+    let disconnected = false;
+    res.on("close", () => { disconnected = true; });
     try {
-      let built: Awaited<ReturnType<typeof buildScenarioModel>>;
-      try {
-        built = await buildScenarioModel(state.situation, state.model, agentFor(state, input.agent), sendEvent);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (/did not call|schema|AGENT_INVALID_OUTPUT/i.test(msg) && input.agent) {
-          sendEvent({ kind: "progress", stage: "shape", message: "Trying a compatible response format…" });
-          built = await buildScenarioModel(state.situation, state.model, undefined, sendEvent);
-        } else if (/timed out/i.test(msg)) {
-          sendEvent({ kind: "progress", stage: "shape", message: "Trying faster settings…" });
-          const fallback = agentFor(state, input.agent);
-          const fast = fallback ? { ...fallback, thinkingLevel: "low" as const } : undefined;
-          built = await buildScenarioModel(state.situation, state.model, fast, sendEvent);
-        } else throw error;
+      const buildId = startModelBuild(streamId, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      let sent = "";
+      while (true) {
+        if (disconnected) return;
+        const latest = detail(streamId);
+        if (!latest) throw new Error("Task not found");
+        const build = latest.activeBuild;
+        if ((!build || build.buildId !== buildId) && modelBuildJobs.has(streamId)) { await new Promise((resolve) => setTimeout(resolve, 250)); continue; }
+        if (!build || build.buildId !== buildId) { sendEvent({ kind: "done", task: latest }); res.end(); return; }
+        const key = `${build.stage}:${build.message}:${build.attempt}:${build.status}:${build.error ?? ""}`;
+        if (key !== sent) {
+          sent = key;
+          sendEvent({ kind: build.status === "failed" ? "error" : "progress", stage: build.stage, message: build.message, attempt: build.attempt, ...(build.error ? { error: build.error } : {}) });
+        }
+        if (build.status === "failed") { res.end(); return; }
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      sendEvent({ kind: "progress", stage: "save", message: "Saving the model…" });
-      const now = new Date().toISOString();
-      await ask(streamId, { tag: "SetModel", model: built.model, agent: built.agent, now });
-      await ask(streamId, { tag: "SuggestQuestions", questions: [], now });
-      await addMessage(streamId, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
-      sendEvent({ kind: "done", task: detail(streamId) });
-      res.end(); return;
     } catch (error) {
       const failure = httpError(error);
       sendEvent({ kind: "error", code: failure.code, error: failure.error });
@@ -504,27 +562,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
       if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
-      let built: Awaited<ReturnType<typeof buildScenarioModel>>;
-      try {
-        built = await buildScenarioModel(state.situation, state.model, agentFor(state, input.agent));
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        // Retry once with the default authenticated model when the chosen model fails to produce structured output
-        if (/did not call|schema|AGENT_INVALID_OUTPUT/i.test(msg) && input.agent) {
-          console.warn(`understand failed with ${JSON.stringify(input.agent)}, retrying with default model:`, msg.slice(0, 300));
-          built = await buildScenarioModel(state.situation, state.model, undefined);
-        } else if (/timed out/i.test(msg)) {
-          console.warn(`understand timed out with ${JSON.stringify(input.agent)}, retrying with low thinking:`, msg.slice(0, 200));
-          const fallback = agentFor(state, input.agent);
-          const fast = fallback ? { ...fallback, thinkingLevel: "low" as const } : undefined;
-          built = await buildScenarioModel(state.situation, state.model, fast);
-        } else throw error;
-      }
-      const now = new Date().toISOString();
-      await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
-      await ask(id, { tag: "SuggestQuestions", questions: [], now });
-      await addMessage(id, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
-      send(res, 200, detail(id)); return;
+      const buildId = startModelBuild(id, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      send(res, 200, await waitForModelBuild(id, buildId)); return;
     }
     // The single conversational entry point: a question is answered, a fact is filed by kind.
     // Outcome facts now use a preview+confirm flow so the UI can show what was parsed before persisting.
@@ -653,6 +692,7 @@ server.listen(port, "127.0.0.1", () => console.log(`Scenario workspace: http://1
 
 for (const summary of summaries()) {
   const state = detail(summary.id);
+  if (state?.activeBuild?.status === "running") startModelBuild(state.id, state.agent, state.activeBuild.buildId);
   if ((state?.status === "running" || state?.status === "labeling") && state.activeAnalysis) startAnalysis(state.id, state.activeAnalysis);
 }
 
