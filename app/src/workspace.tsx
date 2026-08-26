@@ -314,6 +314,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   });
   const replayMutation = useMutation({ mutationFn: ({ taskId, analysisId, index }: { taskId: string; analysisId: string; index: number }) => getWorldReplay(taskId, analysisId, index) });
   const buildActive = current?.activeBuild?.status === "running" || current?.status === "building";
+  const buildFailed = buildActivity.some((item) => item.status === "failed");
   const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming || buildActive;
   const promptBusy = busy;
   const elapsed = useElapsed(busy);
@@ -431,8 +432,10 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     }
     setRunError("");
     try {
+      const worldCount = Math.min(5000, Math.max(1, Math.round(trials)));
+      setTrials(worldCount);
       const seed = nextSeed ?? ((crypto.getRandomValues(new Uint32Array(1))[0]! & 0x7fffffff) || 1);
-      cacheTask(await runTask(current.id, { trials, seed, ...(selectedAgent ? { agent: selectedAgent } : {}) }));
+      cacheTask(await runTask(current.id, { trials: worldCount, seed, ...(selectedAgent ? { agent: selectedAgent } : {}) }));
       setNextSeed(undefined);
       onSelectRun(undefined);
     } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
@@ -740,8 +743,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             {workflowRunning && <button type="button" className="workflow-cancel" onClick={cancelAnalysis} disabled={busy}>Cancel</button>}
             {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && <button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button>}
             {(streaming || buildActive || Boolean(current.model && !situationStale && !workflowRunning)) && <div className="workflow-live spd-live"><SpatialPrisonersDilemma /></div>}
-            {buildActivity.length > 0 && (streaming || buildActive) && <BuildActivity items={buildActivity} active />}
-            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div>}
+            {buildActivity.length > 0 && (streaming || buildActive || buildFailed) && <BuildActivity items={buildActivity} active={streaming || buildActive} />}
+            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div>}
             {runError && !streaming && <div className="error" role="alert">{runError}</div>}
           </section>
           {!streaming && !buildActive && (!current.model || situationStale) && <div className="model-scroll"><ModelForm
