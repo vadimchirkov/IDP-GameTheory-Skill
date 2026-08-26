@@ -233,19 +233,14 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .river-activity b, .river-activity span { display: block }
 .river-activity b { font-size: 14px; font-weight: 590; letter-spacing: -.01em }
 .river-activity span { margin-top: 3px; color: var(--muted); font-size: 11px; text-wrap: pretty }
-.river-orbit { width: 82px; height: 82px; flex: 0 0 auto; overflow: visible; fill: none }
-.river-orbit-track { stroke: rgba(255, 255, 255, .07); stroke-width: 1 }
-.river-orbit-flow { transform-origin: 32px 32px; stroke: var(--muted-strong); stroke-linecap: round }
-.river-orbit-flow.flow-a { stroke-width: 2.2; stroke-dasharray: 25 75; animation: river-flow 1.8s linear infinite }
-.river-orbit-flow.flow-b { stroke-width: 1.7; stroke-dasharray: 18 20 10 52; opacity: .72; animation: river-flow-reverse 2.4s linear infinite }
-.river-orbit-flow.flow-c { stroke-width: 1.4; stroke-dasharray: 12 32 18 38; opacity: .45; animation: river-flow 1.35s linear infinite }
-.river-orbit-core { fill: var(--ink); opacity: .9 }
+.river-orbit { width: 82px; height: 82px; flex: 0 0 auto; overflow: visible }
+.river-flood { opacity: .78; mix-blend-mode: screen; animation: river-hue 11s linear infinite }
 .river-activity.compact { justify-content: flex-start; gap: 10px; margin-top: 10px; padding: 8px 9px; border-radius: 9px; background: rgba(255, 255, 255, .025) }
 .river-activity.compact .river-orbit { width: 34px; height: 34px }
 .river-activity.compact b { font-size: 11px }
 .river-activity.compact span { margin-top: 1px; font-size: 9px }
-@keyframes river-flow { to { transform: rotate(360deg) } }
-@keyframes river-flow-reverse { to { transform: rotate(-360deg) } }
+@keyframes river-hue { to { filter: hue-rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .river-flood { animation: none } }
 
 .spd { display: grid; gap: 12px; width: min(100%, 360px); color: var(--ink); text-align: left }
 .spd__intro { text-align: center }
