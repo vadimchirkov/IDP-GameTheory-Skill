@@ -1,9 +1,18 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+
 export interface ResearchSource {
   id: string;
   title: string;
   url: string;
   excerpt: string;
+  query: string;
+  purpose?: string;
+  field?: string;
+  fetchedAt: string;
 }
+
+export interface ResearchQuery { query: string; purpose?: string; field?: string }
 
 const MAX_RESPONSE_BYTES = 750_000;
 
@@ -17,6 +26,32 @@ function decodeHtml(value: string): string {
     .replace(/&gt;/g, ">")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function privateAddress(address: string): boolean {
+  if (address === "::1" || address === "::" || address.startsWith("fc") || address.startsWith("fd") || address.startsWith("fe80:")) return true;
+  const match = address.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return false;
+  const [a, b] = [Number(match[1]), Number(match[2])];
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+}
+
+async function publicUrl(value: string): Promise<URL> {
+  const url = new URL(value);
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only public HTTP pages can be researched");
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".local")) throw new Error("Private hosts cannot be researched");
+  if (isIP(hostname) && privateAddress(hostname)) throw new Error("Private hosts cannot be researched");
+  const addresses = await lookup(hostname, { all: true });
+  if (!addresses.length || addresses.some(({ address }) => privateAddress(address))) throw new Error("Private hosts cannot be researched");
+  return url;
+}
+
+function pageText(html: string): string {
+  return decodeHtml(html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " "));
 }
 
 async function limitedText(response: Response): Promise<string> {
@@ -70,6 +105,8 @@ export async function researchWeb(query: string, limit = 6): Promise<ResearchSou
           title: decodeHtml(match[2]!).slice(0, 160) || target.hostname,
           url: target.href,
           excerpt: decodeHtml(snippets[index]?.[1] ?? "").slice(0, 700),
+          query: normalized,
+          fetchedAt: new Date().toISOString(),
         });
         if (sources.length >= Math.min(Math.max(limit, 1), 8)) break;
       } catch { /* Ignore malformed result links. */ }
@@ -78,4 +115,53 @@ export async function researchWeb(query: string, limit = 6): Promise<ResearchSou
   } catch {
     return [];
   }
+}
+
+/** Fetches a small, text-only public page. Redirect targets are validated too. */
+export async function openPublicPage(value: string): Promise<{ title: string; url: string; excerpt: string }> {
+  let url = await publicUrl(value);
+  for (let redirects = 0; redirects < 4; redirects += 1) {
+    const response = await fetch(url, {
+      headers: { "user-agent": "FluminaPublicResearch/1.0", accept: "text/html,text/plain;q=0.8" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error("Research page redirected without a location");
+      url = await publicUrl(new URL(location, url).href);
+      continue;
+    }
+    if (!response.ok) throw new Error(`Research page returned HTTP ${response.status}`);
+    const type = response.headers.get("content-type") ?? "";
+    if (!/text\/(html|plain)/i.test(type)) throw new Error("Research page is not text");
+    const html = await limitedText(response);
+    const title = decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").slice(0, 160) || url.hostname;
+    return { title, url: url.href, excerpt: pageText(html).slice(0, 3_000) };
+  }
+  throw new Error("Research page redirected too many times");
+}
+
+/** Searches and opens at most two useful pages per query, with a small global cap. */
+export async function researchPublicContext(queries: readonly ResearchQuery[]): Promise<ResearchSource[]> {
+  const sources: ResearchSource[] = [];
+  for (const item of queries.slice(0, 3)) {
+    const results = await researchWeb(item.query, 4);
+    for (const result of results.slice(0, 2)) {
+      if (sources.some((source) => source.url === result.url)) continue;
+      let opened: Awaited<ReturnType<typeof openPublicPage>> | undefined;
+      try { opened = await openPublicPage(result.url); } catch { /* Search snippets remain useful when a page blocks automated reading. */ }
+      sources.push({
+        ...result,
+        id: `source-${sources.length + 1}`,
+        title: opened?.title || result.title,
+        url: opened?.url || result.url,
+        excerpt: opened?.excerpt || result.excerpt,
+        ...(item.field ? { field: item.field } : {}),
+        ...(item.purpose ? { purpose: item.purpose } : {}),
+      });
+      if (sources.length >= 6) return sources;
+    }
+  }
+  return sources;
 }

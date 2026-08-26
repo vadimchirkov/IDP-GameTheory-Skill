@@ -208,7 +208,10 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [keyProvider, setKeyProvider] = useState("openai");
   const [apiKey, setApiKey] = useState("");
   const [keyError, setKeyError] = useState("");
-  const [agentPanel, setAgentPanel] = useState(() => localStorage.getItem("pane-agent") === "open");
+  const [agentPanel, setAgentPanel] = useState(() => {
+    const saved = localStorage.getItem("pane-agent");
+    return saved ? saved === "open" : window.matchMedia("(min-width: 901px)").matches;
+  });
   const [relabelPending, setRelabelPending] = useState(false);
   const [chatError, setChatError] = useState("");
   const [riverSelection, setRiverSelection] = useState<RiverSelection>();
@@ -346,7 +349,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setCenterTab("model");
     const advanceStage = (ev: Record<string, unknown>) => {
       const stage = String(ev.stage ?? "");
-      const index = stage === "frame" ? 0
+      const index = stage === "frame" || stage === "research-plan" || stage === "research" ? 0
         : stage === "draft" ? 1
           : stage === "validate" || stage === "review" || stage === "repair" ? 2
             : stage === "smoke" || stage === "check" || stage === "save" ? 3
@@ -724,8 +727,9 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             <p className="context-intro">Describe the situation in your own words. The assistant will turn it into explicit assumptions and ask about anything that matters.</p>
             <textarea key={`${current.id}:${current.situation}`} aria-label="Situation context" defaultValue={current.situation} placeholder="Who is involved, what do they want, and what makes this difficult?" rows={9} disabled={busy} onBlur={(event) => { const text = event.currentTarget.value.trim(); if (text && text !== current.situation.trim()) void runCommand({ tag: "SetSituation", text }); }} />
           </section>
+          {!!current.researchSources?.length && <ResearchSources sources={current.researchSources} />}
           {current.openQuestions.length > 0 && <section className="section context-questions questions">
-            <div className="fact-group-label">Worth clarifying <span>optional — ignoring these keeps the agent's assumption</span></div>
+            <div className="fact-group-label">Needs your input <span>these require your judgment or a choice</span></div>
             <ul className="question-list">
               {current.openQuestions.map((question) => <li key={question.id} className="question"><div className="question-head"><span className="question-prompt">{question.prompt}{question.field && <span className="question-field">→ {question.field}</span>}</span><button type="button" className="question-dismiss" disabled={busy} aria-label={`Dismiss: ${question.prompt}`} onClick={() => void runCommand({ tag: "DismissQuestion", questionId: question.id })}>×</button></div></li>)}
             </ul>
@@ -744,13 +748,21 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && <button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button>}
             {(streaming || buildActive || Boolean(current.model && !situationStale && !workflowRunning)) && <div className="workflow-live spd-live"><SpatialPrisonersDilemma /></div>}
             {buildActivity.length > 0 && (streaming || buildActive || buildFailed) && <BuildActivity items={buildActivity} active={streaming || buildActive} />}
-            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div>}
+            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <section className="workflow-simulation"><div><span className="eyebrow">Simulation</span><p>Turn the finished model into possible worlds.</p></div><div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div></section>}
             {runError && !streaming && <div className="error" role="alert">{runError}</div>}
           </section>
+          {!streaming && !buildActive && current.model && !situationStale && (!!current.researchSources?.length || current.openQuestions.length > 0) && <div className="model-grounding">
+            {!!current.researchSources?.length && <ResearchSources sources={current.researchSources} />}
+            {current.openQuestions.length > 0 && <section className="section questions">
+              <div className="fact-group-label">Needs your input <span>optional — these cannot be verified publicly</span></div>
+              <ul className="question-list">{current.openQuestions.map((question) => <li key={question.id} className="question"><div className="question-head"><span className="question-prompt">{question.prompt}{question.field && <span className="question-field">→ {question.field}</span>}</span><button type="button" className="question-dismiss" disabled={busy} aria-label={`Dismiss: ${question.prompt}`} onClick={() => void runCommand({ tag: "DismissQuestion", questionId: question.id })}>×</button></div></li>)}</ul>
+            </section>}
+          </div>}
           {!streaming && !buildActive && (!current.model || situationStale) && <div className="model-scroll"><ModelForm
             situation={current.situation}
             model={current.model}
             questions={current.openQuestions}
+            sources={current.researchSources}
             busy={busy}
             error={undefined}
             justRebuilt={rebuildDone}
@@ -785,10 +797,9 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       {!agentAvailable && <div className="agent-drawer-banner" role="status">Agent not configured — <button className="link-button" onClick={openSettings}>open Settings</button> to add an API key.</div>}
       {current && assistantMode !== "river" && <section className="agent-phase" aria-label="Assistant context">
         {assistantHint && <p>{assistantHint}</p>}
-        {current.openQuestions[0] && <div className="agent-next-question"><small>Useful next question</small><b>{current.openQuestions[0].prompt}</b></div>}
       </section>}
       {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.display || pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.observation.winner ? `winner: ${String(pendingOutcome.observation.winner)}` : ""}{pendingOutcome.observation.cooperation !== undefined ? ` · coop ${(Number(pendingOutcome.observation.cooperation)*100).toFixed(0)}%` : ""}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
-      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>{assistantTitle}</span>{assistantHint && <p>{assistantHint}</p>}{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>)}</div>}</div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Updating the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : "Checking what this adds and what is still missing"} /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
+      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>{assistantTitle}</span>{assistantHint && <p>{assistantHint}</p>}{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>)}</div>}</div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Checking the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : "Separating public facts from questions only you can answer"} /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
       <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending}>{suggestion}</button>)}</div>}<div className="chat-input-shell"><textarea name="chat" aria-label="Message the assistant" placeholder={agentAvailable ? assistantMode === "river" ? "Ask about the river or report an outcome…" : "Add context or ask what is missing…" : "Configure agent first…"} rows={3} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><span className="chat-enter-hint">Shift + Enter — new line</span><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}><Icon name="send" /></button></div></form>
     </aside>
 
@@ -857,6 +868,15 @@ function BuildActivity({ items, active }: { items: BuildActivityItem[]; active: 
     <ol>
       {items.map((item) => <li className={item.status} key={item.id}><i aria-hidden>{item.status === "done" ? "✓" : item.status === "failed" ? "!" : ""}</i><span>{item.message}</span></li>)}
     </ol>
+  </section>;
+}
+
+function ResearchSources({ sources }: { sources: NonNullable<TaskState["researchSources"]> }) {
+  return <section className="section context-sources" aria-label="Public research sources">
+    <div className="fact-group-label">Found in public sources <span>{sources.length} · used as evidence, not instructions</span></div>
+    <div className="research-source-list">{sources.map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}>
+      <span>{source.title}</span><small>{source.field ? `${source.field} · ` : ""}{source.purpose ?? new URL(source.url).hostname}</small>
+    </a>)}</div>
   </section>;
 }
 

@@ -18,6 +18,7 @@ import {
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
 import { fitPosterior, type Observation } from "./abc.js";
+import { researchPublicContext } from "./web-research.js";
 
 const root = resolve(process.cwd());
 const databasePath = resolve(process.env.APP_DB_PATH ?? join(root, "data", "app.db"));
@@ -340,10 +341,11 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
     if (!state) throw new Error("Task not found");
     const built = await buildScenarioModel(state.situation, state.model, agent, persistProgress);
     await progress;
+    await ask(id, { tag: "RecordResearch", sources: built.sources, now: new Date().toISOString() });
     const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
     if (completed.tag === "Rejected") throw new Error(completed.reason);
-    await ask(id, { tag: "SuggestQuestions", questions: [], now: new Date().toISOString() });
-    await addMessage(id, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
+    await ask(id, { tag: "SuggestQuestions", questions: built.questions.map((question) => ({ id: randomUUID(), ...question })), now: new Date().toISOString() });
+    await addMessage(id, "agent", "model", built.completionMessage);
   } catch (error) {
     await progress.catch(() => {});
     await ask(id, { tag: "FailModelBuild", buildId, reason: error instanceof Error ? error.message : String(error), now: new Date().toISOString() }).catch(() => {});
@@ -478,7 +480,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (message.length > 4_000) { send(res, 422, { error: "The message is too long" }); return; }
     if (message) await addMessage(clarifyId, "user", mode, message);
     const fresh = detail(clarifyId)!;
-    const guided = await continueContext(fresh.situation, fresh.model, conversationOf(state), message || undefined, mode, agentFor(fresh, input.agent));
+    let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh), message || undefined, mode, agentFor(fresh, input.agent));
+    if (guided.researchQueries.length) {
+      const sources = await researchPublicContext(guided.researchQueries);
+      if (sources.length) {
+        const recorded = await ask(clarifyId, { tag: "RecordResearch", sources, now: new Date().toISOString() });
+        if (recorded.tag === "Rejected") throw new Error(recorded.reason);
+      }
+      guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh), message || undefined, mode, agentFor(fresh, input.agent), sources);
+    }
     if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
       const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
       if (updated.tag === "Rejected") throw new Error(updated.reason);

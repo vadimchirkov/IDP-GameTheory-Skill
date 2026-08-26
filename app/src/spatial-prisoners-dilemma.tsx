@@ -22,7 +22,6 @@ export function SpatialPrisonersDilemma() {
     grid: new Uint8Array(N * N),
     previous: new Uint8Array(N * N),
     score: new Float32Array(N * N),
-    generation: 0,
   });
   const temptationRef = useRef(1.85);
   const playingRef = useRef(true);
@@ -30,8 +29,6 @@ export function SpatialPrisonersDilemma() {
   const lastFrameRef = useRef(0);
 
   const [temptation, setTemptation] = useState(1.85);
-  const [generation, setGeneration] = useState(0);
-  const [cooperation, setCooperation] = useState(50);
   const [playing, setPlaying] = useState(true);
 
   const draw = useCallback(() => {
@@ -60,24 +57,14 @@ export function SpatialPrisonersDilemma() {
     }
   }, []);
 
-  const updateStats = useCallback(() => {
-    const { grid, generation } = simulation.current;
-    let cooperators = 0;
-    for (const strategy of grid) if (strategy === COOP) cooperators++;
-    setGeneration(generation);
-    setCooperation(Math.round((100 * cooperators) / grid.length));
-  }, []);
-
   const reset = useCallback(() => {
     const state = simulation.current;
     for (let cell = 0; cell < state.grid.length; cell++) {
       state.grid[cell] = Math.random() < 0.5 ? COOP : DEFECT;
       state.previous[cell] = state.grid[cell];
     }
-    state.generation = 0;
     draw();
-    updateStats();
-  }, [draw, updateStats]);
+  }, [draw]);
 
   const step = useCallback(() => {
     const state = simulation.current;
@@ -118,7 +105,6 @@ export function SpatialPrisonersDilemma() {
 
     state.previous.set(grid);
     grid.set(next);
-    state.generation++;
   }, []);
 
   useEffect(() => {
@@ -127,14 +113,13 @@ export function SpatialPrisonersDilemma() {
       if (playingRef.current && time - lastFrameRef.current > STEP_INTERVAL) {
         step();
         draw();
-        updateStats();
         lastFrameRef.current = time;
       }
       animationRef.current = requestAnimationFrame(loop);
     };
     animationRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animationRef.current);
-  }, [draw, reset, step, updateStats]);
+  }, [draw, reset, step]);
 
   const onTemptationChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = Number.parseFloat(event.target.value);
@@ -147,14 +132,6 @@ export function SpatialPrisonersDilemma() {
     playingRef.current = next;
     setPlaying(next);
   };
-
-  const story = generation < 3
-    ? "At first, trust and betrayal are scattered at random. Every square is waiting to see which behavior survives nearby."
-    : cooperation >= 70
-      ? "Trust is spreading. Cooperative neighborhoods protect one another, while isolated defectors slowly lose their influence."
-      : cooperation <= 30
-        ? "Betrayal is winning for now. Small cooperative pockets survive only where neighbors can keep supporting one another."
-        : "The board is in tension. Islands of cooperation form, break apart, and return as every square copies its most successful neighbor.";
 
   return (
     <div className="spd">
@@ -171,11 +148,6 @@ export function SpatialPrisonersDilemma() {
         className="spd__canvas"
         aria-label="Spatial prisoner's dilemma simulation"
       />
-
-      <div className="spd__story">
-        <div><span>Generation {generation}</span><b>{cooperation}% cooperate</b></div>
-        <p>{story}</p>
-      </div>
 
       <div className="spd__legend" aria-label="Simulation legend">
         <Chip color={COLORS.stayC} label="cooperates" />

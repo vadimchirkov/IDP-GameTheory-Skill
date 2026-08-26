@@ -38,12 +38,32 @@ export const contextReplyOutputSchema = Type.Object({
   message: Type.String({ minLength: 1, maxLength: 2000 }),
   contextNote: nullable(Type.String({ minLength: 1, maxLength: 800 })),
   title: Type.String({ minLength: 1, maxLength: 72 }),
+  researchQueries: Type.Array(Type.Object({
+    query: Type.String({ minLength: 1, maxLength: 240 }),
+    field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+    purpose: Type.String({ minLength: 1, maxLength: 240 }),
+  }, closed), { maxItems: 3 }),
   questions: Type.Array(Type.Object({
     prompt: Type.String({ minLength: 1, maxLength: 200 }),
     field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
   }, closed)),
 }, closed);
 export type ContextReplyOutput = Static<typeof contextReplyOutputSchema>;
+
+/** A bounded public-web plan made before a model is built. */
+export const researchPlanOutputSchema = Type.Object({
+  completionMessage: Type.String({ minLength: 1, maxLength: 320 }),
+  queries: Type.Array(Type.Object({
+    query: Type.String({ minLength: 1, maxLength: 240 }),
+    field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+    purpose: Type.String({ minLength: 1, maxLength: 240 }),
+  }, closed), { maxItems: 3 }),
+  questions: Type.Array(Type.Object({
+    prompt: Type.String({ minLength: 1, maxLength: 200 }),
+    field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+  }, closed), { maxItems: 4 }),
+}, closed);
+export type ResearchPlanOutput = Static<typeof researchPlanOutputSchema>;
 
 /**
  * Router output for a chat turn. The agent decides whether the message is a plain question or a

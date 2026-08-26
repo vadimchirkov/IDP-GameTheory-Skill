@@ -45,22 +45,21 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 ## What the application does
 
-A scenario is **one list of facts** and **one Run button**.
+A scenario is **one context**, **one editable model**, and **one Run button**.
 
 1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
    shared resource, or another relationship in which 2–10 sides meet repeatedly. What
    you write becomes the first fact.
-2. **Let the agent fill in the rest.** It adds the assumptions it can infer as ordinary
-   facts, marked *assumed* so you can edit or delete them, and raises what it cannot
-   infer as optional questions. Questions never block anything: answer one to replace
-   the assumption, ignore it to keep the default, or look it up on the web.
-3. **Keep adding facts.** A fact is either about **the situation** (it shapes the model)
-   or about **what already happened** (it is evidence). You can type facts directly or
-   just say them in the chat — the agent files them and flags which kind it chose, and
-   you can flip that with one click.
-4. **Press Run.** One action rebuilds the model from the situation facts, validates it
-   against the engine's domain rules, and explores 1–5000 worlds (default 600). Adding
-   facts never triggers a run by itself.
+2. **Let the agent fill in the rest.** It researches materially useful public facts,
+   shows the sources it used, keeps uncertain values broad, and raises only what cannot
+   be verified publicly as optional questions. Questions never block anything: answer
+   one to replace the assumption or ignore it to keep the default.
+3. **Review the model.** Situation details live in the editable model. Separately, tell
+   the agent what actually happened after a run; those outcome facts reweight the river
+   without being baked back into its assumptions.
+4. **Press Run.** One action validates the current model against the engine's domain
+   rules and explores 1–5000 worlds (default 600). Editing context or outcome evidence
+   never triggers a run by itself.
 5. **Explore the result.** An interactive river groups worlds by approach, opening,
    response, development, and outcome. Select a branch to inspect it or replay a
    representative pair round by round.
@@ -181,8 +180,10 @@ The same seed and model reproduce the same worlds. Interrupted `running` or
 The embedded Pi agent does not spawn Claude CLI. Its structured operations expose
 only one terminating TypeBox output tool and disable built-in filesystem, shell,
 editing, extensions, skills, prompt templates, and project-context tools. User text
-and research excerpts are treated as untrusted data. Optional research uses one
-fixed search endpoint and does not fetch result pages.
+and research excerpts are treated as untrusted data. Public research uses a bounded
+search plan, validates every public HTTP target, limits response sizes and redirects,
+and supplies only cleaned excerpts to the modelling prompt. The agent never receives
+filesystem, shell, or unrestricted browser access.
 
 ## Simulation model
 

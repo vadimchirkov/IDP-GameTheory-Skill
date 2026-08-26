@@ -13,9 +13,10 @@ import { runSummaryProjection, type RunSummaryView } from "./projections.js";
 import { participantAggregate, participantCategory, participantEventCodec, participantStateCodec } from "./participant.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
-import { normalizeScenarioCoreDraft, normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
+import { contextReplyOutputSchema, normalizeScenarioCoreDraft, normalizeScenarioDraft, researchPlanOutputSchema, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
 import { parseChatResponse, parseScenarioHints, parseStructuredJson } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
+import { openPublicPage } from "./web-research.js";
 
 const payoff = { T: 5, R: 3, P: 1, S: 0 };
 const config: RunConfig = {
@@ -48,6 +49,9 @@ assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", 
 assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
 assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
 assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
+assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
+assert.equal(Value.Check(researchPlanOutputSchema, { completionMessage: "Модель собрана; проверьте допущения.", queries: [], questions: [] }), true, "model builds carry a same-language completion message");
+await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
 const agentDraft = {
   situation: "contract check",
   game: "prisoners_dilemma" as const,
@@ -183,6 +187,11 @@ assert.equal(created.revision, 1, "the situation seed sets the initial fingerpri
 assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
 await task.runtime.ask(tid, { tag: "AddMessage", message: { id: "message-1", role: "user", mode: "context", text: "They compete on price", createdAt: "2026-01-01T00:00:00Z" } }, taskCategory);
 assert.equal((await taskState()).messages[0]?.text, "They compete on price", "agent conversation is persisted with the task");
+const researchRevision = (await taskState()).revision;
+await task.runtime.ask(tid, { tag: "RecordResearch", sources: [{ id: "source-1", title: "Public report", url: "https://example.com/report", excerpt: "Published conditions", query: "public report", field: "payoffs", purpose: "Ground conditions", fetchedAt: "2026-01-01T00:00:00Z" }], now: "2026-01-01T00:00:00Z" }, taskCategory);
+const researched = await taskState();
+assert.equal(researched.researchSources?.[0]?.title, "Public report", "public research provenance is persisted with the task");
+assert.equal(researched.revision, researchRevision, "recording sources alone does not stale a simulation");
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const sitId = EntityId("situation-edit");
