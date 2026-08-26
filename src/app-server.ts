@@ -9,12 +9,12 @@ import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite"
 import type { ScenarioModel } from "./domain.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildScenarioModel, labelWorlds, routeMessage, understandSituation } from "./scenario-agent.js";
+import { buildScenarioModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
-import { generateWorldsVisual, injectWorldLabels, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
+import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
   taskAggregate, taskCategory, taskEventCodec, taskStateCodec,
-  type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
+  type AgentMode, type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
 import { fitPosterior, type Observation } from "./abc.js";
@@ -208,6 +208,13 @@ function agentSelection(input: unknown, fallback?: AgentSelection): AgentSelecti
 
 const agentFor = (state: TaskState, input?: unknown): AgentSelection | undefined => agentSelection(input, state.agent);
 
+async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string): Promise<void> {
+  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, createdAt: new Date().toISOString() } });
+  if (answer.tag === "Rejected") throw new Error(answer.reason);
+}
+
+const conversationOf = (state: TaskState) => (state.messages ?? []).map(({ role, text }) => ({ role, text }));
+
 function analysisWorker(model: ScenarioModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
     const worker = new Worker(new URL("./analysis-worker.ts", import.meta.url), { workerData: { model, trials, seed } });
@@ -253,15 +260,20 @@ async function resumeAnalysisLabels(id: string, analysis: TaskAnalysis, model: S
 }
 
 /**
- * The stored model is the source of truth: if the task already has one, return it as-is. Only when
- * the task has no model yet do we build one from the situation prose and store it. Outcome facts are
- * never part of the build — they reweight the finished run instead.
+ * The stored model is the source of truth, but if the situation text changed since the model was built
+ * we rebuild first — otherwise Run would simulate stale assumptions. Outcome facts are never part of the build.
  */
 async function modelForRun(id: string, agent: AgentSelection | undefined, now: string): Promise<ScenarioModel> {
   const state = detail(id);
   if (!state) throw new Error("Task not found");
-  if (state.model) return state.model;
-  const built = await buildScenarioModel(state.situation, undefined, agent);
+  const stale = Boolean(state.model && state.situation.trim() && state.model.situation.trim() !== state.situation.trim());
+  if (state.model && !stale) return state.model;
+  if (state.model && stale && !agent && !state.agent) {
+    throw new Error("Situation changed — rebuild the model before running (agent not configured)");
+  }
+  const current = stale ? state.model : undefined;
+  const effectiveAgent = agent ?? state.agent;
+  const built = await buildScenarioModel(state.situation, current, effectiveAgent);
   const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
   if (stored.tag === "Rejected") throw new Error(stored.reason);
   return built.model;
@@ -391,6 +403,70 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     send(res, 200, view);
     return;
   }
+  // Context/model conversation: collect missing information first; building remains an explicit action.
+  const clarifyMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/clarify$/);
+  if (req.method === "POST" && clarifyMatch) {
+    const clarifyId = clarifyMatch[1]!;
+    const input = await body(req); const state = detail(clarifyId);
+    if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
+    const mode: "context" | "model" = input.mode === "model" ? "model" : "context";
+    const message = String(input.message ?? "").trim();
+    if (message.length > 4_000) { send(res, 422, { error: "The message is too long" }); return; }
+    if (message) await addMessage(clarifyId, "user", mode, message);
+    const fresh = detail(clarifyId)!;
+    const guided = await continueContext(fresh.situation, fresh.model, conversationOf(state), message || undefined, mode, agentFor(fresh, input.agent));
+    if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
+      const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
+      if (updated.tag === "Rejected") throw new Error(updated.reason);
+    }
+    const now = new Date().toISOString();
+    await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
+    await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
+    await addMessage(clarifyId, "agent", mode, guided.message);
+    send(res, 200, { kind: guided.kind, message: guided.message, task: detail(clarifyId) });
+    return;
+  }
+  // Streaming variant: POST /api/tasks/:id/understand/stream -> SSE with live agent events (outside generic match)
+  const understandStreamMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/understand\/stream$/);
+  if (req.method === "POST" && understandStreamMatch) {
+    const streamId = understandStreamMatch[1]!;
+    const input = await body(req); const state = detail(streamId);
+    if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
+    if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+    const sendEvent = (payload: unknown) => { try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {} };
+    const abort = new AbortController();
+    req.on("close", () => abort.abort());
+    sendEvent({ kind: "start", stage: "shape", message: "Shaping players, choices and incentives…" });
+    try {
+      let built: Awaited<ReturnType<typeof buildScenarioModel>>;
+      try {
+        built = await buildScenarioModel(state.situation, state.model, agentFor(state, input.agent), sendEvent);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/did not call|schema|AGENT_INVALID_OUTPUT/i.test(msg) && input.agent) {
+          sendEvent({ kind: "progress", stage: "shape", message: "Trying a compatible response format…" });
+          built = await buildScenarioModel(state.situation, state.model, undefined, sendEvent);
+        } else if (/timed out/i.test(msg)) {
+          sendEvent({ kind: "progress", stage: "shape", message: "Trying faster settings…" });
+          const fallback = agentFor(state, input.agent);
+          const fast = fallback ? { ...fallback, thinkingLevel: "low" as const } : undefined;
+          built = await buildScenarioModel(state.situation, state.model, fast, sendEvent);
+        } else throw error;
+      }
+      sendEvent({ kind: "progress", stage: "save", message: "Saving the model…" });
+      const now = new Date().toISOString();
+      await ask(streamId, { tag: "SetModel", model: built.model, agent: built.agent, now });
+      await ask(streamId, { tag: "SuggestQuestions", questions: [], now });
+      await addMessage(streamId, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
+      sendEvent({ kind: "done", task: detail(streamId) });
+      res.end(); return;
+    } catch (error) {
+      const failure = httpError(error);
+      sendEvent({ kind: "error", code: failure.code, error: failure.error });
+      res.end(); return;
+    }
+  }
   const match = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)(?:\/(commands|chat|understand|run|events|activity))?$/);
   if (match) {
     const id = match[1] ?? ""; const action = match[2];
@@ -424,19 +500,34 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       startAnalysis(id, { revision: answer.revision, trials, seed, ...(agent ? { agent } : {}) });
       send(res, 200, detail(id)); return;
     }
-    // Read the situation and let the agent build the model, plus the questions it cannot answer.
     if (req.method === "POST" && action === "understand") {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
       if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
-      const understanding = await understandSituation(state.situation, state.model, agentFor(state, input.agent));
+      let built: Awaited<ReturnType<typeof buildScenarioModel>>;
+      try {
+        built = await buildScenarioModel(state.situation, state.model, agentFor(state, input.agent));
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        // Retry once with the default authenticated model when the chosen model fails to produce structured output
+        if (/did not call|schema|AGENT_INVALID_OUTPUT/i.test(msg) && input.agent) {
+          console.warn(`understand failed with ${JSON.stringify(input.agent)}, retrying with default model:`, msg.slice(0, 300));
+          built = await buildScenarioModel(state.situation, state.model, undefined);
+        } else if (/timed out/i.test(msg)) {
+          console.warn(`understand timed out with ${JSON.stringify(input.agent)}, retrying with low thinking:`, msg.slice(0, 200));
+          const fallback = agentFor(state, input.agent);
+          const fast = fallback ? { ...fallback, thinkingLevel: "low" as const } : undefined;
+          built = await buildScenarioModel(state.situation, state.model, fast);
+        } else throw error;
+      }
       const now = new Date().toISOString();
-      await ask(id, { tag: "SetTitle", title: understanding.title, now });
-      await ask(id, { tag: "SetModel", model: understanding.model, agent: understanding.agent, now });
-      await ask(id, { tag: "SuggestQuestions", questions: understanding.questions.map((q) => ({ id: randomUUID(), prompt: q.prompt, ...(q.field ? { field: q.field } : {}) })), now });
+      await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
+      await ask(id, { tag: "SuggestQuestions", questions: [], now });
+      await addMessage(id, "agent", "model", state.model ? "Model rebuilt from the updated context. Review the changed fields, then run it when you are ready." : "Model built from the context. Review the assumptions, then run it when you are ready.");
       send(res, 200, detail(id)); return;
     }
     // The single conversational entry point: a question is answered, a fact is filed by kind.
+    // Outcome facts now use a preview+confirm flow so the UI can show what was parsed before persisting.
     if (req.method === "POST" && action === "chat") {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
@@ -444,29 +535,91 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       if (!message || message.length > 4_000) { send(res, 422, { error: "The message is empty or too long" }); return; }
       const agent = agentFor(state, input.agent);
       const analysis = state.analyses.at(-1);
-      const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent);
-      if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message }); return; }
-      const now = new Date().toISOString();
-      const observation = routed.kind === "outcome" && analysis?.artifactUrl
-        ? observationFrom({ ...routed.observation }, (await readRiverArtifact(analysis.artifactUrl)).model)
+      await addMessage(id, "user", "river", message);
+      const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state));
+      await addMessage(id, "agent", "river", routed.message);
+      if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, task: detail(id) }); return; }
+      // outcome: return preview without persisting; caller must POST /chat/confirm to file it
+      const previewObservation = analysis?.artifactUrl
+        ? (() => { try { return observationFrom({ ...routed.observation }, state.model!); } catch { return undefined; } })()
         : undefined;
-      const added = await ask(id, { tag: "AddFact", factId: randomUUID(), text: message, kind: routed.kind, source: "user", ...(observation ? { observation } : {}), now });
-      if (added.tag === "Rejected") { send(res, 409, added); return; }
-      let note = "";
-      if (routed.kind === "outcome" && analysis?.artifactUrl) {
-        const artifact = await readRiverArtifact(analysis.artifactUrl);
-        const fresh = detail(id)!;
-        const view = runPosterior(artifact, outcomeObservations(fresh, artifact));
-        const baseWin = view.usesTeams ? view.baseline.winPctTeam : view.baseline.winPct;
-        const postWin = view.usesTeams ? view.posterior.winPctTeam : view.posterior.winPct;
-        const shares = Object.keys(postWin).sort((a, b) => (postWin[b] ?? 0) - (postWin[a] ?? 0))
-          .map((name) => `- ${name}: ${Math.round(baseWin[name] ?? 0)}% → ${Math.round(postWin[name] ?? 0)}%`).join("\n");
-        const count = fresh.facts.filter((fact) => fact.kind === "outcome").length;
-        const fit = view.posterior.fit < 0.05 ? `\n\n_Unlikely under the current model (${Math.round(view.posterior.fit * 100)}% fit) — the assumptions in the Model tab may be worth revisiting._` : "";
-        note = `\n\n**Reweighted** — ${Math.round(view.posterior.effectiveSampleSize)} of ${analysis.trials} worlds match${count > 1 ? ` across ${count} outcome facts` : ""}. Cooperation ${Math.round(view.baseline.cooperation.mean * 100)}% → ${Math.round(view.posterior.cooperation.mean * 100)}%.\n${shares}${fit}`;
-      }
-      send(res, 200, { kind: routed.kind, message: `${routed.message}${note}`, task: detail(id) }); return;
+      // Validate against model if we have one, but don't require artifact
+      const display = routed.observation.winner || routed.observation.cooperation !== undefined || routed.observation.regime
+        ? JSON.stringify(routed.observation) : message.slice(0, 120);
+      send(res, 200, { kind: "outcome", message: routed.message, task: detail(id), pendingOutcome: { observation: routed.observation, display, ...(previewObservation ? { validated: previewObservation } : {}) } });
+      return;
     }
+  }
+  // Relabel a finished run — re-run Pi labeling without recomputing worlds
+  const relabelMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/relabel$/);
+  if (req.method === "POST" && relabelMatch) {
+    const relabelId = relabelMatch[1]!;
+    const input = await body(req); const state = detail(relabelId);
+    if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
+    const analysisId = String(input.analysisId ?? "");
+    const analysis = state.analyses.find((a) => (a.id ?? a.visualUrl) === analysisId);
+    if (!analysis || !analysis.artifactUrl) { send(res, 404, { error: "Analysis not found or not relabelable" }); return; }
+    if (state.status === "running" || state.status === "labeling") { send(res, 409, { error: "Wait for the current run to finish" }); return; }
+    const artifact = await readRiverArtifact(analysis.artifactUrl);
+    const agent = agentFor(state, input.agent);
+    const now = new Date().toISOString();
+    const ans = await ask(relabelId, { tag: "RelabelAnalysis", analysisId: analysis.id!, ...(agent ? { agent } : {}), now });
+    if (ans.tag === "Rejected") { send(res, 409, ans); return; }
+    const controller = new AbortController();
+    analysisJobs.set(relabelId, controller);
+    // Direct labeling — sub-runner will call CompleteAnalysisLabels on success
+    void (async () => {
+      try {
+        const html = generateWorldsVisual(artifact.model, analysis.trials, analysis.seed, artifact);
+        const nodes = visibleWorldLabelNodes(artifact.model, resultFromArtifact(artifact));
+        await labelAnalysis(relabelId, analysis as TaskAnalysis, artifact.model, agent, controller.signal, html, nodes);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          await ask(relabelId, { tag: "CompleteAnalysisLabels", analysisId: analysis.id!, worldLabels: {}, now: new Date().toISOString() });
+        }
+      } finally { if (analysisJobs.get(relabelId) === controller) analysisJobs.delete(relabelId); }
+    })();
+    send(res, 202, detail(relabelId)); return;
+  }
+  // Confirm an outcome fact after preview
+  const confirmMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/chat\/confirm$/);
+  if (req.method === "POST" && confirmMatch) {
+    const confirmId = confirmMatch[1]!;
+    const input = await body(req); const state = detail(confirmId);
+    if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
+    const text = String(input.text ?? input.message ?? "").trim();
+    if (!text) { send(res, 422, { error: "Text is required" }); return; }
+    const rawObs = (input.observation ?? {}) as Record<string, unknown>;
+    const analysis = state.analyses.at(-1);
+    let observation: Observation | undefined;
+    if (analysis?.artifactUrl) {
+      try {
+        const artifact = await readRiverArtifact(analysis.artifactUrl);
+        observation = observationFrom(rawObs, artifact.model);
+      } catch (error) { send(res, 422, { error: error instanceof Error ? error.message : String(error) }); return; }
+    } else if (state.model) {
+      try { observation = observationFrom(rawObs, state.model); } catch { observation = undefined; }
+    }
+    const now = new Date().toISOString();
+    const added = await ask(confirmId, { tag: "AddFact", factId: randomUUID(), text: text.slice(0, 2000), kind: "outcome", source: "user", ...(observation ? { observation } : {}), now });
+    if (added.tag === "Rejected") { send(res, 409, added); return; }
+    let note = "";
+    if (analysis?.artifactUrl && observation) {
+      const artifact = await readRiverArtifact(analysis.artifactUrl);
+      const fresh = detail(confirmId)!;
+      const view = runPosterior(artifact, outcomeObservations(fresh, artifact));
+      const baseWin = view.usesTeams ? view.baseline.winPctTeam : view.baseline.winPct;
+      const postWin = view.usesTeams ? view.posterior.winPctTeam : view.posterior.winPct;
+      const shares = Object.keys(postWin).sort((a, b) => (postWin[b] ?? 0) - (postWin[a] ?? 0))
+        .map((name) => `- ${name}: ${Math.round(baseWin[name] ?? 0)}% → ${Math.round(postWin[name] ?? 0)}%`).join("\n");
+      const count = fresh.facts.filter((fact) => fact.kind === "outcome").length;
+      const fit = view.posterior.fit < 0.05 ? `\n\n_Unlikely under the current model (${Math.round(view.posterior.fit * 100)}% fit) — the assumptions in the Model tab may be worth revisiting._` : "";
+      note = `\n\n**Reweighted** — ${Math.round(view.posterior.effectiveSampleSize)} of ${analysis.trials} worlds match${count > 1 ? ` across ${count} outcome facts` : ""}. Cooperation ${Math.round(view.baseline.cooperation.mean * 100)}% → ${Math.round(view.posterior.cooperation.mean * 100)}%.\n${shares}${fit}`;
+    }
+    const replyMessage = `Filed.${note}`;
+    await addMessage(confirmId, "agent", "river", replyMessage);
+    send(res, 200, detail(confirmId) ? { kind: "outcome", message: replyMessage, task: detail(confirmId) } : { kind: "outcome", message: replyMessage });
+    return;
   }
   const reportMatch = url.pathname.match(/^\/reports\/tasks\/([a-f0-9-]+-r\d+(?:-\d+w)?--?\d+(?:-[a-f0-9-]+)?\.html)$/);
   if (req.method === "GET" && reportMatch?.[1]) {

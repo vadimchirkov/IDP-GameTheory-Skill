@@ -1,9 +1,9 @@
 import type { AgentSelection } from "../../src/agent-contracts";
 import type { ScenarioModel } from "../../src/domain";
-import type { Fact, FactKind, OpenQuestion, TaskState } from "../../src/task";
+import type { AgentMode, Fact, FactKind, OpenQuestion, TaskMessage, TaskState } from "../../src/task";
 import type { TaskSummary } from "../../src/task-projections";
 
-export type { AgentSelection, Fact, FactKind, OpenQuestion, ScenarioModel, TaskState, TaskSummary };
+export type { AgentMode, AgentSelection, Fact, FactKind, OpenQuestion, ScenarioModel, TaskMessage, TaskState, TaskSummary };
 
 export interface AgentStatus {
   available: boolean;
@@ -114,8 +114,58 @@ export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
 export const createTask = (text: string) => post<TaskState>("/api/tasks", { text });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
 export const understandTask = (id: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
+export const clarifyTask = (id: string, value: { message?: string; mode: "context" | "model"; agent?: AgentSelection }) => post<ChatResult & { task: TaskState }>(`/api/tasks/${id}/clarify`, value);
+export async function understandTaskStream(id: string, agent: AgentSelection | undefined, onEvent: (ev: Record<string, unknown>) => void): Promise<TaskState> {
+  const response = await fetch(`/api/tasks/${id}/understand/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream" },
+    body: JSON.stringify({ agent }),
+  });
+  if (response.status === 404 || response.status === 409) {
+    const value: unknown = await response.json().catch(() => ({}));
+    const failure = value as { error?: string; reason?: string };
+    throw new Error(failure.error ?? failure.reason ?? `HTTP ${response.status}`);
+  }
+  if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
+    const value: unknown = await response.json().catch(() => ({}));
+    const failure = value as { error?: string; reason?: string };
+    throw new Error(failure.error ?? failure.reason ?? `HTTP ${response.status}`);
+  }
+  if (!response.body) throw new Error("Streaming not supported");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneTask: TaskState | undefined;
+  let error: string | undefined;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      const json = line.slice(6);
+      try {
+        const ev = JSON.parse(json) as Record<string, unknown>;
+        if (ev.kind === "done" && ev.task) doneTask = ev.task as TaskState;
+        else if (ev.kind === "error") error = (ev.error as string) ?? "Agent failed";
+        onEvent(ev);
+        if (ev.kind === "error" || ev.kind === "done") {
+          // keep reading until stream ends
+        }
+      } catch {}
+    }
+  }
+  if (error) throw new Error(error);
+  if (doneTask) return doneTask;
+  throw new Error("Agent stream ended without result");
+}
 export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
-export const chatTask = (id: string, message: string, agent?: AgentSelection) => post<ChatResult>(`/api/tasks/${id}/chat`, { message, agent });
+export const relabelTask = (id: string, analysisId: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/relabel`, { analysisId, agent });
+export const chatTask = (id: string, message: string, agent?: AgentSelection) => post<ChatResult & { pendingOutcome?: { observation: Record<string, unknown>; display: string } }>(`/api/tasks/${id}/chat`, { message, agent });
+export const confirmOutcome = (id: string, text: string, observation: Record<string, unknown>) => post<{ kind: string; message: string; task: TaskState }>(`/api/tasks/${id}/chat/confirm`, { text, observation });
 export const getWorldReplay = (taskId: string, analysisId: string, index: number) => api<WorldReplay>(`/api/tasks/${taskId}/analyses/${analysisId}/worlds/${index}/replay`);
 export const getPosterior = (taskId: string, analysisId: string) => api<RunPosterior>(`/api/tasks/${taskId}/analyses/${analysisId}/posterior`);
 export const getAgentStatus = () => api<AgentStatus>("/api/agent/status");

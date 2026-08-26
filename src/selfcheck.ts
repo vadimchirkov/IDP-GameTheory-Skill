@@ -14,7 +14,7 @@ import { participantAggregate, participantCategory, participantEventCodec, parti
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
 import { normalizeScenarioDraft, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
-import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
+import { parseChatResponse, parseScenarioHints, parseStructuredJson } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 
 const payoff = { T: 5, R: 3, P: 1, S: 0 };
@@ -46,6 +46,8 @@ const scenario: ScenarioModel = {
 };
 assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [{ prompt: "How long will it last?", field: "structure.w" }] }), true, "the understanding contract accepts a closed result");
 assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
+assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
+assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
 const agentDraft = {
   mode: "shared" as const,
   shared: {
@@ -136,7 +138,7 @@ await participant.runtime.shutdown();
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
-const state0: TaskState = { id: "legacy", status: "ready", title: "Legacy", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] };
+const state0: TaskState = { id: "legacy", status: "ready", title: "Legacy", situation: "", facts: [], openQuestions: [], messages: [], revision: 0, analyses: [] };
 const legacyJournal: TaskEvent[] = [
   { tag: "TaskCreated", taskId: "legacy", title: "Legacy", brief: "A legacy brief", now: "2025-01-01T00:00:00Z" },
   { tag: "ContextAdded", text: "a legacy clarification", revision: 2, now: "2025-01-01T00:00:01Z" },
@@ -173,6 +175,8 @@ await task.runtime.ask(tid, { tag: "CreateTask", taskId: "task-check", text: "Tw
 const created = await taskState();
 assert.equal(created.revision, 1, "the situation seed sets the initial fingerprint");
 assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
+await task.runtime.ask(tid, { tag: "AddMessage", message: { id: "message-1", role: "user", mode: "context", text: "They compete on price", createdAt: "2026-01-01T00:00:00Z" } }, taskCategory);
+assert.equal((await taskState()).messages[0]?.text, "They compete on price", "agent conversation is persisted with the task");
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const sitId = EntityId("situation-edit");

@@ -2,7 +2,7 @@ import { projection } from "@lambda-house/teob-ts/projection";
 import type { TaskEvent, TaskState } from "./task.js";
 import { applyTaskEvent } from "./task.js";
 
-const empty = (): TaskState => ({ id: "", status: "new", title: "", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
+const empty = (): TaskState => ({ id: "", status: "new", title: "", situation: "", facts: [], openQuestions: [], messages: [], revision: 0, analyses: [] });
 
 export const taskDetailProjection = projection<TaskEvent, TaskState>({
   projectionId: "scenario-task-detail",
