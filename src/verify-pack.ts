@@ -477,4 +477,26 @@ run("12.1 Visual replay trace is opt-in and does not change a match", ()=>{
   assert.equal(traced.trace?.length,40); assert.equal(traced.trace?.at(-1)?.scoreA,traced.scoreA);
 });
 
+run("13.1 Backend model creation: fast local path + domain guards", ()=>{
+  const model: any = {
+    situation: "fast local model",
+    game: "prisoners_dilemma",
+    players: [{ name: "A", dispositions: ["provocable"] }, { name: "B", dispositions: ["alld"] }],
+    payoffs: { T: [5,6], R: [3,4], P: [1,2], S: [-1,1] },
+    structure: { w: [0.7,0.97], noise: [0,0.1] },
+  };
+  assert.doesNotThrow(()=> assertScenario(model));
+  const badPayoff: any = structuredClone(model); badPayoff.payoffs = { T: [1,1], R: [10,10], P: [1,1], S: [0,0] };
+  assert.throws(()=> assertScenario(badPayoff), /cannot satisfy/);
+  const typo: any = structuredClone(model); (typo.players[0] as any).value = [-1,1];
+  assert.throws(()=> assertScenario(typo), /Unknown field "value"/);
+  const loner: any = structuredClone(model); loner.players[0].dispositions = ["loner"];
+  assert.throws(()=> assertScenario(loner), /sigma/);
+  const t0 = Date.now();
+  const r = analyzeScenario(model, 10, 42);
+  const dt = Date.now() - t0;
+  assert.ok(dt < 500, `local model->result should be <500ms, got ${dt}ms`);
+  assert.ok(typeof r.winPct.A === "number" && r.cooperation.mean >= 0);
+});
+
 console.log("verify-pack OK");

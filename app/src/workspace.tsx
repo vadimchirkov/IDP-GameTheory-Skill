@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  askAgent, chatAgent, createTask, getAgentStatus, getScenarioHints, getTask, getTasks, getWorldReplay, removeProviderKey, researchScenarioHint, saveProviderKey, sendCommand,
-  type AgentModelStatus, type AgentSelection, type RiverSelection, type TaskDecision, type TaskState, type TaskSummary, type WorldReplay,
+  chatTask, clarifyTask, confirmOutcome, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, relabelTask, removeProviderKey, runTask, saveProviderKey, sendCommand, understandTask, understandTaskStream,
+  type AgentMode, type AgentModelStatus, type AgentSelection, type FactCommand, type RiverSelection, type TaskState, type TaskSummary, type WorldReplay,
 } from "./api";
+import { OutcomeFacts } from "./facts";
+import { ModelForm } from "./model-form";
+import { RiverActivity } from "./river-activity";
+import { SpatialPrisonersDilemma } from "./spatial-prisoners-dilemma";
 import { relativeTime } from "./relative-time";
 
-const statusName = { draft: "Draft", ready: "Ready", running: "Running", labeling: "Labeling", completed: "Complete", failed: "Failed", new: "New" } as const;
-type Proposal = NonNullable<TaskState["pendingProposal"]>;
-type PromptState = { mode: "create" | "refine" | "edit-brief" | "edit-context" | "proposal"; index?: number; proposal?: Proposal };
+const statusName = { ready: "Ready", running: "Running", labeling: "Labeling", completed: "Complete", failed: "Failed", building: "Building", new: "New" } as const;
+type PromptState = { mode: "create" };
 type ModelOption = AgentModelStatus;
-type ChatMessage = { role: "user" | "agent"; text: string };
+type BuildActivityItem = { id: string; stage: string; message: string; status: "active" | "done" | "failed" };
 type PendingDelete =
   | { id: string; kind: "task"; task: TaskSummary; nextTaskId?: string; committing?: boolean }
   | { id: string; kind: "analysis"; taskId: string; revision: number; analysis: TaskState["analyses"][number]; wasSelected: boolean; committing?: boolean };
@@ -49,7 +52,7 @@ function openDialog(dialog: HTMLDialogElement | null) {
 
 function Icon({ name }: { name: "collapse" | "worlds" | "situations" | "runs" | "settings" | "plus" | "more" | "trash" | "chat" | "close" | "edit" | "refresh" | "search" | "send" }) {
   const paths = {
-    collapse: <path d="m14.5 6.5-5.5 5.5 5.5 5.5" />,
+    collapse: <><path d="M9 4v16" /><path d="m15 9-3 3 3 3" /></>,
     worlds: <><circle cx="12" cy="12" r="8.5" /><path d="M3.8 12h16.4M12 3.5c2.3 2.3 3.5 5.1 3.5 8.5s-1.2 6.2-3.5 8.5c-2.3-2.3-3.5-5.1-3.5-8.5S9.7 5.8 12 3.5z" /></>,
     situations: <><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="5" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="5" cy="18" r="1" fill="currentColor" stroke="none" /></>,
     runs: <><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="18" cy="18" r="2" /><path d="M8 5h8M6 7v5a6 6 0 0 0 6 6h4" /></>,
@@ -118,19 +121,6 @@ function useMinuteClock() {
   return now;
 }
 
-function RiverActivity({ label, detail, compact = false }: { label: string; detail?: string; compact?: boolean }) {
-  return <div className={`river-activity ${compact ? "compact" : ""}`} role="status" aria-live="polite">
-    <svg className="river-orbit" viewBox="0 0 64 64" aria-hidden="true">
-      <circle className="river-orbit-track" cx="32" cy="32" r="24" />
-      <circle className="river-orbit-flow flow-a" cx="32" cy="32" r="24" pathLength="100" />
-      <circle className="river-orbit-flow flow-b" cx="32" cy="32" r="18" pathLength="100" />
-      <circle className="river-orbit-flow flow-c" cx="32" cy="32" r="12" pathLength="100" />
-      <circle className="river-orbit-core" cx="32" cy="32" r="3" />
-    </svg>
-    <div><b>{label}</b>{detail && <span>{detail}</span>}</div>
-  </div>;
-}
-
 function inlineMarkdown(text: string): ReactNode[] {
   const token = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)|\*[^*\n]+\*)/g;
   const nodes: ReactNode[] = [];
@@ -197,32 +187,29 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const queryClient = useQueryClient();
   const mobile = useMobile();
   const now = useMinuteClock();
-  const [hidden, setHidden] = useState(() => ({
-    situations: localStorage.getItem("pane-situations") === "hidden",
-    runs: localStorage.getItem("pane-runs") === "hidden",
-  }));
-  const [mobilePane, setMobilePane] = useState<"situations" | "runs" | null>(null);
+  const [hideSituations, setHideSituations] = useState(() => localStorage.getItem("pane-situations") === "hidden");
+  const [situationsOpen, setSituationsOpen] = useState(false);
+  const [centerTab, setCenterTab] = useState<"context" | "model" | "river">("context");
+  const [pendingOutcome, setPendingOutcome] = useState<{ message: string; observation: Record<string, unknown>; display: string } | null>(null);
   const [prompt, setPrompt] = useState<PromptState>();
   const [draftText, setDraftText] = useState("");
-  const [debouncedDraft, setDebouncedDraft] = useState("");
-  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [promptError, setPromptError] = useState("");
-  const [researchingHints, setResearchingHints] = useState<string[]>([]);
   const [runError, setRunError] = useState("");
+  const [rebuildDone, setRebuildDone] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [modelBuildStage, setModelBuildStage] = useState(0);
+  const [buildActivity, setBuildActivity] = useState<BuildActivityItem[]>([]);
   const [streamError, setStreamError] = useState("");
   const [modelError, setModelError] = useState("");
   const [nextSeed, setNextSeed] = useState<number>();
-  const [modelText, setModelText] = useState("");
-  const [modelSnapshot, setModelSnapshot] = useState("");
   const [agentKey, setAgentKey] = useState(savedSelection);
   const [runAgentKey, setRunAgentKey] = useState("");
   const [settingsAgentKey, setSettingsAgentKey] = useState("");
   const [keyProvider, setKeyProvider] = useState("openai");
   const [apiKey, setApiKey] = useState("");
   const [keyError, setKeyError] = useState("");
-  const [agentPanel, setAgentPanel] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [generatedSuggestions, setGeneratedSuggestions] = useState<string[]>([]);
+  const [agentPanel, setAgentPanel] = useState(() => localStorage.getItem("pane-agent") === "open");
+  const [relabelPending, setRelabelPending] = useState(false);
   const [chatError, setChatError] = useState("");
   const [riverSelection, setRiverSelection] = useState<RiverSelection>();
   const [worldReplay, setWorldReplay] = useState<WorldReplay>();
@@ -233,8 +220,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const modelDialog = useRef<HTMLDialogElement>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const settingsPrompted = useRef(false);
-  const previousTaskStatus = useRef<TaskState["status"] | undefined>(undefined);
-  const summarizedAnalyses = useRef(new Set<string>());
   const deleteTimers = useRef(new Map<string, number>());
   const riverFrame = useRef<HTMLIFrameElement>(null);
   const chatScroll = useRef<HTMLDivElement>(null);
@@ -245,6 +230,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId!), enabled: Boolean(taskId) });
   const agent = useQuery({ queryKey: ["agent-status"], queryFn: getAgentStatus, retry: 0 });
   const current = task.data;
+  const assistantMode: AgentMode = !current?.model || centerTab === "context" ? "context" : centerTab === "model" ? "model" : "river";
+  const chatMessages = current?.messages ?? [];
 
   useEffect(() => {
     const first = tasks.data?.[0];
@@ -254,7 +241,12 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   useEffect(() => {
     setNextSeed(undefined);
     setRunError("");
+    setModelBuildStage(1);
+    setBuildActivity([]);
+    setStreaming(false);
+    setRebuildDone(false);
     setTrials(current?.analyses.at(-1)?.trials ?? 600);
+    setCenterTab(current?.analyses.length ? "river" : current?.model ? "model" : "context");
   }, [taskId, current?.id]);
 
   useEffect(() => {
@@ -270,27 +262,23 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   }, [queryClient, taskId]);
 
   useEffect(() => {
+    const build = current?.activeBuild;
+    if (!build || streaming) return;
+    setModelBuildStage(build.stage === "frame" ? 0 : build.stage === "draft" ? 1 : 2);
+    setBuildActivity([{ id: build.buildId, stage: build.stage, message: build.error ?? build.message, status: build.status === "failed" ? "failed" : "active" }]);
+  }, [current?.activeBuild?.buildId, current?.activeBuild?.stage, current?.activeBuild?.message, current?.activeBuild?.status, current?.activeBuild?.error, current?.activeBuild?.updatedAt, streaming]);
+
+  useEffect(() => {
     const dialog = promptDialog.current;
     if (prompt) openDialog(dialog);
     if (!prompt && dialog?.open) dialog.close();
   }, [prompt]);
 
-  useEffect(() => {
-    if (!prompt || prompt.mode === "proposal") { setDraftText(""); setDebouncedDraft(""); return; }
-    const initial = prompt.mode === "edit-brief" ? current?.brief ?? "" : prompt.mode === "edit-context" && prompt.index !== undefined ? current?.context[prompt.index] ?? "" : "";
-    setDraftText(initial);
-    setDebouncedDraft("");
-  }, [prompt]);
-
-  useEffect(() => {
-    const text = draftText.trim();
-    setDebouncedDraft("");
-    if (!prompt || prompt.mode === "proposal" || text.length < (current ? 8 : 40)) return;
-    const timer = setTimeout(() => setDebouncedDraft(text), 1_800);
-    return () => clearTimeout(timer);
-  }, [current, draftText, prompt?.mode]);
+  useEffect(() => { setDraftText(""); setPromptError(""); }, [prompt]);
 
   const models = agent.data?.models ?? [];
+  const agentAvailable = Boolean(agent.data?.available && models.length > 0);
+  const agentStatusText = agent.data?.detail ?? (agentAvailable ? "Pi agent connected" : agent.data?.error ?? "Configure Pi authentication in Settings");
   const selectedAgent = useMemo<AgentSelection | undefined>(() => {
     const saved = parseSelection(agentKey, models);
     if (saved) return saved;
@@ -303,31 +291,32 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     return first ? parseSelection(selectionValue({ provider: first.provider, model: first.model, thinkingLevel: "medium" }), models) : undefined;
   }, [agent.data?.defaultSelection, agentKey, current?.agent, models]);
 
-  const scenarioContext = useMemo(() => {
-    if (!prompt || prompt.mode === "proposal") return "";
-    if (!current) return debouncedDraft;
-    const brief = prompt.mode === "edit-brief" ? debouncedDraft : current.brief;
-    const context = current.context.map((text, index) => prompt.mode === "edit-context" && prompt.index === index ? debouncedDraft : text);
-    if (prompt.mode === "refine" && debouncedDraft) context.push(debouncedDraft);
-    return `Situation: ${brief}\n\nContext:\n${context.map((text) => `- ${text}`).join("\n")}`.slice(0, 20_000);
-  }, [current, debouncedDraft, prompt]);
-
-  const scenarioHints = useQuery({
-    queryKey: ["scenario-hints", scenarioContext, selectedAgent],
-    queryFn: () => getScenarioHints({ text: scenarioContext, agent: selectedAgent }),
-    enabled: Boolean(debouncedDraft && selectedAgent && prompt && prompt.mode !== "proposal" && !researchingHints.length),
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-
   const createMutation = useMutation({ mutationFn: createTask });
-  const commandMutation = useMutation({ mutationFn: ({ id, value }: { id: string; value: Record<string, unknown> }) => sendCommand(id, value) });
-  const agentMutation = useMutation({ mutationFn: ({ id, value }: { id: string; value: Parameters<typeof askAgent>[1] }) => askAgent(id, value) });
+  const commandMutation = useMutation({ mutationFn: ({ id, value }: { id: string; value: FactCommand }) => sendCommand(id, value) });
+  const agentMutation = useMutation({ mutationFn: ({ id }: { id: string }) => understandTask(id, selectedAgent) });
+  // keep agentMutation for fallback non-stream calls; streaming uses understandTaskStream directly
   const keyMutation = useMutation({ mutationFn: ({ provider, key }: { provider: string; key?: string }) => key ? saveProviderKey(provider, key) : removeProviderKey(provider) });
-  const chatMutation = useMutation({ mutationFn: chatAgent });
+  // The chat is the conversational way in: the agent answers questions and files facts itself, so the
+  // user never has to decide which box a sentence belongs in.
+  const chatMutation = useMutation({
+    mutationFn: async (vars: { message: string }) => {
+      if (!taskId) throw new Error("Open a situation first");
+      const routed = assistantMode === "river"
+        ? await chatTask(taskId, vars.message, selectedAgent)
+        : await clarifyTask(taskId, { message: vars.message, mode: assistantMode, agent: selectedAgent }).catch((error: unknown) => {
+          // A running pre-upgrade server has no /clarify route yet; keep context prompts usable.
+          if (error instanceof Error && error.message === "Not found") return chatTask(taskId, vars.message, selectedAgent);
+          throw error;
+        });
+      if (routed.task) cacheTask(routed.task);
+      return routed;
+    },
+  });
   const replayMutation = useMutation({ mutationFn: ({ taskId, analysisId, index }: { taskId: string; analysisId: string; index: number }) => getWorldReplay(taskId, analysisId, index) });
-  const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending;
-  const promptBusy = busy || Boolean(researchingHints.length);
+  const buildActive = current?.activeBuild?.status === "running" || current?.status === "building";
+  const buildFailed = buildActivity.some((item) => item.status === "failed");
+  const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming || buildActive;
+  const promptBusy = busy;
   const elapsed = useElapsed(busy);
 
   const cacheTask = (value: TaskState) => {
@@ -335,23 +324,79 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
   };
 
-  const showProposal = (proposal?: Proposal) => {
-    if (!proposal) return;
-    const decisions = proposal.decisions?.length ? proposal.decisions : (proposal.questions ?? []).map((label, index) => ({ id: `question-${index + 1}`, prompt: label, answer: "", alternatives: [] }));
-    setAnswers(Object.fromEntries(decisions.map((decision) => [decision.id, decision.answer])));
-    setPromptError("");
-    setPrompt({ mode: "proposal", proposal: { ...proposal, decisions } });
+  const runCommand = async (value: FactCommand) => {
+    if (!current) return;
+    setRunError("");
+    try { cacheTask(await commandMutation.mutateAsync({ id: current.id, value })); }
+    catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const requestAgent = async (id: string, revision: number, message: string, options: { remember?: boolean; research?: boolean; operation?: "understand" | "build-model" | "revise-model"; decisions?: readonly TaskDecision[] } = {}) => {
-    const value = await agentMutation.mutateAsync({ id, value: { message, baseRevision: revision, agent: selectedAgent, ...options } });
-    cacheTask(value);
-    if (selectedAgent) {
-      const value = selectionValue(selectedAgent);
-      saveSelection(value, models);
-      setAgentKey(value);
+  /** Persist drawer open state */
+  useEffect(() => { localStorage.setItem("pane-agent", agentPanel ? "open" : "closed"); }, [agentPanel]);
+
+  /** Explicit Context → Model transition. Progress is status, never fake chat history. */
+  const reviewWithAgent = async (id = current?.id) => {
+    if (!id) return;
+    if (!agentAvailable) { setRunError(agentStatusText); openSettings(); return; }
+    setRunError("");
+    setRebuildDone(false);
+    setModelBuildStage(1);
+    setBuildActivity([]);
+    setStreaming(true);
+    setCenterTab("model");
+    const advanceStage = (ev: Record<string, unknown>) => {
+      const stage = String(ev.stage ?? "");
+      const index = stage === "frame" ? 0
+        : stage === "draft" ? 1
+          : stage === "validate" || stage === "review" || stage === "repair" ? 2
+            : stage === "smoke" || stage === "check" || stage === "save" ? 3
+              : 1;
+      setModelBuildStage(index);
+      if (ev.kind === "error") {
+        const message = String(ev.error ?? "The model build stopped").trim();
+        setBuildActivity((items) => {
+          const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
+          const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
+          return next.slice(-6);
+        });
+        return;
+      }
+      if (ev.kind === "done") {
+        setBuildActivity((items) => items.map((item) => ({ ...item, status: "done" as const })));
+        return;
+      }
+      const message = String(ev.message ?? "").trim();
+      if (!message || !stage || stage === "shape" || stage === "save") return;
+      setBuildActivity((items) => {
+        const current = items.at(-1);
+        if (current?.stage === stage && current.message === message) return items;
+        return [...items.map((item) => ({ ...item, status: "done" as const })), { id: `${stage}-${items.length}`, stage, message, status: "active" as const }].slice(-6);
+      });
+    };
+    try {
+      // Prefer streaming endpoint (shows live agent messages); fallback to classic
+      let task: TaskState;
+      try {
+        task = await understandTaskStream(id, selectedAgent, advanceStage);
+      } catch (e) {
+        // If streaming not available, fallback
+        if (!String(e).includes("Streaming not supported")) throw e;
+        task = await agentMutation.mutateAsync({ id });
+      }
+      cacheTask(task);
+      if (selectedAgent) { const value = selectionValue(selectedAgent); saveSelection(value, models); setAgentKey(value); }
+      setRebuildDone(true);
+      window.setTimeout(() => setRebuildDone(false), 4000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBuildActivity((items) => {
+        if (items.at(-1)?.status === "failed") return items;
+        const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
+        const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
+        return next.slice(-6);
+      });
     }
-    return value;
+    finally { setStreaming(false); }
   };
 
   const submitPrompt = async (event: FormEvent) => {
@@ -359,105 +404,61 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     if (!prompt) return;
     setPromptError("");
     try {
-      if (prompt.mode === "proposal") { await applyProposal(); return; }
       const text = draftText.trim();
-      if (!text) throw new Error("Enter a situation or clarification");
-      if (prompt.mode === "create") {
-        const created = await createMutation.mutateAsync(text);
-        cacheTask(created);
-        await navigate({ to: "/tasks/$taskId", params: { taskId: created.id } });
-        const value = await requestAgent(created.id, created.revision, "Review the situation and prepare a clear plain-English understanding for confirmation.", { remember: false, research: false });
-        showProposal(value.pendingProposal);
-      } else if (current && prompt.mode === "refine") {
-        const value = await requestAgent(current.id, current.revision, text, { research: false });
-        showProposal(value.pendingProposal);
-      } else if (current && prompt.mode === "edit-brief") {
-        const reply = await commandMutation.mutateAsync({ id: current.id, value: { tag: "EditBrief", brief: text, baseRevision: current.revision } });
-        if (reply.tag !== "Accepted") throw new Error(reply.tag === "Rejected" ? reply.reason : "The change was not accepted");
-        const value = await requestAgent(current.id, reply.revision, "The situation has changed. Update the title and review every assumption again.", { remember: false, research: false });
-        showProposal(value.pendingProposal);
-      } else if (current && prompt.mode === "edit-context" && prompt.index !== undefined) {
-        const reply = await commandMutation.mutateAsync({ id: current.id, value: { tag: "EditContext", index: prompt.index, text, baseRevision: current.revision } });
-        if (reply.tag !== "Accepted") throw new Error(reply.tag === "Rejected" ? reply.reason : "The change was not accepted");
-        const value = await requestAgent(current.id, reply.revision, "The context has changed. Rebuild every assumption in clear plain English.", { remember: false, research: false });
-        showProposal(value.pendingProposal);
+      if (!text) throw new Error("Describe the situation first");
+      const created = await createMutation.mutateAsync(text);
+      cacheTask(created);
+      setPrompt(undefined);
+      await navigate({ to: "/tasks/$taskId", params: { taskId: created.id } });
+      setAgentPanel(true);
+      if (agentAvailable) {
+        const guided = await clarifyTask(created.id, { mode: "context", agent: selectedAgent });
+        cacheTask(guided.task);
       }
     } catch (error) { setPromptError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const researchHint = async (hint: string) => {
-    setResearchingHints((items) => [...items, hint]); setPromptError("");
-    try {
-      const result = await researchScenarioHint({ question: hint, context: scenarioContext, agent: selectedAgent });
-      setDraftText((text) => `${text.trimEnd()}\n\n${result.text.trim()}`);
-    } catch (error) { setPromptError(error instanceof Error ? error.message : String(error)); }
-    finally { setResearchingHints((items) => items.filter((item) => item !== hint)); }
-  };
-
-  const applyProposal = async () => {
-    if (!current || !prompt?.proposal) return;
-    const proposal = prompt.proposal;
-    const decisions = (proposal.decisions ?? []).map((decision) => ({ ...decision, answer: (answers[decision.id] ?? "").trim() }));
-    if (decisions.some((decision) => !decision.answer)) throw new Error("Complete the selected assumptions");
-    const changed = decisions.some((decision, index) => decision.answer !== proposal.decisions?.[index]?.answer);
-    let acceptedProposal = proposal;
-    if (changed || !proposal.model) {
-      const built = await requestAgent(current.id, current.revision, "Build the model from the explicitly confirmed assumptions provided.", { remember: false, operation: "build-model", decisions });
-      if (!built.pendingProposal?.model) { showProposal(built.pendingProposal); return; }
-      acceptedProposal = built.pendingProposal;
-    }
-    const reply = await commandMutation.mutateAsync({ id: current.id, value: { tag: "AcceptProposal", proposalId: acceptedProposal.id, baseRevision: current.revision } });
-    if (reply.tag !== "Accepted") throw new Error(reply.tag === "Rejected" ? reply.reason : "The model was not accepted");
-    if (acceptedProposal.agentMeta?.operation === "revise-model" && selectedAnalysis) {
-      await commandMutation.mutateAsync({ id: current.id, value: { tag: "RequestAnalysis", trials: selectedAnalysis.trials, seed: selectedAnalysis.seed, agent: selectedAgent, baseRevision: reply.revision } });
-      onSelectRun(undefined);
-    }
-    setPrompt(undefined);
-    await queryClient.invalidateQueries({ queryKey: ["task", current.id] });
-    await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-  };
-
-  const refreshAssumptions = async (focus?: TaskDecision) => {
-    if (!current) return;
-    setPromptError("");
-    try {
-      const message = focus
-        ? `Review all current assumptions in plain English. The user wants to change “${focus.prompt}: ${focus.answer}”.`
-        : "Review the current understanding, research the web if necessary, and present every assumption as a clear plain-English statement without internal terminology.";
-      showProposal((await requestAgent(current.id, current.revision, message, { remember: false, research: true })).pendingProposal);
-    } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
-  };
-
+  // One Run: if situation is stale we rebuild first (so Run reflects what the user sees). Simulation itself is deterministic and needs no agent; labeling will be skipped if no agent.
   const runAnalysis = async () => {
     if (!current) return;
+    if (situationStale) {
+      await reviewWithAgent(current.id);
+      // re-read after rebuild: if still stale or model missing, abort
+      const fresh = queryClient.getQueryData<TaskState>(["task", current.id]);
+      if (!fresh?.model || fresh.model.situation.trim() !== fresh.situation.trim()) {
+        setRunError("Rebuild did not apply — check the situation text and try again.");
+        return;
+      }
+    }
     setRunError("");
     try {
+      const worldCount = Math.min(5000, Math.max(1, Math.round(trials)));
+      setTrials(worldCount);
       const seed = nextSeed ?? ((crypto.getRandomValues(new Uint32Array(1))[0]! & 0x7fffffff) || 1);
-      await commandMutation.mutateAsync({ id: current.id, value: { tag: "RequestAnalysis", trials, seed, agent: selectedAgent, baseRevision: current.revision } });
+      cacheTask(await runTask(current.id, { trials: worldCount, seed, ...(selectedAgent ? { agent: selectedAgent } : {}) }));
       setNextSeed(undefined);
       onSelectRun(undefined);
-      await queryClient.invalidateQueries({ queryKey: ["task", current.id] });
-      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
     } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const cancelAnalysis = async () => {
-    if (!current) return;
+  const relabelAnalysis = async () => {
+    if (!current || !selectedAnalysis?.id) return;
+    if (!agentAvailable) { setRunError(agentStatusText); openSettings(); return; }
+    setRelabelPending(true);
     setRunError("");
     try {
-      await commandMutation.mutateAsync({ id: current.id, value: { tag: "CancelAnalysis", baseRevision: current.revision } });
-      await queryClient.invalidateQueries({ queryKey: ["task", current.id] });
-      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      cacheTask(await relabelTask(current.id, selectedAnalysis.id, selectedAgent));
     } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); }
+    finally { setRelabelPending(false); }
   };
+
+  const cancelAnalysis = () => void runCommand({ tag: "CancelAnalysis" });
 
   const commitDelete = async (deletion: PendingDelete) => {
     setPendingDeletes((items) => items.map((item) => item.id === deletion.id ? { ...item, committing: true } : item));
     try {
-      const reply = deletion.kind === "task"
-        ? await sendCommand(deletion.task.id, { tag: "DeleteTask", baseRevision: deletion.task.revision })
-        : await sendCommand(deletion.taskId, { tag: "RemoveAnalysis", analysisId: analysisKey(deletion.analysis), baseRevision: deletion.revision });
-      if (reply.tag !== "Accepted") throw new Error(reply.tag === "Rejected" ? reply.reason : "Could not delete the item");
+      if (deletion.kind === "task") await sendCommand(deletion.task.id, { tag: "DeleteTask" });
+      else await sendCommand(deletion.taskId, { tag: "RemoveAnalysis", analysisId: analysisKey(deletion.analysis) });
       if (deletion.kind === "analysis") await queryClient.invalidateQueries({ queryKey: ["task", deletion.taskId] });
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
       if (deletion.kind === "task" && taskIdRef.current === deletion.task.id) {
@@ -497,14 +498,13 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
 
   const openModel = () => {
     if (!current) return;
-    const value = current.model ? JSON.stringify(current.model, null, 2) : "{}";
-    setModelText(value); setModelSnapshot(value); setModelError("");
+    setModelError("");
     setRunAgentKey(selectedAgent ? selectionValue(selectedAgent) : agentKey);
     openDialog(modelDialog.current);
   };
 
   const openSettings = () => {
-    setMobilePane(null);
+    setSituationsOpen(false);
     setAgentPanel(false);
     setSettingsAgentKey(selectedAgent ? selectionValue(selectedAgent) : agentKey);
     setKeyProvider(agent.data?.authProviders.find((provider) => provider.id === "openai")?.id ?? agent.data?.authProviders[0]?.id ?? "");
@@ -557,42 +557,44 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     } catch (error) { setKeyError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const sendChatMessage = async (message: string, showUser = true) => {
-    if (!message || !selectedAgent) return;
-    const visible = showUser ? [...chatMessages, { role: "user" as const, text: message }] : chatMessages;
-    const request = showUser ? visible : [...visible, { role: "user" as const, text: message }];
-    if (showUser) setChatMessages(visible);
+  const sendChatMessage = async (message: string) => {
+    if (!message) return;
+    if (!selectedAgent && !agentAvailable) { setChatError(agentStatusText); openSettings(); return; }
     setChatError("");
     try {
-      const history = request.slice(-10).map((item) => `${item.role === "user" ? "User" : "Agent"}: ${item.text}`).join("\n\n");
-      const riverContext = selectedAnalysis ? [
-        `River run: ${selectedAnalysis.trials} worlds, seed ${selectedAnalysis.seed}, model revision ${selectedAnalysis.revision}.`,
-        `Run result: ${selectedAnalysis.report}`,
-        `Current scope: ${riverSelection?.label ?? "entire river"} (${riverSelection?.worldIds.length ?? selectedAnalysis.trials} worlds).`,
-        worldReplay ? `Verified replay of world ${worldReplay.index + 1}: ${JSON.stringify({ exact: worldReplay.exact, winners: worldReplay.stored.winners, cooperation: worldReplay.stored.cooperation, inputs: worldReplay.stored.inputs, scores: worldReplay.stored.scores, digest: worldReplay.stored.digest })}` : "",
-      ].filter(Boolean).join("\n") : "";
-      const result = await chatMutation.mutateAsync({ message: history, context: current ? `${current.title}\n${current.brief}${riverContext ? `\n\n${riverContext}` : ""}` : undefined, agent: selectedAgent });
-      setChatMessages((items) => [...items, { role: "agent", text: result.text }]);
-      setGeneratedSuggestions(result.suggestions);
+      const result = await chatMutation.mutateAsync({ message });
+      if ((result as unknown as { pendingOutcome?: { observation: Record<string, unknown>; display: string } }).pendingOutcome) {
+        const pending = (result as unknown as { pendingOutcome: { observation: Record<string, unknown>; display: string } }).pendingOutcome;
+        setPendingOutcome({ message, observation: pending.observation, display: pending.display });
+      }
     } catch (error) { setChatError(error instanceof Error ? error.message : String(error)); }
+  };
+
+  const confirmPendingOutcome = async () => {
+    if (!pendingOutcome || !current) return;
+    setChatError("");
+    try {
+      const res = await confirmOutcome(current.id, pendingOutcome.message, pendingOutcome.observation);
+      if (res.task) cacheTask(res.task);
+      setPendingOutcome(null);
+    } catch (error) { setChatError(error instanceof Error ? error.message : String(error)); }
+  };
+
+  const handleSuggestion = (suggestion: string) => {
+    if (suggestion === "Rebuild model from new situation") {
+      setAgentPanel(false);
+      setCenterTab("model");
+      void reviewWithAgent();
+      return;
+    }
+    void sendChatMessage(suggestion);
   };
 
   const submitChat = async (event: FormEvent) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement, message = String(new FormData(form).get("chat") ?? "").trim();
-    if (!message || !current || !selectedAgent) return;
-    const revising = ((event.nativeEvent as SubmitEvent).submitter as HTMLElement | null)?.dataset.action === "revise";
+    if (!message || !current || !agentAvailable) return;
     form.reset();
-    if (revising) {
-      setChatMessages((items) => [...items, { role: "user", text: message }]);
-      setChatError("");
-      try {
-        const value = await requestAgent(current.id, current.revision, message, { remember: false, operation: "revise-model" });
-        setChatMessages((items) => [...items, { role: "agent", text: "I prepared a model change for review. Nothing has been applied yet." }]);
-        showProposal(value.pendingProposal);
-      } catch (error) { setChatError(error instanceof Error ? error.message : String(error)); }
-      return;
-    }
     await sendChatMessage(message);
   };
 
@@ -605,33 +607,16 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       const seed = rawSeed ? Number(rawSeed) : undefined;
       if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 1 || seed > 2_147_483_647)) throw new Error("Seed must be an integer from 1 to 2147483647");
       setNextSeed(seed);
-      setAgentKey(runAgentKey);
-      saveSelection(runAgentKey, models);
-      if (modelText !== modelSnapshot) {
-        await commandMutation.mutateAsync({ id: current.id, value: { tag: "ReplaceModel", model: JSON.parse(modelText), baseRevision: current.revision } });
-        onSelectRun(undefined);
-        await queryClient.invalidateQueries({ queryKey: ["task", current.id] });
-        await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      }
+      if (runAgentKey) { setAgentKey(runAgentKey); saveSelection(runAgentKey, models); }
       modelDialog.current?.close();
     } catch (error) { setModelError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const togglePane = (name: "situations" | "runs") => {
-    if (mobile) { setMobilePane((value) => value === name ? null : name); return; }
-    setHidden((value) => {
-      const next = { ...value, [name]: !value[name] };
-      localStorage.setItem(`pane-${name}`, next[name] ? "hidden" : "shown");
-      return next;
-    });
-  };
-
-  const openScenario = () => {
-    if (mobile) { setMobilePane("runs"); return; }
-    setHidden((value) => {
-      if (!value.runs) return value;
-      localStorage.setItem("pane-runs", "shown");
-      return { ...value, runs: false };
+  const toggleSituations = () => {
+    if (mobile) { setSituationsOpen((value) => !value); return; }
+    setHideSituations((value) => {
+      localStorage.setItem("pane-situations", value ? "shown" : "hidden");
+      return !value;
     });
   };
 
@@ -649,25 +634,21 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     : undefined) ?? analyses.at(-1);
   const selectedAnalysisId = selectedAnalysis ? analysisKey(selectedAnalysis) : "";
   const analysisActive = current?.status === "running" || current?.status === "labeling";
-  const contextualSuggestions = riverSelection && riverSelection.kind !== "all"
+  // Only outcome facts are evidence. Journals written before the redesign still carry situation facts,
+  // and the engine ignores them — so the workspace must not count or list them as things that happened.
+  const outcomeFacts = (current?.facts ?? []).filter((fact) => fact.kind === "outcome");
+  const situationStale = Boolean(current?.model && current.situation.trim() && current.model.situation.trim() !== current.situation.trim());
+  const chatSuggestions = assistantMode === "context"
+    ? []
+    : assistantMode === "model"
+      ? ["Which assumptions should I review?", "What could change the result most?"]
+      : riverSelection && riverSelection.kind !== "all"
     ? ["Why did this branch emerge?", "How do these worlds differ from the rest?", "How can I change this branch's probability?"]
     : selectedAnalysis
-      ? ["Explain the main result", "What changes the outcome most?", "How can cooperation become more likely?"]
-      : current
-        ? ["What data is missing?", "Review my assumptions", "Which actions have we overlooked?"]
-        : ["Help me frame the situation", "What can I explore?", "Show me a good scenario example"];
-  const chatSuggestions = chatMessages.length && generatedSuggestions.length ? generatedSuggestions : contextualSuggestions;
+      ? ["Explain the main result", "What changes the outcome most?", "How do I tell you what actually happened?"]
+      : ["What can I learn after the first run?"];
 
-  useEffect(() => {
-    const previous = previousTaskStatus.current, next = current?.status;
-    previousTaskStatus.current = next;
-    if ((previous !== "running" && previous !== "labeling") || next !== "completed" || !selectedAnalysis || !selectedAgent) return;
-    const id = analysisKey(selectedAnalysis);
-    if (summarizedAnalyses.current.has(id)) return;
-    summarizedAnalyses.current.add(id);
-    setAgentPanel(true);
-    void sendChatMessage("Summarize the river that just finished. Use Markdown: a short heading, then three bullets — the main outcome, the key risk, and the most useful action. Do not repeat technical parameters or mention this request.", false);
-  }, [current?.status, selectedAnalysisId]);
+  useEffect(() => { if (current?.status === "completed" && selectedAnalysis) setCenterTab("river"); }, [current?.status, selectedAnalysisId]);
 
   useEffect(() => {
     setRiverSelection(undefined);
@@ -675,12 +656,12 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setReplayError("");
   }, [taskId, selectedAnalysisId]);
 
-  useEffect(() => { setChatMessages([]); setGeneratedSuggestions([]); setChatError(""); }, [taskId]);
+  useEffect(() => { setChatError(""); }, [taskId]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight, behavior: "smooth" }));
     return () => cancelAnimationFrame(frame);
-  }, [chatMessages.length, chatMutation.isPending]);
+  }, [chatMessages.length, chatMutation.isPending, streaming]);
 
   useEffect(() => {
     const receiveSelection = (event: MessageEvent) => {
@@ -703,72 +684,149 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     try { setWorldReplay(await replayMutation.mutateAsync({ taskId, analysisId: selectedAnalysis.id, index })); }
     catch (error) { setReplayError(error instanceof Error ? error.message : String(error)); }
   };
-  const appClass = ["app", hidden.situations && "hide-situations", hidden.runs && "hide-runs", agentPanel && "agent-open", mobilePane && `mobile-${mobilePane}`].filter(Boolean).join(" ");
-  const promptTitle = prompt?.mode === "create" ? "New situation" : prompt?.mode === "edit-brief" ? "Edit situation" : prompt?.mode === "edit-context" ? "Edit context" : prompt?.mode === "proposal" ? "Did we understand correctly?" : "Add context";
-  const promptHint = prompt?.mode === "create" ? "Describe the situation in your own words: who is involved, what they want, which decisions are available, what limits their choices, how urgent it is, and which outcome matters. Write freely — Pi will help spot the gaps." : prompt?.mode === "edit-brief" ? "Clarify the participants, their goals, available actions, constraints, timing, and desired outcome. Pi will update the title and review the assumptions after you save." : prompt?.mode === "edit-context" ? "Add specifics: who, what, when, under which conditions, and why it matters. Pi will review the assumptions again after you save." : "Add a fact, participant goal, constraint, or possible action. You can also correct the current understanding or ask Pi to verify up-to-date information.";
-  const workingLabel = prompt?.mode === "proposal" ? "Pi is building the model" : "Pi is exploring the situation";
+  const appClass = ["app", hideSituations && "hide-situations", agentPanel && "agent-open", situationsOpen && "mobile-situations"].filter(Boolean).join(" ");
+  const assistantTitle = assistantMode === "context" ? "Context guide" : assistantMode === "model" ? "Model copilot" : "River analyst";
+  const assistantHint = assistantMode === "model"
+      ? "Discuss assumptions here; rebuild explicitly when the context changes."
+      : assistantMode === "river" ? "Ask about branches or tell me what actually happened." : "";
+  const promptTitle = "New situation";
+  const promptHint = "Describe the situation in your own words: who is involved, what they want, which choices they have, and what makes it hard. The agent will fill in the rest and ask about anything it cannot infer.";
+  const workingLabel = "Reading the situation";
+  const workflowRunning = current?.status === "running" || current?.status === "labeling";
+  const contextReady = Boolean(current?.situation.trim());
+  const modelReady = Boolean(current?.model);
+  const contextActive = centerTab === "context";
+  const worldsActive = centerTab === "river" || workflowRunning;
 
   return <div className={appClass}>
     <aside className="pane situations" aria-label="Situations">
-      <header className="pane-head"><button className="icon quiet" onClick={() => togglePane("situations")} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create" })} aria-label="New situation"><Icon name="plus" /></button></header>
+      <header className="pane-head"><button className="icon quiet" onClick={toggleSituations} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create" })} aria-label="New situation"><Icon name="plus" /></button></header>
       <nav className="tasks">
         {tasks.isPending && <div className="empty-runs">Loading situations…</div>}
         {tasks.isError && <ErrorState error={tasks.error} retry={() => void tasks.refetch()} />}
-        {visibleTasks?.map((item) => <WorldRow key={item.id} item={item} now={now} onOpen={openScenario} onDelete={() => removeTask(item)} />)}
+        {visibleTasks?.map((item) => <WorldRow key={item.id} item={item} now={now} onOpen={() => setSituationsOpen(false)} onDelete={() => removeTask(item)} />)}
         {visibleTasks?.length === 0 && <div className="list-empty"><Icon name="worlds" /><b>No worlds yet</b><span>Create your first situation to begin.</span></div>}
       </nav>
       <footer className="sidebar-footer"><button className="settings-link" onClick={openSettings}><Icon name="settings" /><span>Settings</span></button></footer>
     </aside>
 
-    <aside className="pane run-pane" aria-label="Scenario">
-      <header className="pane-head"><button className="icon quiet" onClick={() => togglePane("runs")} aria-label="Collapse scenario panel"><Icon name="collapse" /></button><div className="pane-title"><b>Scenario</b><span>{current ? `${statusName[current.status]} · revision ${current.revision}` : "Select a situation"}</span></div><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button></header>
-      <div className="run-scroll">
+    <main className="river-pane">
+      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && situationsOpen} onClick={toggleSituations}><Icon name="situations" /><span>Situations</span></button><nav className="stage-switcher" aria-label="Scenario stages">
+        <button type="button" className={`${contextActive ? "active" : ""} ${contextReady && !contextActive ? "done" : ""}`} aria-current={contextActive ? "step" : undefined} onClick={() => setCenterTab("context")}><i aria-hidden>{contextReady && !contextActive ? "✓" : "1"}</i><span>Context</span></button><b aria-hidden />
+        <button type="button" className={`${centerTab === "model" ? "active" : ""} ${modelReady && centerTab !== "model" ? "done" : ""}`} aria-current={centerTab === "model" ? "step" : undefined} onClick={() => setCenterTab("model")}><i aria-hidden>{modelReady && centerTab !== "model" ? "✓" : "2"}</i><span>Model</span></button><b aria-hidden />
+        <button type="button" className={`${worldsActive ? "active" : ""} ${selectedAnalysis && !worldsActive ? "done" : ""}`} aria-current={worldsActive ? "step" : undefined} onClick={() => setCenterTab("river")}><i aria-hidden>{selectedAnalysis && !worldsActive ? "✓" : "3"}</i><span>Worlds{selectedAnalysis ? ` · ${selectedAnalysis.trials}` : ""}</span></button>
+      </nav><div className="agent-tools"><button className="icon quiet" onClick={openModel} aria-label="Run settings" disabled={!current}><Icon name="more" /></button><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
+
+      {centerTab === "context" ? <div className="context-pane">
+        {current && <div className="context-workspace">
+          <section className="section context-card">
+            <div className="section-heading"><div><div className="eyebrow">Context</div><h1>What is happening?</h1></div></div>
+            <p className="context-intro">Describe the situation in your own words. The assistant will turn it into explicit assumptions and ask about anything that matters.</p>
+            <textarea key={`${current.id}:${current.situation}`} aria-label="Situation context" defaultValue={current.situation} placeholder="Who is involved, what do they want, and what makes this difficult?" rows={9} disabled={busy} onBlur={(event) => { const text = event.currentTarget.value.trim(); if (text && text !== current.situation.trim()) void runCommand({ tag: "SetSituation", text }); }} />
+          </section>
+          {current.openQuestions.length > 0 && <section className="section context-questions questions">
+            <div className="fact-group-label">Worth clarifying <span>optional — ignoring these keeps the agent's assumption</span></div>
+            <ul className="question-list">
+              {current.openQuestions.map((question) => <li key={question.id} className="question"><div className="question-head"><span className="question-prompt">{question.prompt}{question.field && <span className="question-field">→ {question.field}</span>}</span><button type="button" className="question-dismiss" disabled={busy} aria-label={`Dismiss: ${question.prompt}`} onClick={() => void runCommand({ tag: "DismissQuestion", questionId: question.id })}>×</button></div></li>)}
+            </ul>
+          </section>}
+        </div>}
+      </div> : centerTab === "model" ? <div className="model-pane">
         {task.isPending && taskId && <div className="empty-runs">Loading situation…</div>}
         {task.isError && <ErrorState error={task.error} retry={() => void task.refetch()} />}
         {!taskId && <div className="empty-runs">Select a situation or create a new one.</div>}
-        {current && <>
-          <section className="section"><div className="eyebrow">Situation</div><div className="brief editable-text"><span>{current.brief}</span><button className="inline-edit" onClick={() => setPrompt({ mode: "edit-brief" })} aria-label="Edit situation"><Icon name="edit" /></button></div><Clarifications key={current.id} current={current} onEdit={(index) => setPrompt({ mode: "edit-context", index })} onRefresh={refreshAssumptions} /><div className="actions"><button onClick={() => setPrompt({ mode: "refine" })}><Icon name="plus" />Add context</button></div>{current.pendingProposal && <ProposalCard proposal={current.pendingProposal} onOpen={() => showProposal(current.pendingProposal)} onRefresh={() => void refreshAssumptions()} onReject={async () => { try { await commandMutation.mutateAsync({ id: current.id, value: { tag: "RejectProposal", proposalId: current.pendingProposal!.id, baseRevision: current.revision } }); await queryClient.invalidateQueries({ queryKey: ["task", current.id] }); } catch (error) { setRunError(error instanceof Error ? error.message : String(error)); } }} />}</section>
-          <section className="section"><div className="eyebrow">New run</div><div className="run-form single"><label><span>Worlds</span><input type="number" min="1" max="5000" value={trials} disabled={analysisActive} onChange={(event) => setTrials(Number(event.target.value))} /></label>{analysisActive ? <button onClick={() => void cancelAnalysis()} disabled={busy}>{current.status === "running" ? "Cancel calculation" : "Stop labeling"}</button> : <button className="primary" onClick={() => void runAnalysis()} disabled={!current.model || busy}>Run</button>}{!current.model && <div className="run-hint">Review and confirm the agent's assumptions first.</div>}</div>{current.status === "running" && <RiverActivity compact label="Calculating worlds" detail="Exploring how the parties may behave" />}{current.status === "labeling" && <RiverActivity compact label="Labeling the river" detail="Pi is turning the results into a clear narrative" />}{current.lastError && <div className="error" role="alert"><b>The last run did not finish:</b> {current.lastError}</div>}{runError && <div className="error" role="alert">{runError}</div>}{streamError && <div className="error" role="status">{streamError}</div>}</section>
-          <section className="section"><div className="section-heading"><div className="eyebrow">Runs</div>{analyses.length > 0 && <span>{uniqueRuns(analyses).length}</span>}</div><div className="runs">{uniqueRuns(analyses).map((analysis) => <RunCard key={analysisKey(analysis)} analysis={analysis} currentRevision={current.revision} selected={Boolean(selectedAnalysis && analysisKey(analysis) === analysisKey(selectedAnalysis))} onClick={() => { onSelectRun(analysisKey(analysis)); setMobilePane(null); }} onDelete={() => void removeAnalysis(analysis)} />)}{!analyses.length && <div className="runs-empty"><span className="runs-empty-icon"><Icon name="runs" /></span><b>Your runs will appear here</b><span>Run a simulation to compare saved rivers of worlds.</span></div>}</div></section>
-        </>}
-      </div>
-    </aside>
-
-    <main className="river-pane">
-      <header className="river-toolbar"><button className="toggle open-situations" aria-pressed={mobile && mobilePane === "situations"} onClick={() => togglePane("situations")}><Icon name="situations" /><span>Situations</span></button><button className="toggle open-runs" aria-pressed={mobile && mobilePane === "runs"} onClick={() => togglePane("runs")}><Icon name="runs" /><span>Scenario</span></button><div className="river-heading"><b>{current?.title ?? "River of possibilities"}</b><span>{current?.status === "running" ? "Calculating possible worlds…" : current?.status === "labeling" ? "The river is ready; Pi is labeling its branches…" : selectedAnalysis ? `${selectedAnalysis.trials} possible worlds · ${compactDate(selectedAnalysis.completedAt)} · model r${selectedAnalysis.revision}` : current?.model ? "Start the first run" : "Clarify the situation with the agent first"}</span></div><div className="agent-tools"><button className="icon quiet" onClick={() => selectedAgent ? setAgentPanel(true) : openSettings()} aria-label="Open assistant"><Icon name="chat" /></button></div></header>
-      {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : <><button className="empty-world-add" onClick={() => setPrompt({ mode: "create" })} aria-label="Create situation" title="Create situation"><Icon name="plus" /></button><h1>Worlds begin with a situation</h1><p>Describe it, review the assumptions, and run the first set of worlds.</p></>}</div></div>}
+        {current && <div className="model-workspace">
+          <section className={`workflow-card ${streaming || buildActive || (current.model && !situationStale && !workflowRunning) ? "toy" : ""}`} aria-label="Scenario workflow">
+            {!streaming && !buildActive && workflowRunning && <div className="workflow-head"><b>{current.status === "labeling" ? "Naming the branches" : "Exploring possible worlds"}</b></div>}
+            {!streaming && workflowRunning && <div className="workflow-live"><RiverActivity compact label={current.status === "labeling" ? "Calculation complete" : "Building the worlds"} detail={current.status === "labeling" ? "Pi is adding clear names to the branches" : "Exploring the model with the selected number of worlds"} /></div>}
+            {!streaming && !workflowRunning && current.model && situationStale && <p className="workflow-copy">The situation changed. Rebuild the model before running it.</p>}
+            {workflowRunning && <button type="button" className="workflow-cancel" onClick={cancelAnalysis} disabled={busy}>Cancel</button>}
+            {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && <button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button>}
+            {(streaming || buildActive || Boolean(current.model && !situationStale && !workflowRunning)) && <div className="workflow-live spd-live"><SpatialPrisonersDilemma /></div>}
+            {buildActivity.length > 0 && (streaming || buildActive || buildFailed) && <BuildActivity items={buildActivity} active={streaming || buildActive} />}
+            {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div>}
+            {runError && !streaming && <div className="error" role="alert">{runError}</div>}
+          </section>
+          {!streaming && !buildActive && (!current.model || situationStale) && <div className="model-scroll"><ModelForm
+            situation={current.situation}
+            model={current.model}
+            questions={current.openQuestions}
+            busy={busy}
+            error={undefined}
+            justRebuilt={rebuildDone}
+            streaming={streaming}
+            buildStage={modelBuildStage}
+            buildElapsed={streaming ? elapsed : 0}
+            agentAvailable={agentAvailable}
+            agentStatusText={agentStatusText}
+            onSituation={(text) => void runCommand({ tag: "SetSituation", text })}
+            onModel={(model) => void runCommand({ tag: "SetModel", model })}
+            onUnderstand={() => void reviewWithAgent()}
+            onDismissQuestion={(questionId) => void runCommand({ tag: "DismissQuestion", questionId })}
+          /></div>}
+          {streamError && <div className="error model-run-error" role="status">{streamError}</div>}
+        </div>}
+      </div> : <>
+        {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : current ? <><button className="empty-world-add" onClick={() => setCenterTab("model")} aria-label="Open model" title="Open model"><Icon name="edit" /></button><h1>{current.model ? "The model is ready" : "Build the model first"}</h1><p>{current.model ? "Review it if needed, then press Run to create the river." : "Answer any useful questions, then build a model from the context."}</p></> : <><button className="empty-world-add" onClick={() => setPrompt({ mode: "create" })} aria-label="Create situation" title="Create situation"><Icon name="plus" /></button><h1>Worlds begin with a situation</h1><p>Describe it in your own words to begin.</p></>}</div></div>}
+        <div className="river-below">
+          {selectedAnalysis && <div className="river-detail"><div className="river-scope"><div><small>River selection</small><b>{riverSelection?.label ?? "Entire river"}</b><span>{riverSelection?.worldIds.length ?? selectedAnalysis.trials} {word(riverSelection?.worldIds.length ?? selectedAnalysis.trials, "world", "worlds", "worlds")}</span></div><div className="river-scope-actions"><button type="button" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending || !selectedAnalysis.artifactUrl}>{replayMutation.isPending ? "Replaying…" : selectedAnalysis.artifactUrl ? `Replay world #${(riverSelection?.worldIds[0] ?? 0) + 1}` : "New run required"}</button><button type="button" onClick={() => void relabelAnalysis()} disabled={relabelPending || !selectedAnalysis.artifactUrl || analysisActive} title={agentAvailable ? "Regenerate branch labels with Pi" : agentStatusText}>{relabelPending ? "Relabeling…" : "Relabel"}</button></div></div>{replayError && <div className="error" role="alert">{replayError}</div>}{worldReplay && <WorldReplayCard value={worldReplay} />}{taskId && selectedAnalysis?.id && selectedAnalysis.artifactUrl && outcomeFacts.length > 0 && <RunPosteriorCard taskId={taskId} analysisId={selectedAnalysis.id} trials={selectedAnalysis.trials} outcomeCount={outcomeFacts.length} />}</div>}
+          {current && <section className="section"><div className="section-heading"><div className="eyebrow">Runs</div>{analyses.length > 0 && <span>{uniqueRuns(analyses).length}</span>}</div><div className="runs">{uniqueRuns(analyses).map((analysis) => <RunCard key={analysisKey(analysis)} analysis={analysis} currentRevision={current.revision} selected={Boolean(selectedAnalysis && analysisKey(analysis) === analysisKey(selectedAnalysis))} onClick={() => onSelectRun(analysisKey(analysis))} onDelete={() => void removeAnalysis(analysis)} />)}{!analyses.length && <div className="runs-empty"><span className="runs-empty-icon"><Icon name="runs" /></span><b>Your runs will appear here</b><span>Run a simulation to compare saved rivers of worlds.</span></div>}</div></section>}
+          <OutcomeFacts facts={outcomeFacts} busy={busy} onRemove={(factId) => void runCommand({ tag: "RemoveFact", factId })} />
+        </div>
+      </>}
     </main>
 
-    {mobilePane && <button className="mobile-scrim" onClick={() => setMobilePane(null)} aria-label="Close side panel" />}
+    {situationsOpen && <button className="mobile-scrim" onClick={() => setSituationsOpen(false)} aria-label="Close side panel" />}
 
     <div className="toast-region" aria-label="Notifications" aria-live="polite">{pendingDeletes.filter((item) => !item.committing).map((item) => <div className="undo-toast" role="status" key={item.id}><span>{item.kind === "task" ? `World “${item.task.title}” deleted` : `Run with ${item.analysis.trials} ${word(item.analysis.trials, "world", "worlds", "worlds")} deleted`}</span><button onClick={() => undoDelete(item.id)}>Undo</button></div>)}</div>
 
     <aside className={`agent-drawer ${agentPanel ? "open" : ""}`} aria-label="Pi assistant" aria-hidden={!agentPanel}>
-      <header><div><b>Assistant</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : "No model selected"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
-      {selectedAnalysis && <div className="river-scope"><div><small>River context</small><b>{riverSelection?.label ?? "Entire river"}</b><span>{riverSelection?.worldIds.length ?? selectedAnalysis.trials} {word(riverSelection?.worldIds.length ?? selectedAnalysis.trials, "world", "worlds", "worlds")}</span></div><button type="button" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending || !selectedAnalysis.artifactUrl}>{replayMutation.isPending ? "Replaying…" : selectedAnalysis.artifactUrl ? `Replay world #${(riverSelection?.worldIds[0] ?? 0) + 1}` : "New run required"}</button>{replayError && <div className="error" role="alert">{replayError}</div>}</div>}
-      {worldReplay && <WorldReplayCard value={worldReplay} />}
-      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message, index) => <div className={`chat-entry ${message.role}`} key={index}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>What should we explore?</span><p>Pi can see the situation, selected run, and active river branch.</p><div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void sendChatMessage(suggestion)} disabled={chatMutation.isPending || !selectedAgent}>{suggestion}</button>)}</div></div>}{(chatMutation.isPending || agentMutation.isPending) && <div className="chat-entry agent pending"><RiverActivity compact label="Studying the context" detail="Comparing assumptions and possible worlds" /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
-      <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void sendChatMessage(suggestion)} disabled={chatMutation.isPending}>{suggestion}</button>)}</div>}{current?.model && <button className="chat-revise" type="submit" data-action="revise" disabled={chatMutation.isPending || agentMutation.isPending || analysisActive}>Propose model change</button>}<div className="chat-input-shell"><textarea name="chat" aria-label="Message the assistant" placeholder="Ask about the situation or selected branch…" rows={3} disabled={chatMutation.isPending || agentMutation.isPending} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><span className="chat-enter-hint">Shift + Enter — new line</span><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || agentMutation.isPending || !selectedAgent}><Icon name="send" /></button></div></form>
+      <header><div><b>{assistantTitle}</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : agentAvailable ? "No model selected" : "Not configured"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
+      {!agentAvailable && <div className="agent-drawer-banner" role="status">Agent not configured — <button className="link-button" onClick={openSettings}>open Settings</button> to add an API key.</div>}
+      {current && assistantMode !== "river" && <section className="agent-phase" aria-label="Assistant context">
+        {assistantHint && <p>{assistantHint}</p>}
+        {current.openQuestions[0] && <div className="agent-next-question"><small>Useful next question</small><b>{current.openQuestions[0].prompt}</b></div>}
+      </section>}
+      {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.display || pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.observation.winner ? `winner: ${String(pendingOutcome.observation.winner)}` : ""}{pendingOutcome.observation.cooperation !== undefined ? ` · coop ${(Number(pendingOutcome.observation.cooperation)*100).toFixed(0)}%` : ""}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
+      <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty"><span>{assistantTitle}</span>{assistantHint && <p>{assistantHint}</p>}{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>)}</div>}</div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Updating the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : "Checking what this adds and what is still missing"} /></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
+      <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending}>{suggestion}</button>)}</div>}<div className="chat-input-shell"><textarea name="chat" aria-label="Message the assistant" placeholder={agentAvailable ? assistantMode === "river" ? "Ask about the river or report an outcome…" : "Add context or ask what is missing…" : "Configure agent first…"} rows={3} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><span className="chat-enter-hint">Shift + Enter — new line</span><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}><Icon name="send" /></button></div></form>
     </aside>
 
     <dialog ref={promptDialog} onClose={() => setPrompt(undefined)}>
       <form className="dialog-form" onSubmit={(event) => void submitPrompt(event)}>
         <h2>{promptTitle}</h2>
-        {prompt?.mode === "proposal" && prompt.proposal ? <ProposalEditor proposal={prompt.proposal} answers={answers} setAnswers={setAnswers} /> : <div><p>{promptHint}</p><textarea name="message" aria-label="Situation description" value={draftText} onChange={(event) => setDraftText(event.target.value)} autoFocus />{debouncedDraft && scenarioHints.isFetching && <RiverActivity compact label="Finding gaps" detail="Pi is checking what the model still needs" />}{researchingHints.length > 0 && debouncedDraft !== draftText.trim() && <RiverActivity compact label="Checking facts" detail={`Research tasks remaining: ${researchingHints.length}`} />}{debouncedDraft === draftText.trim() && scenarioHints.data?.hints.length ? <div className="prompt-hints"><span>Worth clarifying</span><ul>{scenarioHints.data.hints.map((hint) => { const researching = researchingHints.includes(hint); return <li key={hint}><span>{hint}</span><button className="hint-research quiet" type="button" disabled={busy || researching} onClick={() => void researchHint(hint)} aria-label={`Research: ${hint}`}><Icon name="search" />{researching ? "Researching…" : "Research"}</button></li>; })}</ul></div> : null}</div>}
+        <div><p>{promptHint}</p><textarea name="message" aria-label="Situation description" value={draftText} onChange={(event) => setDraftText(event.target.value)} autoFocus /></div>
         {busy && <RiverActivity compact label={workingLabel} detail={`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")} · you can leave this window open`} />}
         {promptError && <div className="error" role="alert">{promptError}</div>}
-        <div className="dialog-actions"><button type="button" onClick={() => setPrompt(undefined)} disabled={promptBusy}>Cancel</button><button className="primary" disabled={promptBusy}>{busy ? "Working…" : prompt?.mode === "proposal" ? "Looks right" : prompt?.mode === "create" ? "Continue" : prompt?.mode === "edit-brief" || prompt?.mode === "edit-context" ? "Save" : "Send to agent"}</button></div>
+        <div className="dialog-actions"><button type="button" onClick={() => setPrompt(undefined)} disabled={promptBusy}>Cancel</button><button className="primary" disabled={promptBusy}>{busy ? "Working…" : "Continue"}</button></div>
       </form>
     </dialog>
 
     <dialog className="model-dialog" ref={modelDialog}>
-      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><div className="advanced-field"><span>Pi for AI labeling</span><AgentPicker providers={agent.data?.providers ?? []} models={models} value={runAgentKey} onChange={setRunAgentKey} prefix="Labeling" /><small>The simulation remains deterministic; the selected Pi labels the resulting worlds.</small></div><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label><details className="developer-settings"><summary>Manual world model</summary><div className="eyebrow model-label">Model JSON</div><textarea className="code" value={modelText} onChange={(event) => setModelText(event.target.value)} spellCheck={false} aria-label="World model JSON" /></details>{modelError && <div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending || !parseSelection(runAgentKey, models)}>Save</button></div></form>
+      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><div className="advanced-field"><span>Pi for AI labeling</span><AgentPicker providers={agent.data?.providers ?? []} models={models} value={runAgentKey} onChange={setRunAgentKey} prefix="Labeling" /><small>Optional. The simulation remains deterministic; Pi only labels the resulting worlds.</small></div><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label>{modelError &&<div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending}>Save</button></div></form>
     </dialog>
 
     <dialog className="settings-dialog" ref={settingsDialog}>
       <form className="dialog-form" onSubmit={saveSettings}><header className="settings-header"><h2>Model and access</h2></header><div className="settings-content"><section className="settings-section"><div className="settings-section-title"><b>Default model</b></div><AgentPicker providers={agent.data?.providers ?? []} models={models} value={settingsAgentKey} onChange={setSettingsAgentKey} prefix="Default" />{!models.length && <div className="settings-hint">Add an API key to see available models.</div>}</section><section className="settings-section"><div className="settings-section-title"><b>API keys</b></div><div className="key-entry"><label><span>Provider</span><select aria-label="API key provider" value={keyProvider} onChange={(event) => setKeyProvider(event.target.value)}>{authProviders.map((provider) => <option value={provider.id} key={provider.id}>{provider.id === "openai" ? "OpenAI / ChatGPT API" : provider.name}</option>)}</select></label><label><span>API key</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void configureKey(); } }} placeholder={authProviders.find((provider) => provider.id === keyProvider)?.label ?? "API key"} aria-label="API key" autoComplete="off" spellCheck={false} /></label><button type="button" onClick={() => void configureKey()} disabled={!keyProvider || !apiKey.trim() || keyMutation.isPending}>Add</button></div>{keyError && <div className="error" role="alert">{keyError}</div>}<div className="key-list">{authProviders.filter((provider) => provider.configured).map((provider) => <div className="key-chip" key={provider.id}><i className="dot on" /><span>{provider.name}</span><small>{provider.source === "environment" ? "from environment" : "configured"}</small>{provider.source !== "environment" && <button type="button" className="icon quiet" onClick={() => void deleteKey(provider.id)} aria-label={`Delete ${provider.name} key`}><Icon name="close" /></button>}</div>)}</div></section></div><div className="dialog-actions"><button type="button" onClick={() => settingsDialog.current?.close()}>Cancel</button><button className="primary" disabled={!parseSelection(settingsAgentKey, models)}>Save</button></div></form>
     </dialog>
   </div>;
+}
+
+/** How the run reads once the outcome facts are applied. The facts themselves live in the facts list. */
+function RunPosteriorCard({ taskId, analysisId, trials, outcomeCount }: { taskId: string; analysisId: string; trials: number; outcomeCount: number }) {
+  const posterior = useQuery({ queryKey: ["posterior", taskId, analysisId, outcomeCount], queryFn: () => getPosterior(taskId, analysisId) });
+  const base = posterior.data?.baseline, post = posterior.data?.posterior, usesTeams = posterior.data?.usesTeams;
+  const baseWin = base && (usesTeams ? base.winPctTeam : base.winPct);
+  const postWin = post && (usesTeams ? post.winPctTeam : post.winPct);
+  if (!base || !post || !baseWin || !postWin) return null;
+  return <section className="observed" aria-label="The run given what happened">
+    <div className="observed-head"><div><small>Given what already happened</small><b>{outcomeCount} {word(outcomeCount, "fact", "facts", "facts")} applied to this run</b></div></div>
+    <div className="observed-result">
+      <div className="observed-stats"><div><small>Worlds that match</small><b>{Math.round(post.effectiveSampleSize)} / {trials}</b></div><div><small>Cooperation</small><b>{Math.round(base.cooperation.mean * 100)}% → {Math.round(post.cooperation.mean * 100)}%</b></div></div>
+      {post.fit < 0.05 && <div className="observed-note">Unlikely under the current model ({Math.round(post.fit * 100)}% fit) — the assumptions in the Model tab may be worth revisiting.</div>}
+      <div className="observed-bars">{Object.keys(postWin).sort((a, b) => (postWin[b] ?? 0) - (postWin[a] ?? 0)).map((name) => <div className="observed-row" key={name}><span className="observed-name">{name}</span><span className="observed-bar"><i style={{ width: `${postWin[name] ?? 0}%` }} /></span><span className="observed-num">{Math.round(baseWin[name] ?? 0)}→{Math.round(postWin[name] ?? 0)}%</span></div>)}</div>
+    </div>
+  </section>;
 }
 
 function WorldReplayCard({ value }: { value: WorldReplay }) {
@@ -792,6 +850,17 @@ function WorldReplayCard({ value }: { value: WorldReplay }) {
   </section>;
 }
 
+function BuildActivity({ items, active }: { items: BuildActivityItem[]; active: boolean }) {
+  const failed = items.some((item) => item.status === "failed");
+  return <section className="model-build-report" aria-label="Live model build" aria-live="polite">
+    <div className="model-build-report-head"><span>{failed ? "Model build stopped" : active ? "Working on the model" : "Model build complete"}</span></div>
+    <ol>
+      {items.map((item) => <li className={item.status} key={item.id}><i aria-hidden>{item.status === "done" ? "✓" : item.status === "failed" ? "!" : ""}</i><span>{item.message}</span></li>)}
+    </ol>
+  </section>;
+}
+
+
 function AgentPicker({ providers, models, value, onChange, prefix }: { providers: Array<{ id: string; name: string }>; models: ModelOption[]; value: string; onChange: (value: string) => void; prefix: string }) {
   const selection = parseSelection(value, models) ?? (models[0] ? parseSelection(selectionValue({ provider: models[0].provider, model: models[0].model, thinkingLevel: "medium" }), models) : undefined);
   const providerModels = selection ? models.filter((model) => model.provider === selection.provider) : [];
@@ -810,28 +879,11 @@ function AgentPicker({ providers, models, value, onChange, prefix }: { providers
 }
 
 function WorldRow({ item, now, onOpen, onDelete }: { item: TaskSummary; now: number; onOpen: () => void; onDelete: () => void }) {
-  return <div className="task-row"><Link to="/tasks/$taskId" params={{ taskId: item.id }} search={{}} className="task" activeProps={{ "aria-current": "page" }} onClick={onOpen}><b className="task-title">{item.title}</b><div className="task-meta"><span><i className={`status-dot ${item.status}`} />{statusName[item.status]}</span><time dateTime={item.updatedAt} title={compactDate(item.updatedAt)}>{relativeTime(item.updatedAt, now)}</time></div></Link><button className="icon quiet row-delete" onClick={onDelete} aria-label={`Delete world “${item.title}”`} disabled={item.status === "running" || item.status === "labeling"}><Icon name="trash" /></button></div>;
+  return <div className="task-row"><Link to="/tasks/$taskId" params={{ taskId: item.id }} search={{}} className="task" activeProps={{ "aria-current": "page" }} onClick={onOpen}><b className="task-title">{item.title}</b><div className="task-meta"><span><i className={`status-dot ${item.status}`} />{statusName[item.status]}</span><time dateTime={item.updatedAt} title={compactDate(item.updatedAt)}>{relativeTime(item.updatedAt, now)}</time></div></Link><button className="icon quiet row-delete" onClick={onDelete} aria-label={`Delete world “${item.title}”`} disabled={item.status === "building" || item.status === "running" || item.status === "labeling"}><Icon name="trash" /></button></div>;
 }
 
 function ErrorState({ error, retry }: { error: Error; retry: () => void }) {
   return <div className="load-error" role="alert"><span>{error.message}</span><button onClick={retry}>Retry</button></div>;
-}
-
-function Clarifications({ current, onEdit, onRefresh }: { current: TaskState; onEdit: (index: number) => void; onRefresh: (focus?: TaskDecision) => void }) {
-  const notes = current.context.map((text, index) => ({ text, index })).filter((item) => !item.text.startsWith("The user confirmed the following assumptions.") && !item.text.startsWith("Пользователь утвердил следующие допущения."));
-  const legacy = current.context.length - notes.length, assumptions = current.assumptions ?? [];
-  if (!notes.length && !assumptions.length && !legacy) return null;
-  return <details className="clarifications"><summary><span className="eyebrow">Context</span></summary><div className="clarification-list">{assumptions.map((item) => <div className="clarification" key={item.id}><div><small>{item.prompt}</small><span>{item.answer}</span></div><button className="inline-edit" onClick={() => onRefresh(item)} aria-label="Edit assumption"><Icon name="edit" /></button></div>)}{notes.map((item) => <div className="clarification" key={item.index}><span>{item.text}</span><button className="inline-edit" onClick={() => onEdit(item.index)} aria-label="Edit context"><Icon name="edit" /></button></div>)}{legacy > 0 && <div className="clarification legacy-note"><span>{legacy} legacy {word(legacy, "item", "items", "items")} need to be updated.</span><button className="inline-refresh" onClick={() => onRefresh()} aria-label="Update legacy context"><Icon name="refresh" /></button></div>}</div></details>;
-}
-
-function ProposalCard({ proposal, onOpen, onRefresh, onReject }: { proposal: Proposal; onOpen: () => void; onRefresh: () => void; onReject: () => void }) {
-  const legacy = proposal.sources === undefined, count = proposal.decisions?.length ?? proposal.questions?.length ?? 0, sources = proposal.sources?.length ?? 0;
-  return <div className="proposal"><div className="eyebrow">{legacy ? "Update required" : "The agent's understanding"}</div><p>{legacy ? "This understanding uses an older technical format. Pi can rewrite it in plain English and verify the facts." : proposal.explanation}</p>{!legacy && <div className="proposal-count">{count ? `${count} ${word(count, "item", "items", "items")} to review` : "Ready to continue"}{sources ? ` · ${sources} ${word(sources, "source", "sources", "sources")}` : ""}</div>}<div className="actions"><button className="primary" onClick={legacy ? onRefresh : onOpen}>{legacy ? "Update with research" : "Review"}</button><button className="danger" onClick={onReject}>Reject</button></div></div>;
-}
-
-function ProposalEditor({ proposal, answers, setAnswers }: { proposal: Proposal; answers: Record<string, string>; setAnswers: (value: Record<string, string>) => void }) {
-  const decisions = proposal.decisions ?? [];
-  return <><p className="proposal-copy">{proposal.explanation}</p>{proposal.sources?.length ? <div className="sources">{proposal.sources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a>)}</div> : null}<div className="decision-grid">{decisions.length ? decisions.map((decision) => <label className="decision" key={decision.id}><small>{decision.prompt}</small><input list={`options-${decision.id}`} value={answers[decision.id] ?? ""} onChange={(event) => setAnswers({ ...answers, [decision.id]: event.target.value })} /><datalist id={`options-${decision.id}`}>{[decision.answer, ...decision.alternatives].filter(Boolean).map((option) => <option value={option} key={option} />)}</datalist></label>) : <div className="empty-runs">Everything needed is already clear.</div>}</div></>;
 }
 
 function RunCard({ analysis, currentRevision, selected, onClick, onDelete }: { analysis: TaskState["analyses"][number]; currentRevision: number; selected: boolean; onClick: () => void; onDelete: () => void }) {

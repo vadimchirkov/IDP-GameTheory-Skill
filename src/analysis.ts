@@ -49,6 +49,8 @@ export interface Trial {
   teamScores: Record<string, number>;
   /** Per-player normalised scores; useful for plotting winner margin without payoff-scale bias. */
   scores: Record<string, number>;
+  /** Fraction of rounds each player cooperated, averaged over its matches — the behavioural fingerprint that identifies a player's disposition. Absent for a player whose every pairing opted out. */
+  playerCoop: Record<string, number>;
   rounds: number;
   digest: WorldDigest;
   trace?: TrialTrace;
@@ -200,6 +202,8 @@ export function oneTrial(
   const sanctions = (obs: string, tgt: string): boolean =>
     rep!.quantitative ? (ledger[tgt] ?? 0) < rep!.theta : viewOf(obs, tgt) === "B";
   const scores = new Map(model.players.map((player) => [player.name, 0]));
+  const coopSum = new Map(model.players.map((player) => [player.name, 0]));
+  const coopN = new Map(model.players.map((player) => [player.name, 0]));
   let cooperation = 0;
   let coopMatches = 0;
   let envSum = 0;
@@ -242,6 +246,8 @@ export function oneTrial(
       scores.set(a.name, (scores.get(a.name) ?? 0) + match.scoreA);
       scores.set(b.name, (scores.get(b.name) ?? 0) + match.scoreB);
       if (rep) updateStanding(rep, image, ledger, names, a.name, b.name, match.coopA >= 0.5 ? "C" : "D", match.coopB >= 0.5 ? "C" : "D", rng);
+      coopSum.set(a.name, (coopSum.get(a.name) ?? 0) + match.coopA); coopN.set(a.name, (coopN.get(a.name) ?? 0) + 1);
+      coopSum.set(b.name, (coopSum.get(b.name) ?? 0) + match.coopB); coopN.set(b.name, (coopN.get(b.name) ?? 0) + 1);
       cooperation += match.cooperation;
       if (match.envFinal !== undefined) { envSum += match.envFinal; ecoMatches += 1; }
       if (match.stateOccupancy) for (const [s, f] of Object.entries(match.stateOccupancy)) occSum[s] = (occSum[s] ?? 0) + f;
@@ -278,8 +284,10 @@ export function oneTrial(
   const finalCooperation = pivotal?.digest.finalCooperation ?? 0;
   const switchRate = pivotal?.digest.switchRate ?? 0;
   const regime: WorldDigest["regime"] = !pivotal ? "exit" : cooperation / Math.max(1, coopMatches) >= 0.78 && finalCooperation >= 0.75 ? "cooperation" : switchRate >= 0.25 ? "oscillation" : finalCooperation <= 0.25 ? "conflict" : "fragile";
+  const playerCoop: Record<string, number> = {};
+  for (const p of model.players) { const n = coopN.get(p.name) ?? 0; if (n > 0) playerCoop[p.name] = (coopSum.get(p.name) ?? 0) / n; }
   return {
-    winners, teamWinners, perCapitaWinners, teamScores, scores: Object.fromEntries(scores), rounds,
+    winners, teamWinners, perCapitaWinners, teamScores, scores: Object.fromEntries(scores), playerCoop, rounds,
     cooperation: cooperation / Math.max(1, coopMatches),
     inputs,
     digest: {
