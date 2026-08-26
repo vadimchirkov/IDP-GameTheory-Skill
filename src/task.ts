@@ -41,6 +41,17 @@ export interface OpenQuestion {
   field?: string;
 }
 
+export type AgentMode = "context" | "model" | "river";
+
+/** Persisted conversation memory. The mode records which job the agent was doing for this turn. */
+export interface TaskMessage {
+  id: string;
+  role: "user" | "agent";
+  mode: AgentMode;
+  text: string;
+  createdAt: string;
+}
+
 export type TaskStatus = "new" | "ready" | "running" | "labeling" | "completed" | "failed";
 
 export interface TaskAnalysis {
@@ -75,6 +86,7 @@ export interface TaskState {
   situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
+  messages: readonly TaskMessage[];
   /** Bumped when the model or situation prose changes — the fingerprint a run is measured against. */
   revision: number;
   status: TaskStatus;
@@ -95,6 +107,7 @@ export type TaskCommand =
   | { tag: "RemoveFact"; factId: string; now: string }
   | { tag: "SuggestQuestions"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "DismissQuestion"; questionId: string; now: string }
+  | { tag: "AddMessage"; message: TaskMessage }
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
   | { tag: "SetModel"; model: ScenarioModel; agent?: AgentSelection; now: string }
@@ -103,6 +116,7 @@ export type TaskCommand =
   | { tag: "RequestAnalysis"; trials: number; seed: number; agent?: AgentSelection; now: string }
   | { tag: "RecordAnalysis"; analysis: TaskAnalysis }
   | { tag: "CompleteAnalysisLabels"; analysisId: string; worldLabels: NonNullable<TaskAnalysis["worldLabels"]>; agentMeta?: AgentRunMeta; now: string }
+  | { tag: "RelabelAnalysis"; analysisId: string; agent?: AgentSelection; now: string }
   | { tag: "CancelAnalysis"; now: string }
   | { tag: "FailAnalysis"; revision: number; reason: string; now: string }
   | { tag: "GetTask" };
@@ -118,6 +132,7 @@ export type TaskEvent =
   | { tag: "FactRemoved"; factId: string; revision: number; now: string }
   | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
   | { tag: "QuestionDismissed"; questionId: string; now: string }
+  | { tag: "MessageAdded"; message: TaskMessage }
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
   | { tag: "ModelBuilt"; model: ScenarioModel; revision: number; agent?: AgentSelection; now: string }
@@ -126,6 +141,7 @@ export type TaskEvent =
   | { tag: "AnalysisRequested"; revision: number; trials: number; seed: number; agent?: AgentSelection; now: string }
   | { tag: "AnalysisCalculated"; analysis: TaskAnalysis }
   | { tag: "AnalysisLabelsCompleted"; analysisId: string; worldLabels: NonNullable<TaskAnalysis["worldLabels"]>; agentMeta?: AgentRunMeta; now: string }
+  | { tag: "RelabelRequested"; analysisId: string; agent?: AgentSelection; now: string }
   | { tag: "AnalysisCancelled"; revision: number; hasResult: boolean; now: string }
   | { tag: "AnalysisCompleted"; analysis: TaskAnalysis }
   | { tag: "AnalysisFailed"; revision: number; reason: string; now: string }
@@ -148,7 +164,7 @@ export type TaskReply =
 
 export const taskCategory = categoryTypes<TaskCommand, TaskReply>(CategoryId("scenario-task"));
 
-const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], revision: 0, analyses: [] });
+const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], messages: [], revision: 0, analyses: [] });
 const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
 const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
 
@@ -187,6 +203,8 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
     case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
+    // ponytail: keep a bounded journal until long conversations justify summarization.
+    case "MessageAdded": return { ...state, messages: [...(state.messages ?? []), event.message].slice(-200), updatedAt: event.message.createdAt };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
@@ -198,6 +216,11 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "TaskDeleted": return { ...state, deleted: true, updatedAt: event.now };
     case "AnalysisRequested": return { ...omit(state, "lastError"), status: "running", activeAnalysis: { revision: event.revision, trials: event.trials, seed: event.seed, ...(event.agent ? { agent: event.agent } : {}) }, updatedAt: event.now };
     case "AnalysisCalculated": return { ...state, analyses: [...state.analyses, event.analysis], status: "labeling", activeAnalysis: { ...state.activeAnalysis!, analysisId: event.analysis.id! }, updatedAt: event.analysis.completedAt };
+    case "RelabelRequested": {
+      const target = state.analyses.find((a) => a.id === event.analysisId);
+      if (!target) return state;
+      return { ...omit(state, "lastError"), status: "labeling", activeAnalysis: { revision: state.revision, trials: target.trials, seed: target.seed, ...(event.agent ? { agent: event.agent } : state.agent ? { agent: state.agent } : {}), analysisId: event.analysisId }, updatedAt: event.now };
+    }
     case "AnalysisLabelsCompleted": return { ...omit(state, "activeAnalysis"), analyses: state.analyses.map((analysis) => analysis.id === event.analysisId ? { ...analysis, worldLabels: event.worldLabels, ...(event.agentMeta ? { agentMeta: event.agentMeta } : {}) } : analysis), status: "completed", updatedAt: event.now };
     case "AnalysisCancelled": return { ...omit(state, "activeAnalysis", "lastError"), status: event.hasResult || state.analyses.length ? "completed" : "ready", updatedAt: event.now };
     case "AnalysisCompleted": return { ...omit(state, "activeAnalysis"), analyses: [...state.analyses, event.analysis], status: "completed", updatedAt: event.analysis.completedAt };
@@ -282,6 +305,12 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "DismissQuestion":
         if (!state.openQuestions.some((question) => question.id === command.questionId)) return rejected(state, "That question is already gone");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionDismissed", questionId: command.questionId, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "AddMessage": {
+        const text = command.message.text.trim();
+        if (!text) return rejected(state, "The message is empty");
+        if (state.messages?.some((message) => message.id === command.message.id)) return rejected(state, "That message already exists");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "MessageAdded", message: { ...command.message, text: text.slice(0, 4000) } }), { tag: "Accepted", revision: state.revision });
+      }
       case "SetTitle": {
         const title = command.title.trim().slice(0, 72);
         if (!title) return rejected(state, "The title is empty");
@@ -316,6 +345,11 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "CompleteAnalysisLabels":
         if (!state.activeAnalysis?.analysisId || state.activeAnalysis.analysisId !== command.analysisId || !state.analyses.some((analysis) => analysis.id === command.analysisId)) return rejected(state, "Those labels belong to an older run");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisLabelsCompleted", analysisId: command.analysisId, worldLabels: command.worldLabels, ...(command.agentMeta ? { agentMeta: command.agentMeta } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "RelabelAnalysis": {
+        if (state.status === "running" || state.status === "labeling") return rejected(state, "Wait for the current run to finish");
+        if (!state.analyses.some((analysis) => analysis.id === command.analysisId)) return rejected(state, "That run no longer exists");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "RelabelRequested", analysisId: command.analysisId, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
+      }
       case "CancelAnalysis":
         if (!state.activeAnalysis) return rejected(state, "Nothing is running");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "AnalysisCancelled", revision: state.activeAnalysis.revision, hasResult: !!state.activeAnalysis.analysisId, now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -330,9 +364,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
 export const taskEventCodec = tagCodec<TaskEvent>(
   "TaskCreated", "FactAdded", "FactEdited", "FactRemoved",
-  "QuestionsSuggested", "QuestionDismissed", "TitleSet", "SituationSet", "ModelBuilt",
+  "QuestionsSuggested", "QuestionDismissed", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
-  "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
+  "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay
   "BriefEdited", "ContextAdded", "ContextEdited", "ContextRemoved", "ModelReplaced",
   "AgentProposalRecorded", "AgentProposalAccepted", "AgentProposalRejected",

@@ -32,6 +32,19 @@ export const understandingOutputSchema = Type.Object({
 }, closed);
 export type UnderstandingOutput = Static<typeof understandingOutputSchema>;
 
+/** One context-building turn before the deterministic model is (re)built. */
+export const contextReplyOutputSchema = Type.Object({
+  kind: stringEnum(["answer", "context"] as const),
+  message: Type.String({ minLength: 1, maxLength: 2000 }),
+  contextNote: nullable(Type.String({ minLength: 1, maxLength: 800 })),
+  title: Type.String({ minLength: 1, maxLength: 72 }),
+  questions: Type.Array(Type.Object({
+    prompt: Type.String({ minLength: 1, maxLength: 200 }),
+    field: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+  }, closed)),
+}, closed);
+export type ContextReplyOutput = Static<typeof contextReplyOutputSchema>;
+
 /**
  * Router output for a chat turn. The agent decides whether the message is a plain question or a
  * statement about what the situation is (`answer`, replied to and left for the user to edit the model),
@@ -223,11 +236,12 @@ export interface AgentUsage {
 
 export interface AgentRunMeta {
   runId: string;
-  operation: "understand" | "build-model" | "labels" | "route-fact";
+  operation: "understand" | "context" | "build-model" | "labels" | "route-fact";
   provider: string;
   model: string;
   thinkingLevel: AgentSelection["thinkingLevel"];
   promptVersion: string;
+  structuredOutput?: "tool" | "json-fallback";
   attempts: number;
   durationMs: number;
   usage: AgentUsage;

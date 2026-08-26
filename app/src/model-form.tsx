@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type InputHTMLAttributes } from "react";
 import { assertScenario, isValidPayoff, strategyIds } from "../../src/domain";
 import type { GameType, PayoffRanges, Range, ReputationNorm, ScenarioPlayer, StrategyId } from "../../src/domain";
 import type { ScenarioModel } from "./api";
@@ -77,16 +77,28 @@ function useDraft(value: string, commit: (next: string) => void) {
   return { draft, setDraft, blur: () => { if (draft !== value) commit(draft); } };
 }
 
+function NumberDraft({ value, onChange, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & { value: number; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  const commit = () => {
+    const next = Number(draft);
+    if (!draft.trim() || !Number.isFinite(next)) { setDraft(String(value)); return; }
+    if (next !== value) onChange(next);
+  };
+  return <input {...props} type="number" value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit}
+    onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} />;
+}
+
 function RangeField({ label, value, onChange, min, max, step = 0.1 }: {
   label: string; value: Range; onChange: (next: Range) => void; min?: number; max?: number; step?: number;
 }) {
   return <div className="range-field">
     <span>{label}</span>
     <div className="range-pair">
-      <input type="number" value={value[0]} min={min} max={max} step={step} aria-label={`${label}, low`}
-        onChange={(event) => onChange([num(event.target.value), value[1]])} />
-      <input type="number" value={value[1]} min={min} max={max} step={step} aria-label={`${label}, high`}
-        onChange={(event) => onChange([value[0], num(event.target.value)])} />
+      <NumberDraft value={value[0]} min={min} max={max} step={step} aria-label={`${label}, low`}
+        onChange={(next) => onChange([next, value[1]])} />
+      <NumberDraft value={value[1]} min={min} max={max} step={step} aria-label={`${label}, high`}
+        onChange={(next) => onChange([value[0], next])} />
     </div>
   </div>;
 }
@@ -170,6 +182,13 @@ export interface ModelFormProps {
   model?: ScenarioModel;
   questions: readonly { id: string; prompt: string; field?: string }[];
   busy: boolean;
+  error?: string;
+  justRebuilt?: boolean;
+  streaming?: boolean;
+  buildStage?: number;
+  buildElapsed?: number;
+  agentAvailable?: boolean;
+  agentStatusText?: string;
   onSituation: (text: string) => void;
   onModel: (model: ScenarioModel) => void;
   onUnderstand: () => void;
@@ -267,12 +286,28 @@ export function ModelForm(props: ModelFormProps) {
   const notes = model.rationale ?? {};
   const setNotes = (next: Record<string, string>) => patch({ rationale: Object.keys(next).length ? next : undefined });
 
+  const situationStale = Boolean(model.situation && props.situation.trim() && model.situation.trim() !== props.situation.trim());
+
   return <section className="section model-form">
     <div className="section-heading">
       <div className="eyebrow">Model</div>
-      <button type="button" className="link-button" disabled={props.busy} onClick={props.onUnderstand}
-        title="Let the agent fill in what it can infer and ask what it cannot">Review with agent</button>
+      <button type="button" className="link-button rebuild-button" disabled={props.busy || props.agentAvailable === false} onClick={props.onUnderstand}
+        title={props.agentAvailable === false ? props.agentStatusText ?? "Agent not configured" : `${props.model ? "Rebuild" : "Build"} the model from the collected context`}>{props.busy ? "Building…" : props.model ? "Rebuild model" : "Build model"}</button>
     </div>
+    {props.agentAvailable === false && <div className="model-warning" role="status">Agent not configured — add an API key in Settings to rebuild the model. You can still edit the model by hand.</div>}
+    {situationStale && !props.busy && <div className="model-stale-banner" role="status">
+      <span>The situation text changed — rebuild to apply it to the model.</span>
+      <button type="button" className="primary" onClick={props.onUnderstand}>Rebuild now</button>
+    </div>}
+    {props.busy && <div className="agent-stream" role="status" aria-live="polite">
+      <div className="model-busy"><span className="model-busy-dot" aria-hidden /> Creating your model</div>
+      <ol className="model-progress">
+        {["Context captured", "Shaping the model", "Checking assumptions", "Saving the model"].map((label, index) => <li key={label} className={index < (props.buildStage ?? 0) ? "done" : index === (props.buildStage ?? 0) ? "active" : ""}><i aria-hidden>{index < (props.buildStage ?? 0) ? "✓" : ""}</i>{label}</li>)}
+      </ol>
+      {props.streaming && (props.buildElapsed ?? 0) >= 15 && <div className="agent-log-line muted">Still working — your context is saved.</div>}
+    </div>}
+    {props.justRebuilt && !props.busy && !props.error && <div className="model-success" role="status">Model ready ✓ — review the assumptions, then run it.</div>}
+    {props.error && !props.busy && <div className="model-error error" role="alert">{props.error}</div>}
 
     {props.questions.length > 0 && <div className="questions">
       <div className="fact-group-label">Worth clarifying <span>optional — ignoring these keeps the agent's assumption</span></div>
@@ -442,8 +477,10 @@ export function ModelForm(props: ModelFormProps) {
         </div>}
       </div>
 
-      <details className="clarifications model-advanced">
+      </fieldset>
+      <details className="clarifications model-advanced" open={undefined}>
         <summary><span className="eyebrow">Advanced</span></summary>
+        <fieldset className="model-fields" disabled={props.busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <label className="check">
           <input type="checkbox" checked={asymmetric !== undefined} onChange={(event) => setAsymmetric(event.target.checked)} />
           <span>Each side has its own payoffs</span></label>
@@ -466,7 +503,7 @@ export function ModelForm(props: ModelFormProps) {
           </div>
         </div>
         <RawJson model={model} onModel={props.onModel} />
+        </fieldset>
       </details>
-    </fieldset>
   </section>;
 }
