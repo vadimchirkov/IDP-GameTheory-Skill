@@ -361,16 +361,6 @@ label:has(> select:disabled)::after { opacity: .4 }
 .chat-scope small, .chat-scope b { display: block }
 .chat-scope small { color: var(--muted); font-size: 8px; letter-spacing: .07em }
 .chat-scope b { margin-top: 3px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap }
-.river-scope { margin: 2px 14px 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0 10px }
-.river-detail .river-scope { margin: 0; padding: 10px 12px 8px }
-.river-scope > div:first-child { min-width: 0 }
-.river-scope small, .river-scope b, .river-scope span { display: block }
-.river-scope small { margin-bottom: 2px; color: var(--muted); font-size: 8px; letter-spacing: .04em; text-transform: uppercase }
-.river-scope b { max-width: 210px; overflow: hidden; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap }
-.river-scope span { color: var(--muted); font-size: 9px }
-.river-scope > button { min-height: 32px; border-radius: 8px; background: transparent; color: var(--muted-strong); padding: 0 4px; font-size: 9px }
-.river-scope > button:hover { background: transparent; color: var(--ink) }
-.river-scope > .error { flex-basis: 100%; margin: 0 }
 .river-detail { border-top: 1px solid var(--line); background: #151515; padding-bottom: 4px }
 .river-detail .world-replay { margin: 0 12px 10px }
 .world-replay { margin: 0 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: #191919; padding: 10px }
@@ -601,7 +591,9 @@ fieldset.model-fields { min-inline-size: 0 }
 .pending-outcome span { color: var(--muted-strong); font-size: 10px; display: block; margin-top: 2px; overflow-wrap: anywhere }
 .pending-outcome small { color: var(--muted); font-size: 9px; display: block; margin-top: 4px }
 .pending-actions { display: flex; gap: 6px; justify-content: flex-end }
-.river-scope-actions { display: flex; gap: 6px; align-items: center }
+.river-tools { display: flex; justify-content: flex-end; gap: 6px; padding: 6px 12px }
+.river-tools button { min-height: 32px; border-radius: 8px; background: transparent; color: var(--muted-strong); padding: 0 4px; font-size: 9px }
+.river-tools button:hover { background: transparent; color: var(--ink) }
 .living-hint { font-size: 9px; color: var(--good); margin-top: 4px }
 .model-build-report { width: min(440px, 100%); flex: 0 0 auto; margin: 12px auto 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); text-align: left }
 .model-build-report-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 590 }
