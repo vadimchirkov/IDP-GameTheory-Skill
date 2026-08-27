@@ -105,6 +105,7 @@ export type FactCommand =
   | { tag: "DismissQuestion"; questionId: string }
   | { tag: "RemoveAnalysis"; analysisId: string }
   | { tag: "CancelAnalysis" }
+  | { tag: "CancelModelBuild"; buildId: string }
   | { tag: "DeleteTask" };
 
 const post = <T>(path: string, value: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(value) });
@@ -114,7 +115,7 @@ export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
 export const createTask = (text: string) => post<TaskState>("/api/tasks", { text });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
 export const understandTask = (id: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
-export const clarifyTask = (id: string, value: { message?: string; mode: "context" | "model"; agent?: AgentSelection }) => post<ChatResult & { task: TaskState }>(`/api/tasks/${id}/clarify`, value);
+export const clarifyTask = (id: string, value: { message?: string; mode: "context" | "model"; agent?: AgentSelection }, signal?: AbortSignal) => api<ChatResult & { task: TaskState }>(`/api/tasks/${id}/clarify`, { method: "POST", body: JSON.stringify(value), signal });
 export async function understandTaskStream(id: string, agent: AgentSelection | undefined, onEvent: (ev: Record<string, unknown>) => void): Promise<TaskState> {
   const response = await fetch(`/api/tasks/${id}/understand/stream`, {
     method: "POST",
@@ -164,7 +165,7 @@ export async function understandTaskStream(id: string, agent: AgentSelection | u
 }
 export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
 export const relabelTask = (id: string, analysisId: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/relabel`, { analysisId, agent });
-export const chatTask = (id: string, message: string, agent?: AgentSelection) => post<ChatResult & { pendingOutcome?: { observation: Record<string, unknown>; display: string } }>(`/api/tasks/${id}/chat`, { message, agent });
+export const chatTask = (id: string, message: string, agent?: AgentSelection, selection?: RiverSelection, analysisId?: string) => post<ChatResult & { pendingOutcome?: { observation: Record<string, unknown>; display: string } }>(`/api/tasks/${id}/chat`, { message, agent, selection, analysisId });
 export const confirmOutcome = (id: string, text: string, observation: Record<string, unknown>) => post<{ kind: string; message: string; task: TaskState }>(`/api/tasks/${id}/chat/confirm`, { text, observation });
 export const getWorldReplay = (taskId: string, analysisId: string, index: number) => api<WorldReplay>(`/api/tasks/${taskId}/analyses/${analysisId}/worlds/${index}/replay`);
 export const getPosterior = (taskId: string, analysisId: string) => api<RunPosterior>(`/api/tasks/${taskId}/analyses/${analysisId}/posterior`);

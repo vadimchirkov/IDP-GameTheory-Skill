@@ -191,6 +191,7 @@ const researchRevision = (await taskState()).revision;
 await task.runtime.ask(tid, { tag: "RecordResearch", sources: [{ id: "source-1", title: "Public report", url: "https://example.com/report", excerpt: "Published conditions", query: "public report", field: "payoffs", purpose: "Ground conditions", fetchedAt: "2026-01-01T00:00:00Z" }], now: "2026-01-01T00:00:00Z" }, taskCategory);
 const researched = await taskState();
 assert.equal(researched.researchSources?.[0]?.title, "Public report", "public research provenance is persisted with the task");
+assert.equal(researched.researchRevision, researchRevision, "public research is stamped with its context revision");
 assert.equal(researched.revision, researchRevision, "recording sources alone does not stale a simulation");
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
@@ -240,8 +241,12 @@ assert.ok(missing.ok && missing.value.reply?.tag === "Rejected", "editing a fact
 // Open questions never block: they can be answered as a fact, or dismissed outright.
 await task.runtime.ask(tid, { tag: "SuggestQuestions", questions: [{ id: "q-1", prompt: "How long do they expect this to last?" }, { id: "q-2", prompt: "Who moves first?" }], now: "2026-01-01T00:00:10Z" }, taskCategory);
 assert.equal((await taskState()).openQuestions.length, 2, "the agent can raise questions without answering them");
+assert.equal((await taskState()).questionsRevision, (await taskState()).revision, "questions are stamped with their context revision");
 await task.runtime.ask(tid, { tag: "DismissQuestion", questionId: "q-2", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).openQuestions.length, 1, "a question can be dismissed");
+await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, now: "2026-01-01T00:00:11Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "CancelModelBuild", buildId: "build-cancel", now: "2026-01-01T00:00:11Z" }, taskCategory);
+assert.equal((await taskState()).activeBuild, undefined, "a model build can be cancelled without leaving the task busy");
 
 const runAgent = { provider: "test", model: "labeler", thinkingLevel: "medium" } as const;
 const requestedRevision = (await taskState()).revision;

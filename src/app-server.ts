@@ -37,7 +37,7 @@ await runtime.start();
 const views = createInMemoryProjectionStore();
 const listeners = new Map<string, Set<ServerResponse>>();
 const analysisJobs = new Map<string, AbortController>();
-const modelBuildJobs = new Map<string, Promise<void>>();
+const modelBuildJobs = new Map<string, { promise: Promise<void>; controller: AbortController }>();
 
 function refresh(): void {
   runProjection(taskDetailProjection, journal, views, { eventCodec: taskEventCodec });
@@ -193,6 +193,7 @@ function commandFrom(input: Record<string, unknown>): TaskCommand {
     case "RemoveAnalysis": return { tag: "RemoveAnalysis", analysisId: String(input.analysisId ?? ""), now };
     case "DeleteTask": return { tag: "DeleteTask", now };
     case "CancelAnalysis": return { tag: "CancelAnalysis", now };
+    case "CancelModelBuild": return { tag: "CancelModelBuild", buildId: String(input.buildId ?? ""), now };
     default: throw new Error("Unknown command");
   }
 }
@@ -211,11 +212,15 @@ function agentSelection(input: unknown, fallback?: AgentSelection): AgentSelecti
 const agentFor = (state: TaskState, input?: unknown): AgentSelection | undefined => agentSelection(input, state.agent);
 
 async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string): Promise<void> {
-  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, createdAt: new Date().toISOString() } });
+  const revision = detail(id)?.revision;
+  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, ...(revision !== undefined ? { revision } : {}), createdAt: new Date().toISOString() } });
   if (answer.tag === "Rejected") throw new Error(answer.reason);
 }
 
-const conversationOf = (state: TaskState) => (state.messages ?? []).map(({ role, text }) => ({ role, text }));
+const conversationOf = (state: TaskState, mode: AgentMode) => (state.messages ?? [])
+  .filter((message) => message.mode === mode)
+  .slice(-12)
+  .map(({ role, text }) => ({ role, text }));
 
 function analysisWorker(model: ScenarioModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
@@ -261,6 +266,15 @@ async function resumeAnalysisLabels(id: string, analysis: TaskAnalysis, model: S
   }
 }
 
+function completedRunMessage(model: ScenarioModel, analysis: TaskAnalysis): string {
+  const russian = /[А-Яа-яЁё]/.test(model.situation);
+  const board = Object.keys(analysis.winPctTeam).length < Object.keys(analysis.winPct).length ? analysis.winPctTeam : analysis.winPct;
+  const leader = Object.entries(board).sort((a, b) => b[1] - a[1])[0];
+  const driver = [...analysis.sensitivity, ...analysis.sensitivityWin].sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation))[0];
+  if (russian) return `Симуляция завершена: ${analysis.trials} миров. ${leader ? `Чаще всего выигрывает ${leader[0]} (${Math.round(leader[1])}%). ` : ""}${driver ? `Самый сильный фактор — ${driver.input}. ` : ""}Следующий шаг: попросите объяснить результат или выберите интересующую ветку.`;
+  return `Simulation complete: ${analysis.trials} worlds. ${leader ? `${leader[0]} wins most often (${Math.round(leader[1])}%). ` : ""}${driver ? `The strongest driver is ${driver.input}. ` : ""}Next: ask for an explanation or select a branch to investigate.`;
+}
+
 /**
  * The stored model is the source of truth, but if the situation text changed since the model was built
  * we rebuild first — otherwise Run would simulate stale assumptions. Outcome facts are never part of the build.
@@ -303,6 +317,7 @@ async function runAnalysis(id: string, requested: { revision: number; trials: nu
     if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     unrecordedAssets.length = 0;
     await labelAnalysis(id, analysis, model, agent, signal, result.html, result.labelNodes);
+    if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model, analysis));
   } catch (error) {
     await Promise.all(unrecordedAssets.map(removeReport));
     if (!signal.aborted) await ask(id, { tag: "FailAnalysis", revision: requested.revision, reason: error instanceof Error ? error.message : String(error), now: new Date().toISOString() });
@@ -319,7 +334,7 @@ function startAnalysis(id: string, requested: NonNullable<TaskState["activeAnaly
   void work.finally(() => { if (analysisJobs.get(id) === controller) analysisJobs.delete(id); });
 }
 
-async function runModelBuild(id: string, buildId: string, agent: AgentSelection | undefined): Promise<void> {
+async function runModelBuild(id: string, buildId: string, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
   let progress = Promise.resolve();
   const persistProgress = (event: unknown) => {
     const value = event && typeof event === "object" ? event as Record<string, unknown> : {};
@@ -339,15 +354,17 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
   try {
     const state = detail(id);
     if (!state) throw new Error("Task not found");
-    const built = await buildScenarioModel(state.situation, state.model, agent, persistProgress);
+    const built = await buildScenarioModel(state.situation, state.model, agent, persistProgress, signal);
+    if (signal.aborted) return;
     await progress;
-    await ask(id, { tag: "RecordResearch", sources: built.sources, now: new Date().toISOString() });
     const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
     if (completed.tag === "Rejected") throw new Error(completed.reason);
+    await ask(id, { tag: "RecordResearch", sources: built.sources, now: new Date().toISOString() });
     await ask(id, { tag: "SuggestQuestions", questions: built.questions.map((question) => ({ id: randomUUID(), ...question })), now: new Date().toISOString() });
     await addMessage(id, "agent", "model", built.completionMessage);
   } catch (error) {
     await progress.catch(() => {});
+    if (signal.aborted) return;
     await ask(id, { tag: "FailModelBuild", buildId, reason: error instanceof Error ? error.message : String(error), now: new Date().toISOString() }).catch(() => {});
   } finally {
     clearInterval(heartbeat);
@@ -361,15 +378,16 @@ function startModelBuild(id: string, agent: AgentSelection | undefined, buildId:
   const started = state.activeBuild?.buildId === buildId
     ? { tag: "Accepted" as const, revision: state.revision }
     : undefined;
+  const controller = new AbortController();
   const job = (async () => {
     if (!started) {
       const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, now: new Date().toISOString() });
       if (answer.tag === "Rejected") throw new Error(answer.reason);
     }
-    await runModelBuild(id, buildId, agent);
+    await runModelBuild(id, buildId, agent, controller.signal);
   })();
-  modelBuildJobs.set(id, job);
-  void job.finally(() => { if (modelBuildJobs.get(id) === job) modelBuildJobs.delete(id); });
+  modelBuildJobs.set(id, { promise: job, controller });
+  void job.finally(() => { if (modelBuildJobs.get(id)?.promise === job) modelBuildJobs.delete(id); });
   return buildId;
 }
 
@@ -480,18 +498,22 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (message.length > 4_000) { send(res, 422, { error: "The message is too long" }); return; }
     if (message) await addMessage(clarifyId, "user", mode, message);
     const fresh = detail(clarifyId)!;
-    let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh), message || undefined, mode, agentFor(fresh, input.agent));
+    const controller = new AbortController();
+    req.once("aborted", () => controller.abort());
+    res.once("close", () => { if (!res.writableEnded) controller.abort(); });
+    let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), [], controller.signal);
+    let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
     if (guided.researchQueries.length) {
-      const sources = await researchPublicContext(guided.researchQueries);
-      if (sources.length) {
-        const recorded = await ask(clarifyId, { tag: "RecordResearch", sources, now: new Date().toISOString() });
-        if (recorded.tag === "Rejected") throw new Error(recorded.reason);
-      }
-      guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh), message || undefined, mode, agentFor(fresh, input.agent), sources);
+      researched = await researchPublicContext(guided.researchQueries, controller.signal);
+      guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), researched, controller.signal);
     }
     if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
       const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
       if (updated.tag === "Rejected") throw new Error(updated.reason);
+    }
+    if (researched.length) {
+      const recorded = await ask(clarifyId, { tag: "RecordResearch", sources: researched, now: new Date().toISOString() });
+      if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     }
     const now = new Date().toISOString();
     await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
@@ -554,6 +576,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const answer = await ask(id, command);
       if (answer.tag === "Accepted") await Promise.all(reports.map(removeReport));
       if (answer.tag === "Accepted" && command.tag === "CancelAnalysis") analysisJobs.get(id)?.abort();
+      if (answer.tag === "Accepted" && command.tag === "CancelModelBuild") modelBuildJobs.get(id)?.controller.abort();
       send(res, answer.tag === "Rejected" ? 409 : 200, answer.tag === "Rejected" ? answer : detail(id)); return;
     }
     // One Run: use the stored model (building it once from the situation prose if none exists), then simulate and label.
@@ -583,9 +606,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const message = String(input.message ?? "").trim();
       if (!message || message.length > 4_000) { send(res, 422, { error: "The message is empty or too long" }); return; }
       const agent = agentFor(state, input.agent);
-      const analysis = state.analyses.at(-1);
+      const selection = input.selection && typeof input.selection === "object" ? input.selection as Record<string, unknown> : undefined;
+      const focus = selection && typeof selection.label === "string" && Array.isArray(selection.worldIds)
+        ? { label: selection.label.slice(0, 180), worldCount: selection.worldIds.length }
+        : undefined;
+      const requestedAnalysisId = String(input.analysisId ?? "");
+      const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? state.analyses.at(-1);
       await addMessage(id, "user", "river", message);
-      const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state));
+      const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state, "river"), focus);
       await addMessage(id, "agent", "river", routed.message);
       if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, task: detail(id) }); return; }
       // outcome: return preview without persisting; caller must POST /chat/confirm to file it
@@ -706,6 +734,6 @@ for (const summary of summaries()) {
   if ((state?.status === "running" || state?.status === "labeling") && state.activeAnalysis) startAnalysis(state.id, state.activeAnalysis);
 }
 
-async function close(): Promise<void> { server.close(); for (const job of analysisJobs.values()) job.abort(); await runtime.shutdown(); journal.close(); }
+async function close(): Promise<void> { server.close(); for (const job of analysisJobs.values()) job.abort(); for (const job of modelBuildJobs.values()) job.controller.abort(); await runtime.shutdown(); journal.close(); }
 process.once("SIGINT", () => { void close(); });
 process.once("SIGTERM", () => { void close(); });

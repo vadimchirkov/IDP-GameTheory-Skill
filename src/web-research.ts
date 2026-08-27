@@ -15,6 +15,7 @@ export interface ResearchSource {
 export interface ResearchQuery { query: string; purpose?: string; field?: string }
 
 const MAX_RESPONSE_BYTES = 750_000;
+const requestSignal = (signal?: AbortSignal) => signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
 
 function decodeHtml(value: string): string {
   return value
@@ -78,7 +79,7 @@ async function limitedText(response: Response): Promise<string> {
 }
 
 /** Searches through one fixed public endpoint; result URLs are never fetched by the server. */
-export async function researchWeb(query: string, limit = 6): Promise<ResearchSource[]> {
+export async function researchWeb(query: string, limit = 6, signal?: AbortSignal): Promise<ResearchSource[]> {
   const normalized = query.replace(/\s+/g, " ").trim().slice(0, 300);
   if (!normalized) return [];
   try {
@@ -87,7 +88,7 @@ export async function researchWeb(query: string, limit = 6): Promise<ResearchSou
     const response = await fetch(endpoint, {
       headers: { "user-agent": "ScenarioResearch/1.0" },
       redirect: "error",
-      signal: AbortSignal.timeout(15_000),
+      signal: requestSignal(signal),
     });
     if (!response.ok) return [];
     const html = await limitedText(response);
@@ -112,19 +113,20 @@ export async function researchWeb(query: string, limit = 6): Promise<ResearchSou
       } catch { /* Ignore malformed result links. */ }
     }
     return sources;
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
 
 /** Fetches a small, text-only public page. Redirect targets are validated too. */
-export async function openPublicPage(value: string): Promise<{ title: string; url: string; excerpt: string }> {
+export async function openPublicPage(value: string, signal?: AbortSignal): Promise<{ title: string; url: string; excerpt: string }> {
   let url = await publicUrl(value);
   for (let redirects = 0; redirects < 4; redirects += 1) {
     const response = await fetch(url, {
       headers: { "user-agent": "FluminaPublicResearch/1.0", accept: "text/html,text/plain;q=0.8" },
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
+      signal: requestSignal(signal),
     });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
@@ -143,14 +145,18 @@ export async function openPublicPage(value: string): Promise<{ title: string; ur
 }
 
 /** Searches and opens at most two useful pages per query, with a small global cap. */
-export async function researchPublicContext(queries: readonly ResearchQuery[]): Promise<ResearchSource[]> {
+export async function researchPublicContext(queries: readonly ResearchQuery[], signal?: AbortSignal): Promise<ResearchSource[]> {
   const sources: ResearchSource[] = [];
   for (const item of queries.slice(0, 3)) {
-    const results = await researchWeb(item.query, 4);
+    if (signal?.aborted) throw signal.reason;
+    const results = await researchWeb(item.query, 4, signal);
     for (const result of results.slice(0, 2)) {
       if (sources.some((source) => source.url === result.url)) continue;
       let opened: Awaited<ReturnType<typeof openPublicPage>> | undefined;
-      try { opened = await openPublicPage(result.url); } catch { /* Search snippets remain useful when a page blocks automated reading. */ }
+      try { opened = await openPublicPage(result.url, signal); } catch (error) {
+        if (signal?.aborted) throw error;
+        /* Search snippets remain useful when a page blocks automated reading. */
+      }
       sources.push({
         ...result,
         id: `source-${sources.length + 1}`,
