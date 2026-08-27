@@ -49,7 +49,7 @@ assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", 
 assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
 assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
 assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
-assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
+assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
 assert.equal(Value.Check(researchPlanOutputSchema, { completionMessage: "Модель собрана; проверьте допущения.", queries: [], questions: [] }), true, "model builds carry a same-language completion message");
 await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
 const agentDraft = {
