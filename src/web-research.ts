@@ -146,28 +146,26 @@ export async function openPublicPage(value: string, signal?: AbortSignal): Promi
 
 /** Searches and opens at most two useful pages per query, with a small global cap. */
 export async function researchPublicContext(queries: readonly ResearchQuery[], signal?: AbortSignal): Promise<ResearchSource[]> {
-  const sources: ResearchSource[] = [];
-  for (const item of queries.slice(0, 3)) {
-    if (signal?.aborted) throw signal.reason;
-    const results = await researchWeb(item.query, 4, signal);
-    for (const result of results.slice(0, 2)) {
-      if (sources.some((source) => source.url === result.url)) continue;
-      let opened: Awaited<ReturnType<typeof openPublicPage>> | undefined;
-      try { opened = await openPublicPage(result.url, signal); } catch (error) {
-        if (signal?.aborted) throw error;
-        /* Search snippets remain useful when a page blocks automated reading. */
-      }
-      sources.push({
-        ...result,
-        id: `source-${sources.length + 1}`,
-        title: opened?.title || result.title,
-        url: opened?.url || result.url,
-        excerpt: opened?.excerpt || result.excerpt,
-        ...(item.field ? { field: item.field } : {}),
-        ...(item.purpose ? { purpose: item.purpose } : {}),
-      });
-      if (sources.length >= 6) return sources;
+  if (signal?.aborted) throw signal.reason;
+  const searches = await Promise.all(queries.slice(0, 3).map(async (item) => ({ item, results: await researchWeb(item.query, 4, signal) })));
+  const seen = new Set<string>();
+  const candidates = searches.flatMap(({ item, results }) => results.slice(0, 2).map((result) => ({ item, result })))
+    .filter(({ result }) => !seen.has(result.url) && Boolean(seen.add(result.url)))
+    .slice(0, 6);
+  return Promise.all(candidates.map(async ({ item, result }, index) => {
+    let opened: Awaited<ReturnType<typeof openPublicPage>> | undefined;
+    try { opened = await openPublicPage(result.url, signal); } catch (error) {
+      if (signal?.aborted) throw error;
+      /* Search snippets remain useful when a page blocks automated reading. */
     }
-  }
-  return sources;
+    return {
+      ...result,
+      id: `source-${index + 1}`,
+      title: opened?.title || result.title,
+      url: opened?.url || result.url,
+      excerpt: opened?.excerpt || result.excerpt,
+      ...(item.field ? { field: item.field } : {}),
+      ...(item.purpose ? { purpose: item.purpose } : {}),
+    };
+  }));
 }

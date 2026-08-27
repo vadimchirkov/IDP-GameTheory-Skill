@@ -120,6 +120,8 @@ export interface StructuredRunOptions<T extends TSchema> {
   timeoutMs?: number;
   signal?: AbortSignal;
   onProgress?: (event: unknown) => void;
+  /** Receives the growing `message` field while a structured tool call is generated. */
+  onText?: (text: string) => void;
 }
 
 export interface StructuredRun<T> {
@@ -241,12 +243,19 @@ export async function runStructured<T extends TSchema>(options: StructuredRunOpt
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abortHandler: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined;
+  let streamedText = "";
   let toolFailure: Error | undefined;
   let toolUsage = emptyUsage();
-  if (options.onProgress) {
-    const handler = options.onProgress;
+  if (options.onProgress || options.onText) {
     try { unsubscribe = (session as unknown as { subscribe: (l: (e: unknown)=>void)=>()=>void }).subscribe((ev: unknown) => {
-      try { handler(ev); } catch {}
+      try {
+        options.onProgress?.(ev);
+        const event = ev as { type?: string; message?: { content?: Array<{ type?: string; name?: string; arguments?: { message?: unknown } }> } };
+        if (event.type !== "message_update") return;
+        const toolCall = event.message?.content?.find((item) => item.type === "toolCall" && item.name === options.toolName);
+        const text = toolCall?.arguments?.message;
+        if (typeof text === "string" && text !== streamedText) { streamedText = text; options.onText?.(text); }
+      } catch {}
     }); } catch {}
   }
   try {
@@ -281,14 +290,18 @@ export async function runStructured<T extends TSchema>(options: StructuredRunOpt
     session.dispose();
   }
 
-  if (value !== undefined) return {
+  if (value !== undefined) {
+    const finalText = (value as { message?: unknown }).message;
+    if (typeof finalText === "string" && finalText !== streamedText) options.onText?.(finalText);
+    return {
     value,
     meta: {
       runId, operation: options.operation, provider: selection.provider, model: selection.model,
       thinkingLevel: effectiveThinkingLevel, promptVersion: options.promptVersion,
       structuredOutput: "tool", attempts: 1, durationMs: Date.now() - startedAt, usage: toolUsage,
     },
-  };
+    };
+  }
 
   options.onProgress?.({ kind: "progress", message: "Trying a compatible response format…" });
   const schemaText = JSON.stringify(options.schema);
@@ -328,6 +341,9 @@ export async function runStructured<T extends TSchema>(options: StructuredRunOpt
     const fallbackFailure = error instanceof Error ? error.message : String(error);
     throw new Error(`Structured output failed in tool and JSON modes: ${toolFailure?.message ?? "tool output unavailable"}; ${fallbackFailure}`);
   }
+
+  const fallbackText = (value as { message?: unknown }).message;
+  if (typeof fallbackText === "string" && fallbackText !== streamedText) options.onText?.(fallbackText);
 
   return {
     value,

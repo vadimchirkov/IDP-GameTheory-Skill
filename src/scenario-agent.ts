@@ -67,6 +67,7 @@ export async function continueContext(
   selection?: AgentSelection,
   researchSources: readonly ResearchSource[] = [],
   signal?: AbortSignal,
+  onText?: (text: string) => void,
 ): Promise<ContextReply> {
   const run = await runStructured({
     operation: "context",
@@ -77,6 +78,7 @@ export async function continueContext(
     ...(selection ? { selection } : {}),
     timeoutMs: 120_000,
     ...(signal ? { signal } : {}),
+    ...(onText ? { onText } : {}),
     prompt: `You help a user turn a real situation into a simulation. Reply in the same language as the user's latest message (or the situation when there is no latest message), using plain language. Do not mention game theory, mathematical terms, hidden schemas, or internal modes.
 
 The current mode is ${mode}. ${mode === "context" ? "No model exists yet." : "A model exists, but the user is discussing its assumptions before an explicit rebuild."}
@@ -395,6 +397,7 @@ export async function routeMessage(
   situation?: string,
   history: readonly ConversationMessage[] = [],
   focus?: { label: string; worldCount: number },
+  onText?: (text: string) => void,
 ): Promise<RoutedMessage> {
   const hasModel = Boolean(model);
   const run = await runStructured({
@@ -404,6 +407,7 @@ export async function routeMessage(
     toolDescription: "Reply to the user and classify whether the message is a question or a fact about what already happened.",
     schema: factRoutingOutputSchema,
     ...(selection ? { selection } : {}),
+    ...(onText ? { onText } : {}),
     prompt: `${hasModel ? "A simulation of a recurring strategic situation already exists." : "No simulation model exists yet — the user is still describing the situation."} Read the user's message and reply in the same language as the user's message (1–4 short sentences, plain language, no headings or lists). Put the direct answer first and end with one concrete next action when it would help.
 
 suggestions contains exactly two short follow-up prompts the user could send next. They must be in English, directly continue the latest topic, and reflect the selected river scope. Do not repeat the latest message or offer generic prompts.
