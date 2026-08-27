@@ -140,6 +140,15 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function startEventStream(res: ServerResponse) {
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive" });
+  res.write(": connected\n\n");
+  return {
+    emit: (payload: unknown) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`); },
+    end: () => { if (!res.writableEnded) res.end(); },
+  };
+}
+
 async function sendAppFile(res: ServerResponse, fileName: string): Promise<void> {
   const types: Record<string, string> = { ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml" };
   const content = await readFile(join(appDirectory, fileName));
@@ -211,9 +220,10 @@ function agentSelection(input: unknown, fallback?: AgentSelection): AgentSelecti
 
 const agentFor = (state: TaskState, input?: unknown): AgentSelection | undefined => agentSelection(input, state.agent);
 
-async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string, suggestions?: readonly string[]): Promise<void> {
+async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string, suggestions?: readonly string[], messageId?: string): Promise<void> {
   const revision = detail(id)?.revision;
-  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, ...(suggestions?.length ? { suggestions: suggestions.slice(0, 2) } : {}), ...(revision !== undefined ? { revision } : {}), createdAt: new Date().toISOString() } });
+  const safeId = messageId && /^[a-zA-Z0-9-]{1,80}$/.test(messageId) ? messageId : randomUUID();
+  const answer = await ask(id, { tag: "AddMessage", message: { id: safeId, role, mode, text, ...(suggestions?.length ? { suggestions: suggestions.slice(0, 2) } : {}), ...(revision !== undefined ? { revision } : {}), createdAt: new Date().toISOString() } });
   if (answer.tag === "Rejected") throw new Error(answer.reason);
 }
 
@@ -496,30 +506,44 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const mode: "context" | "model" = input.mode === "model" ? "model" : "context";
     const message = String(input.message ?? "").trim();
     if (message.length > 4_000) { send(res, 422, { error: "The message is too long" }); return; }
-    if (message) await addMessage(clarifyId, "user", mode, message);
+    const stream = req.headers.accept?.includes("text/event-stream") ? startEventStream(res) : undefined;
+    const emit = (payload: unknown) => stream?.emit(payload);
+    if (message) await addMessage(clarifyId, "user", mode, message, undefined, String(input.clientMessageId ?? ""));
     const fresh = detail(clarifyId)!;
     const controller = new AbortController();
     req.once("aborted", () => controller.abort());
     res.once("close", () => { if (!res.writableEnded) controller.abort(); });
-    let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), [], controller.signal);
-    let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
-    if (guided.researchQueries.length) {
-      researched = await researchPublicContext(guided.researchQueries, controller.signal);
-      guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), researched, controller.signal);
+    try {
+      emit({ kind: "status", stage: "reading", message: mode === "model" ? "Reading the model…" : "Reading the context…" });
+      let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }));
+      let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
+      if (guided.researchQueries.length) {
+        emit({ kind: "status", stage: "research", message: "Checking public sources…" });
+        researched = await researchPublicContext(guided.researchQueries, controller.signal);
+        if (researched.length) {
+          emit({ kind: "text", text: "" });
+          emit({ kind: "status", stage: "synthesis", message: "Connecting the evidence…" });
+          guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }));
+        }
+      }
+      if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
+        const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
+        if (updated.tag === "Rejected") throw new Error(updated.reason);
+      }
+      if (researched.length) {
+        const recorded = await ask(clarifyId, { tag: "RecordResearch", sources: researched, now: new Date().toISOString() });
+        if (recorded.tag === "Rejected") throw new Error(recorded.reason);
+      }
+      const now = new Date().toISOString();
+      await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
+      await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
+      await addMessage(clarifyId, "agent", mode, guided.message, guided.suggestions);
+      const result = { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId) };
+      if (stream) { emit({ kind: "done", result }); stream.end(); } else send(res, 200, result);
+    } catch (error) {
+      if (!stream) throw error;
+      const failure = httpError(error); emit({ kind: "error", error: failure.error }); stream.end();
     }
-    if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
-      const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
-      if (updated.tag === "Rejected") throw new Error(updated.reason);
-    }
-    if (researched.length) {
-      const recorded = await ask(clarifyId, { tag: "RecordResearch", sources: researched, now: new Date().toISOString() });
-      if (recorded.tag === "Rejected") throw new Error(recorded.reason);
-    }
-    const now = new Date().toISOString();
-    await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
-    await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
-    await addMessage(clarifyId, "agent", mode, guided.message, guided.suggestions);
-    send(res, 200, { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId) });
     return;
   }
   // Streaming variant: POST /api/tasks/:id/understand/stream -> SSE with live agent events (outside generic match)
