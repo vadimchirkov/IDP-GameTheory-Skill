@@ -3,6 +3,7 @@ dist/
 app/dist/
 .DS_Store
 .claude/
+docs/superpowers/
 reports/
 data/*.db
 data/*.db-shm
