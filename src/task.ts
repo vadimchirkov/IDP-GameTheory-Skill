@@ -50,6 +50,8 @@ export interface TaskMessage {
   role: "user" | "agent";
   mode: AgentMode;
   text: string;
+  /** Context revision this turn was based on; absent on messages from older journals. */
+  revision?: number;
   createdAt: string;
 }
 
@@ -99,8 +101,12 @@ export interface TaskState {
   situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
+  /** Revision for which the current questions were generated. */
+  questionsRevision?: number;
   /** Public sources used to fill model context; excerpts are bounded and treated as untrusted data. */
   researchSources?: readonly ResearchSource[];
+  /** Revision for which the current sources were collected. */
+  researchRevision?: number;
   messages: readonly TaskMessage[];
   /** Bumped when the model or situation prose changes — the fingerprint a run is measured against. */
   revision: number;
@@ -132,6 +138,7 @@ export type TaskCommand =
   | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
   | { tag: "CompleteModelBuild"; buildId: string; model: ScenarioModel; agent?: AgentSelection; now: string }
   | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
+  | { tag: "CancelModelBuild"; buildId: string; now: string }
   | { tag: "RemoveAnalysis"; analysisId: string; now: string }
   | { tag: "DeleteTask"; now: string }
   | { tag: "RequestAnalysis"; trials: number; seed: number; agent?: AgentSelection; now: string }
@@ -151,9 +158,9 @@ export type TaskEvent =
   | { tag: "FactAdded"; fact: Fact; revision: number; now: string }
   | { tag: "FactEdited"; factId: string; text: string; revision: number; now: string }
   | { tag: "FactRemoved"; factId: string; revision: number; now: string }
-  | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; now: string }
+  | { tag: "QuestionsSuggested"; questions: readonly OpenQuestion[]; revision?: number; now: string }
   | { tag: "QuestionDismissed"; questionId: string; now: string }
-  | { tag: "ResearchRecorded"; sources: readonly ResearchSource[]; now: string }
+  | { tag: "ResearchRecorded"; sources: readonly ResearchSource[]; revision?: number; now: string }
   | { tag: "MessageAdded"; message: TaskMessage }
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
@@ -161,6 +168,7 @@ export type TaskEvent =
   | { tag: "ModelBuildStarted"; buildId: string; revision: number; now: string }
   | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
   | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
+  | { tag: "ModelBuildCancelled"; buildId: string; now: string }
   | { tag: "AnalysisRemoved"; analysisId: string; now: string }
   | { tag: "TaskDeleted"; now: string }
   | { tag: "AnalysisRequested"; revision: number; trials: number; seed: number; agent?: AgentSelection; now: string }
@@ -246,9 +254,9 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "FactAdded": return { ...state, facts: [...state.facts, event.fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
     case "FactEdited": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, text: event.text, source: "user" } : fact), revision: event.revision, updatedAt: event.now };
     case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
-    case "QuestionsSuggested": return { ...state, openQuestions: event.questions, updatedAt: event.now };
+    case "QuestionsSuggested": return { ...state, openQuestions: event.questions, questionsRevision: event.revision ?? state.revision, updatedAt: event.now };
     case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
-    case "ResearchRecorded": return { ...state, researchSources: event.sources, updatedAt: event.now };
+    case "ResearchRecorded": return { ...state, researchSources: event.sources, researchRevision: event.revision ?? state.revision, updatedAt: event.now };
     // ponytail: keep a bounded journal until long conversations justify summarization.
     case "MessageAdded": return { ...state, messages: [...(state.messages ?? []), event.message].slice(-200), updatedAt: event.message.createdAt };
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
@@ -264,6 +272,9 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
       if (state.activeBuild?.buildId !== event.buildId) return state;
       return { ...state, status: state.model ? readyStatus(state) : "failed", activeBuild: { ...state.activeBuild, status: "failed", error: event.reason, updatedAt: event.now }, lastError: event.reason, updatedAt: event.now };
     }
+    case "ModelBuildCancelled":
+      if (state.activeBuild?.buildId !== event.buildId) return state;
+      return { ...omit(state, "activeBuild", "lastError"), status: state.model ? readyStatus(state) : "ready", updatedAt: event.now };
     case "AnalysisRemoved": {
       const analyses = state.analyses.filter((analysis) => (analysis.id ?? analysis.visualUrl) !== event.analysisId);
       return { ...state, analyses, status: state.status === "completed" && !analyses.length ? "ready" : state.status, updatedAt: event.now };
@@ -356,12 +367,12 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         return andReply(persist<TaskEvent, TaskReply>({ tag: "FactRemoved", factId: command.factId, revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "SuggestQuestions":
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions: command.questions.slice(0, 5), now: command.now }), { tag: "Accepted", revision: state.revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions: command.questions.slice(0, 5), revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       case "DismissQuestion":
         if (!state.openQuestions.some((question) => question.id === command.questionId)) return rejected(state, "That question is already gone");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionDismissed", questionId: command.questionId, now: command.now }), { tag: "Accepted", revision: state.revision });
       case "RecordResearch":
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ResearchRecorded", sources: boundedResearchSources(command.sources), now: command.now }), { tag: "Accepted", revision: state.revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ResearchRecorded", sources: boundedResearchSources(command.sources), revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       case "AddMessage": {
         const text = command.message.text.trim();
         if (!text) return rejected(state, "The message is empty");
@@ -395,6 +406,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "FailModelBuild":
         if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildFailed", buildId: command.buildId, reason: command.reason.slice(0, 1000), now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "CancelModelBuild":
+        if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildCancelled", buildId: command.buildId, now: command.now }), { tag: "Accepted", revision: state.revision });
       case "SetSituation": {
         const text = command.text.trim();
         if (!text) return rejected(state, "Describe the situation first");
@@ -437,7 +451,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
 
 export const taskEventCodec = tagCodec<TaskEvent>(
   "TaskCreated", "FactAdded", "FactEdited", "FactRemoved",
-  "QuestionsSuggested", "QuestionDismissed", "ResearchRecorded", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed",
+  "QuestionsSuggested", "QuestionDismissed", "ResearchRecorded", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed", "ModelBuildCancelled",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay

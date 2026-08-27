@@ -200,10 +200,17 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .model-grounding { flex: 0 0 auto; max-height: 34%; overflow: auto; margin: 0 16px 16px; border-radius: 11px; background: rgba(255,255,255,.02); padding: 4px 12px }
 .model-grounding .section { padding: 10px 0 }
 .research-source-list { display: grid; gap: 5px; margin-top: 7px }
-.research-source-list a { min-height: 42px; display: grid; align-content: center; gap: 2px; border-radius: 9px; background: rgba(255,255,255,.03); padding: 7px 10px; color: var(--ink); text-decoration: none; transition: background-color 160ms ease }
-.research-source-list a:hover { background: rgba(255,255,255,.065) }
-.research-source-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px }
-.research-source-list small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
+.research-source-list details { min-height: 42px; border-radius: 9px; background: rgba(255,255,255,.03); padding: 7px 10px }
+.research-source-list details:hover { background: rgba(255,255,255,.055) }
+.research-source-list summary { cursor: pointer; list-style: none }
+.research-source-list summary::-webkit-details-marker { display: none }
+.research-source-list summary::after { float: right; color: var(--muted); content: "+" }
+.research-source-list details[open] summary::after { content: "−" }
+.research-source-list details p { margin: 7px 0; color: var(--muted-strong); font-size: 9px; line-height: 1.45 }
+.research-source-list details > a { color: var(--ink); font-size: 9px; text-underline-offset: 3px }
+.research-source-list span { display: block; overflow: hidden; padding-right: 18px; text-overflow: ellipsis; white-space: nowrap; font-size: 10px }
+.research-source-list small { display: block; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
+.context-sources.stale, .question-list.stale { opacity: .58 }
 .model-workspace { width: min(672px, 100%); min-height: 0; display: flex; flex: 1; flex-direction: column; margin: 0 auto }
 .workflow-card { flex: 0 0 auto; margin: 12px 16px 0; padding: 0 0 4px; text-align: center }
 .workflow-card.toy { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 24px 16px 32px }
@@ -350,17 +357,11 @@ label:has(> select:disabled)::after { opacity: .4 }
 .agent-drawer > header b, .agent-drawer > header span { display: block }
 .agent-drawer > header b { font-size: 12px }
 .agent-drawer > header span { max-width: 290px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
-.agent-phase { margin: 0 10px 8px; border-radius: 11px; background: #181818; padding: 11px }
-.agent-steps { display: grid; grid-template-columns: auto 1fr auto 1fr auto; align-items: center; gap: 6px; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .08em }
-.agent-steps span.on { color: var(--ink); font-weight: 650 }
-.agent-steps span.done { color: var(--accent) }
-.agent-steps i { height: 1px; background: var(--line-strong) }
-.agent-phase > p { margin: 9px 0 10px; color: var(--muted-strong); font-size: 10px; line-height: 1.4; text-wrap: pretty }
-.agent-phase > button { width: 100%; margin-top: 10px }
-.agent-next-question { border-radius: 8px; background: rgba(255, 255, 255, .035); padding: 8px 9px }
-.agent-next-question small, .agent-next-question b { display: block }
-.agent-next-question small { margin-bottom: 3px; color: var(--muted); font-size: 8px; letter-spacing: .05em; text-transform: uppercase }
-.agent-next-question b { font-size: 10px; font-weight: 560; line-height: 1.4 }
+.chat-scope { margin: 0 14px 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0 9px }
+.chat-scope small, .chat-scope b, .chat-scope span { display: block }
+.chat-scope small { color: var(--muted); font-size: 8px; letter-spacing: .07em }
+.chat-scope b { margin-top: 3px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap }
+.chat-scope span { margin-top: 2px; color: var(--muted-strong); font-size: 9px; line-height: 1.35 }
 .river-scope { margin: 2px 14px 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0 10px }
 .river-detail .river-scope { margin: 0; padding: 10px 12px 8px }
 .river-scope > div:first-child { min-width: 0 }
@@ -427,6 +428,8 @@ label:has(> select:disabled)::after { opacity: .4 }
 .chat-entry.agent .chat-message { border-bottom-left-radius: 4px }
 .chat-entry.pending { align-items: center }
 .chat-entry.pending .river-activity { max-width: 100%; flex: 1; margin: 0 }
+.chat-pending { width: 100%; display: flex; align-items: center; gap: 6px }
+.chat-pending > button { min-height: 32px; flex: 0 0 auto; background: transparent; color: var(--muted); padding: 0 8px; font-size: 9px }
 .markdown-message > :first-child { margin-top: 0 }
 .markdown-message > :last-child { margin-bottom: 0 }
 .markdown-message p { margin: 0 0 8px }
@@ -520,11 +523,14 @@ label:has(> select:disabled)::after { opacity: .4 }
 /* ── Open questions: always optional, never a gate ─────────────────────────── */
 .question-list { display: grid; gap: 4px; margin: 5px 0 0; padding: 0; list-style: none }
 .question { border: 0; border-radius: 8px; background: rgba(255, 255, 255, .025); padding: 9px 10px }
-.question-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start }
+.question-head { min-width: 0 }
 .question-prompt { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere }
 .question-dismiss { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
 .question-dismiss:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: var(--ink) }
 .question-field { display: block; margin-top: 3px; color: var(--muted); font-size: 9px }
+.question-actions { display: flex; gap: 5px; margin-top: 7px }
+.question-actions button { min-height: 32px; border-radius: 7px; background: rgba(255,255,255,.045); padding: 0 9px; color: var(--muted-strong); font-size: 9px }
+.question-stale-note { color: #e8c07a; font-size: 9px; line-height: 1.4 }
 
 /* ── The model, edited directly: basics, opt-in mechanisms, advanced ───────── */
 .model-fields { min-width: 0; min-inline-size: 0; min-height: 0; margin: 0; border: 0; padding: 0 }
