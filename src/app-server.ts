@@ -211,9 +211,9 @@ function agentSelection(input: unknown, fallback?: AgentSelection): AgentSelecti
 
 const agentFor = (state: TaskState, input?: unknown): AgentSelection | undefined => agentSelection(input, state.agent);
 
-async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string): Promise<void> {
+async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, text: string, suggestions?: readonly string[]): Promise<void> {
   const revision = detail(id)?.revision;
-  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, ...(revision !== undefined ? { revision } : {}), createdAt: new Date().toISOString() } });
+  const answer = await ask(id, { tag: "AddMessage", message: { id: randomUUID(), role, mode, text, ...(suggestions?.length ? { suggestions: suggestions.slice(0, 2) } : {}), ...(revision !== undefined ? { revision } : {}), createdAt: new Date().toISOString() } });
   if (answer.tag === "Rejected") throw new Error(answer.reason);
 }
 
@@ -518,8 +518,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const now = new Date().toISOString();
     await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
     await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
-    await addMessage(clarifyId, "agent", mode, guided.message);
-    send(res, 200, { kind: guided.kind, message: guided.message, task: detail(clarifyId) });
+    await addMessage(clarifyId, "agent", mode, guided.message, guided.suggestions);
+    send(res, 200, { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId) });
     return;
   }
   // Streaming variant: POST /api/tasks/:id/understand/stream -> SSE with live agent events (outside generic match)
@@ -614,8 +614,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? state.analyses.at(-1);
       await addMessage(id, "user", "river", message);
       const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state, "river"), focus);
-      await addMessage(id, "agent", "river", routed.message);
-      if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, task: detail(id) }); return; }
+      await addMessage(id, "agent", "river", routed.message, routed.suggestions);
+      if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, suggestions: routed.suggestions, task: detail(id) }); return; }
       // outcome: return preview without persisting; caller must POST /chat/confirm to file it
       const previewObservation = analysis?.artifactUrl
         ? (() => { try { return observationFrom({ ...routed.observation }, state.model!); } catch { return undefined; } })()
@@ -623,7 +623,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       // Validate against model if we have one, but don't require artifact
       const display = routed.observation.winner || routed.observation.cooperation !== undefined || routed.observation.regime
         ? JSON.stringify(routed.observation) : message.slice(0, 120);
-      send(res, 200, { kind: "outcome", message: routed.message, task: detail(id), pendingOutcome: { observation: routed.observation, display, ...(previewObservation ? { validated: previewObservation } : {}) } });
+      send(res, 200, { kind: "outcome", message: routed.message, suggestions: routed.suggestions, task: detail(id), pendingOutcome: { observation: routed.observation, display, ...(previewObservation ? { validated: previewObservation } : {}) } });
       return;
     }
   }

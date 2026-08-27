@@ -358,10 +358,9 @@ label:has(> select:disabled)::after { opacity: .4 }
 .agent-drawer > header b { font-size: 12px }
 .agent-drawer > header span { max-width: 290px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
 .chat-scope { margin: 0 14px 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0 9px }
-.chat-scope small, .chat-scope b, .chat-scope span { display: block }
+.chat-scope small, .chat-scope b { display: block }
 .chat-scope small { color: var(--muted); font-size: 8px; letter-spacing: .07em }
 .chat-scope b { margin-top: 3px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap }
-.chat-scope span { margin-top: 2px; color: var(--muted-strong); font-size: 9px; line-height: 1.35 }
 .river-scope { margin: 2px 14px 8px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0 10px }
 .river-detail .river-scope { margin: 0; padding: 10px 12px 8px }
 .river-scope > div:first-child { min-width: 0 }
@@ -451,8 +450,8 @@ label:has(> select:disabled)::after { opacity: .4 }
 .chat-form { padding: 8px 10px 10px; background: #202020 }
 .chat-revise { min-height: 32px; margin-bottom: 7px; border-radius: 8px; background: rgba(255, 255, 255, .045); color: var(--muted-strong); font-size: 9px }
 .chat-revise:hover { background: rgba(255, 255, 255, .08); color: var(--ink) }
-.chat-quick-actions { display: grid; gap: 5px; margin-bottom: 9px }
-.chat-quick-actions button { min-height: 30px; justify-content: flex-start; border-radius: 8px; background: rgba(255, 255, 255, .03); padding: 6px 9px; color: var(--muted); font-size: 9px; text-align: left }
+.chat-quick-actions { display: grid; gap: 7px; margin-bottom: 10px }
+.chat-quick-actions button { min-height: 40px; justify-content: flex-start; border-radius: 9px; background: rgba(255, 255, 255, .045); padding: 9px 11px; color: var(--muted-strong); font-size: 12px; line-height: 1.35; text-align: left }
 .chat-quick-actions button:hover { color: var(--ink) }
 .chat-input-shell { position: relative; border-radius: 14px; background: #181818; transition: background-color 160ms ease }
 .chat-input-shell:focus-within { background: #161616 }

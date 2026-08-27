@@ -36,6 +36,7 @@ export type UnderstandingOutput = Static<typeof understandingOutputSchema>;
 export const contextReplyOutputSchema = Type.Object({
   kind: stringEnum(["answer", "context"] as const),
   message: Type.String({ minLength: 1, maxLength: 2000 }),
+  suggestions: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 2 }),
   contextNote: nullable(Type.String({ minLength: 1, maxLength: 800 })),
   title: Type.String({ minLength: 1, maxLength: 72 }),
   researchQueries: Type.Array(Type.Object({
@@ -73,6 +74,7 @@ export type ResearchPlanOutput = Static<typeof researchPlanOutputSchema>;
 export const factRoutingOutputSchema = Type.Object({
   kind: stringEnum(["answer", "outcome"] as const),
   message: Type.String({ minLength: 1, maxLength: 2000 }),
+  suggestions: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 2 }),
   observation: nullable(Type.Object({
     cooperation: nullable(Type.Number({ minimum: 0, maximum: 1 })),
     winner: nullable(Type.String({ minLength: 1, maxLength: 120 })),

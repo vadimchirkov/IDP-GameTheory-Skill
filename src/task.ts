@@ -50,6 +50,8 @@ export interface TaskMessage {
   role: "user" | "agent";
   mode: AgentMode;
   text: string;
+  /** Suggested next turns generated with an agent reply. */
+  suggestions?: readonly string[];
   /** Context revision this turn was based on; absent on messages from older journals. */
   revision?: number;
   createdAt: string;
@@ -377,7 +379,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         const text = command.message.text.trim();
         if (!text) return rejected(state, "The message is empty");
         if (state.messages?.some((message) => message.id === command.message.id)) return rejected(state, "That message already exists");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "MessageAdded", message: { ...command.message, text: text.slice(0, 4000) } }), { tag: "Accepted", revision: state.revision });
+        const suggestions = command.message.suggestions?.map((item) => item.trim().slice(0, 120)).filter(Boolean).slice(0, 2);
+        const { suggestions: _suggestions, ...message } = command.message;
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "MessageAdded", message: { ...message, text: text.slice(0, 4000), ...(suggestions?.length ? { suggestions } : {}) } }), { tag: "Accepted", revision: state.revision });
       }
       case "SetTitle": {
         const title = command.title.trim().slice(0, 72);

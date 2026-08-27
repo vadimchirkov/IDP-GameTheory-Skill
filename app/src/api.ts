@@ -92,6 +92,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export interface ChatResult {
   kind: "answer" | "outcome";
   message: string;
+  suggestions: string[];
   task?: TaskState;
 }
 
