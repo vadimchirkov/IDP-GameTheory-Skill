@@ -19,6 +19,8 @@ import {
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
 import type { SimulationArtifact } from "./simulation.js";
+import { generateSimulationReport } from "./generic-report.js";
+import { summarizeWorlds } from "./simulation.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { researchPublicContext } from "./web-research.js";
 
@@ -744,7 +746,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const visualUrl = `/reports/tasks/${reportMatch[1]}`;
       const analysis = summaries().flatMap((summary) => detail(summary.id)?.analyses ?? []).find((candidate) => candidate.visualUrl === visualUrl);
       let html: string | Buffer;
-      if (analysis?.artifactUrl && !analysis.adapter) {
+      if (analysis?.artifactUrl && analysis.adapter) {
+        const fileName = analysis.artifactUrl.match(/^\/reports\/tasks\/([a-zA-Z0-9._-]+\.json)$/)?.[1];
+        if (!fileName) throw new Error("Invalid simulation artifact path");
+        const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as SimulationArtifact;
+        if (artifact.schemaVersion !== 2 || !artifact.spec || !Array.isArray(artifact.worlds)) throw new Error("Unsupported simulation artifact");
+        html = generateSimulationReport(artifact.spec, { worlds: artifact.worlds, ...summarizeWorlds(artifact.worlds) });
+      } else if (analysis?.artifactUrl && !analysis.adapter) {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         html = injectWorldLabels(generateWorldsVisual(artifact.model, analysis.trials, analysis.seed, artifact), analysis.worldLabels ?? {});
       } else html = await readFile(join(reportDirectory, reportMatch[1]));
