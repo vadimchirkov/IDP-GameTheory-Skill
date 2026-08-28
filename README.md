@@ -50,7 +50,7 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 ## What the application does
 
-A scenario is **one context**, **one editable model**, and **one Run button**.
+A scenario is **one context**, **one built model**, and **one Run button**.
 
 1. **Describe a situation.** Start with a process, network, market, resource,
    rivalry, alliance, or another evolving system. What you write becomes the first fact.
@@ -58,7 +58,8 @@ A scenario is **one context**, **one editable model**, and **one Run button**.
    shows the sources it used, keeps uncertain values broad, and raises only what cannot
    be verified publicly as optional questions. Questions never block anything: answer
    one to replace the assumption or ignore it to keep the default.
-3. **Review the model.** Situation details live in the editable model. Separately, tell
+3. **Review the model.** The agent builds the model from the context; you read it rather
+   than edit its fields. To change it, change the context and rebuild. Separately, tell
    the agent what actually happened after a run; those outcome facts reweight the river
    without being baked back into its assumptions.
 4. **Press Run.** One action validates the current model against the engine's domain

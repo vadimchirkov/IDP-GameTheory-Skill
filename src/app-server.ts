@@ -43,6 +43,10 @@ const listeners = new Map<string, Set<ServerResponse>>();
 const analysisJobs = new Map<string, AbortController>();
 const modelBuildJobs = new Map<string, { promise: Promise<void>; controller: AbortController }>();
 
+// ponytail: evolve is already incremental (runProjection skips by offset), but journal.allEvents has no
+// fromSequenceNr, so each call re-reads and JSON.parses the whole category — twice per command, once per
+// projection. Measured 4.8 ms over 688 events (564 KB); linear, so ~70 ms around 10k events. Replace with
+// a per-entity loop over journal.loadEvents(from offset) when a command starts feeling slow.
 function refresh(): void {
   runProjection(taskDetailProjection, journal, views, { eventCodec: taskEventCodec });
   runProjection(taskSummaryProjection, journal, views, { eventCodec: taskEventCodec });
