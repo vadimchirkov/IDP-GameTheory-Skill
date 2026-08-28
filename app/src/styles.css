@@ -99,19 +99,13 @@ button:disabled { opacity: .42; cursor: not-allowed; transform: none }
 .section:last-child { border-bottom: 0 }
 .eyebrow, .dialog-kicker { color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase }
 .brief { margin: 7px 0 12px; font-size: 16px; font-weight: 540; line-height: 1.35; letter-spacing: -.015em; text-wrap: pretty }
-.editable-text { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px }
 .actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center }
 .actions .ui-icon { width: 14px; height: 14px }
 .section .actions { margin-top: 10px }
 .dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #666a70 }
 .dot.on { background: var(--good); box-shadow: 0 0 0 3px rgba(88, 185, 157, .08) }
-.run-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: 9px }
-.run-form label span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px }
-.run-form input, textarea, select, .decision input, .advanced-field input, .agent-picker-grid select { width: 100%; min-width: 0; min-height: 36px; border: 0; border-radius: 8px; background: #191919; padding: 8px 10px; box-shadow: inset 0 0 0 1px var(--line); transition: background-color 160ms ease, box-shadow 160ms ease }
+textarea, select, .advanced-field input, .agent-picker-grid select { width: 100%; min-width: 0; min-height: 36px; border: 0; border-radius: 8px; background: #191919; padding: 8px 10px; box-shadow: inset 0 0 0 1px var(--line); transition: background-color 160ms ease, box-shadow 160ms ease }
 input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
-.run-form .primary { grid-column: 1 / -1 }
-.run-form.single { grid-template-columns: 1fr }
-.run-hint { margin-top: 9px; color: var(--muted); font-size: 10px }
 .section-heading { display: flex; align-items: center; justify-content: space-between }
 .section-heading > span { min-width: 20px; border-radius: 999px; background: var(--surface); padding: 2px 6px; color: var(--muted); font-size: 9px; text-align: center }
 .runs { display: grid; gap: 4px; margin-top: 10px }
@@ -139,9 +133,6 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .list-empty { padding-top: 38px }
 .list-empty > .ui-icon { width: 20px; height: 20px; margin-bottom: 10px; color: var(--muted) }
 
-.proposal { margin-top: 13px; padding: 12px; border-radius: 11px; background: var(--surface) }
-.proposal p { margin: 4px 0 8px; font-size: 11px }
-.proposal-count { color: var(--muted); font-size: 10px }
 .error { margin-top: 7px; color: var(--bad); font-size: 11px }
 .error b { font-weight: 620 }
 .load-error { display: grid; gap: 8px; padding: 9px; border: 1px solid rgba(226, 109, 101, .35); border-radius: 8px; color: var(--bad); font-size: 11px }
@@ -151,19 +142,7 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .clarifications summary::-webkit-details-marker { display: none }
 .clarifications summary::after { width: 6px; height: 6px; margin-right: 5px; border-right: 1.4px solid var(--muted); border-bottom: 1.4px solid var(--muted); content: ""; transform: rotate(45deg); transition: transform 160ms ease }
 .clarifications[open] summary::after { transform: rotate(225deg) }
-.clarification-list { display: grid; gap: 2px }
-.clarification { display: grid; grid-template-columns: minmax(0, 1fr) 32px 32px; gap: 2px; align-items: center; margin: 0 -6px; padding: 6px 6px; border-radius: 8px; transition: background-color 150ms ease }
-.clarification:hover { background: rgba(255, 255, 255, .03) }
-.clarification small, .clarification span { display: block }
-.clarification small { margin-bottom: 2px; color: var(--muted) }
-.clarification span { overflow-wrap: anywhere; font-size: 11px }
-.inline-edit, .inline-refresh, .inline-delete { width: 32px; min-height: 32px; padding: 0; background: transparent; color: var(--muted-strong) }
-.inline-edit, .inline-delete { opacity: 0; transition: opacity 160ms ease, color 160ms ease, background-color 150ms ease }
-.editable-text:hover .inline-edit, .clarification:hover .inline-edit, .clarification:hover .inline-delete, .inline-edit:focus-visible, .inline-delete:focus-visible { opacity: 1 }
-.inline-edit:hover, .inline-refresh:hover { border-color: transparent; background: transparent; color: var(--ink) }
-.inline-delete:hover { border-color: transparent; background: rgba(226, 109, 101, .1); color: var(--bad) }
-.legacy-note { color: var(--muted) }
-@media (hover: none) { .inline-edit, .row-delete { opacity: 1 } .task-row .task-meta time { opacity: 0 } }
+@media (hover: none) { .row-delete { opacity: 1 } .task-row .task-meta time { opacity: 0 } }
 
 .river-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; background: var(--bg) }
 .river-toolbar { position: relative; z-index: 2; flex: 0 0 52px; display: flex; align-items: center; gap: 6px; padding: 0 12px; box-shadow: 0 1px var(--line) }
@@ -219,7 +198,6 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .workflow-copy { max-width: 440px; margin:11px auto 0; color:var(--muted-strong); font-size:10px; line-height:1.4 }
 .workflow-live { margin-top:10px; padding:8px; border-radius:9px; background:rgba(255,255,255,.035) }
 .workflow-live .river-activity { justify-content:flex-start; gap:9px }.workflow-live .river-orbit { width:24px; height:24px }
-.workflow-live.spd-live { display: flex; justify-content: center; margin-top: 0; padding: 0; background: transparent }
 .workflow-simulation { width: min(100%, 440px); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 18px; margin: 24px auto 0; border-top: 1px solid var(--line); padding-top: 18px; text-align: left }
 .workflow-simulation p { margin: 4px 0 0; color: var(--muted); font-size: 9px }
 .workflow-run { display:grid; grid-template-columns:116px auto; gap:8px; align-items:end; margin:0; text-align:left }
@@ -260,20 +238,6 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 @keyframes river-hue { to { filter: hue-rotate(360deg) } }
 @media (prefers-reduced-motion: reduce) { .river-flood { animation: none } }
 
-.spd { display: grid; gap: 12px; width: min(100%, 360px); color: var(--ink); text-align: left }
-.spd__intro { text-align: center }
-.spd__intro h2 { margin: 5px 0 0; font-size: 18px; font-weight: 590; letter-spacing: -.025em }
-.spd__intro p { margin: 7px auto 0; max-width: 340px; color: var(--muted); font-size: 10px; line-height: 1.5; text-wrap: pretty }
-.spd__canvas { display: block; width: 100%; height: auto; aspect-ratio: 1; overflow: hidden; border-radius: 12px; image-rendering: pixelated; background: var(--surface); box-shadow: 0 12px 30px rgba(0, 0, 0, .22), inset 0 0 0 1px var(--line) }
-.spd__legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 12px; color: var(--muted); font-size: 9px }
-.spd__chip { display: inline-flex; align-items: center; gap: 5px }
-.spd__swatch { width: 8px; height: 8px; border-radius: 2px }
-.spd__controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 12px; padding-top: 2px }
-.spd__actions { display: flex; gap: 6px }
-.spd__actions button { min-height: 32px; padding-inline: 10px; font-size: 10px }
-.spd__temptation { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 9px }
-.spd__temptation input { grid-column: 1 / -1; width: 100%; accent-color: var(--muted-strong) }
-.spd__temptation b { color: var(--ink); font-weight: 590 }
 
 dialog { width: min(600px, calc(100vw - 28px)); max-height: calc(100vh - 28px); overflow: auto; border: 0; border-radius: 18px; padding: 0; background: #202020; color: var(--ink); box-shadow: 0 28px 80px rgba(0, 0, 0, .52), 0 0 0 1px rgba(255, 255, 255, .07) }
 dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
@@ -281,31 +245,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
 .dialog-form h2 { margin: 4px 0 0; font-size: 22px; font-weight: 620; line-height: 1.15; letter-spacing: -.025em }
 .dialog-form p { margin: 7px 0 16px; color: var(--muted) }
 .dialog-form textarea { min-height: 150px; resize: vertical; font-size: 14px }
-.prompt-hints-loading { margin-top: 10px; color: var(--muted); font-size: 12px }
-.prompt-hints { margin-top: 12px; color: var(--muted); font-size: 12px }
-.prompt-hints > span { display: block; margin-bottom: 5px; color: var(--text); font-weight: 600 }
-.prompt-hints ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none }
-.prompt-hints li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding-left: 13px; line-height: 1.45 }
-.prompt-hints li::before { position: absolute; left: 2px; top: .65em; width: 3px; height: 3px; border-radius: 50%; background: currentColor; content: ""; opacity: .65 }
-.hint-research { min-height: 32px; padding: 0 8px; color: var(--muted-strong); font-size: 10px }
-.hint-research:hover { background: transparent; color: var(--ink) }
-.hint-research .ui-icon { width: 14px; height: 14px }
 .dialog-actions { position: sticky; bottom: -22px; display: flex; justify-content: flex-end; gap: 8px; margin: 20px -22px -22px; padding: 12px 22px; background: rgba(32, 32, 32, .96) }
-.decision-grid { display: grid; gap: 9px }
-.decision { display: block; padding: 14px; border-radius: 11px; background: var(--bg) }
-.decision small { display: block; margin-bottom: 8px; color: var(--muted) }
-.decision-value { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 8px; align-items: start; margin: 0; padding: 8px 10px; border-radius: 8px; cursor: text; min-height: 36px; box-sizing: border-box; transition: background-color 150ms ease }
-.decision-value:hover { background: rgba(255, 255, 255, .03) }
-.decision-value span, .decision-input { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; line-height: 1.45; padding: 0; margin: 0; font-weight: 400; letter-spacing: 0; box-sizing: border-box }
-.decision-value span { display: block; color: var(--ink); min-height: 20px }
-.decision-value .inline-edit { opacity: 0; align-self: start; margin-top: 0 }
-.decision-value:hover .inline-edit, .decision-value:focus-within .inline-edit { opacity: 1 }
-.decision-value.is-editing { background: rgba(255, 255, 255, .03); cursor: text }
-.decision-input { display: block; width: 100%; min-width: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); box-shadow: none; outline: none; resize: none; overflow: hidden; field-sizing: content; min-height: 20px }
-.decision-input:focus { background: transparent; box-shadow: none; outline: none }
-.decision-input::placeholder { color: var(--muted) }
-.decision-placeholder { color: var(--muted) }
-.proposal-copy { margin-bottom: 14px }
 .model-dialog { width: min(680px, calc(100vw - 28px)) }
 .model-dialog textarea { min-height: min(48vh, 520px) }
 .code { resize: vertical; white-space: pre; tab-size: 2; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: slashed-zero }
@@ -314,9 +254,6 @@ dialog::backdrop { background: rgba(0, 0, 0, .68); backdrop-filter: blur(2px) }
 .advanced-field small { display: block; margin-top: 5px; color: var(--muted) }
 .agent-picker-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.35fr) minmax(0, .8fr); gap: 7px }
 .agent-picker-grid label > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 500 }
-.sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 15px }
-.sources a { border-radius: 999px; background: var(--surface); padding: 4px 9px; color: var(--muted); font-size: 10px; text-decoration: none }
-.sources a:hover { color: var(--ink) }
 .settings-dialog { width: min(720px, calc(100vw - 28px)); background: #1d1d1d }
 .settings-dialog .dialog-form { padding: 0 }
 .settings-header { padding: 24px 24px 4px }
@@ -438,8 +375,6 @@ label:has(> select:disabled)::after { opacity: .4 }
 .markdown-message a { color: #d7d7d7; text-decoration: underline; text-decoration-color: rgba(255, 255, 255, .28); text-underline-offset: 3px }
 .markdown-message a:hover { text-decoration-color: currentColor }
 .chat-form { padding: 8px 10px 10px; background: #202020 }
-.chat-revise { min-height: 32px; margin-bottom: 7px; border-radius: 8px; background: rgba(255, 255, 255, .045); color: var(--muted-strong); font-size: 9px }
-.chat-revise:hover { background: rgba(255, 255, 255, .08); color: var(--ink) }
 .chat-quick-actions { display: grid; gap: 7px; margin-bottom: 10px }
 .chat-quick-actions button { min-height: 40px; justify-content: flex-start; border-radius: 9px; background: rgba(255, 255, 255, .045); padding: 9px 11px; color: var(--muted-strong); font-size: 12px; line-height: 1.35; text-align: left }
 .chat-quick-actions button:hover { color: var(--ink) }
@@ -504,6 +439,8 @@ label:has(> select:disabled)::after { opacity: .4 }
 .fact-text { display: block; width: 100%; border: 0; background: transparent; color: var(--ink); padding: 0; font: inherit; font-size: 11.5px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; cursor: text }
 .fact.outcome .fact-text { color: var(--muted-strong) }
 .fact-remove { width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer }
+.fact-remove, .question-dismiss { position: relative }
+.fact-remove::before, .question-dismiss::before { position: absolute; inset: -6px; content: "" }
 .fact-remove:hover:not(:disabled) { background: rgba(200, 117, 99, .16); color: #dc8b79 }
 
 .fact-group-label { margin: 13px 0 3px; color: var(--muted-strong); font-size: 9px; text-transform: uppercase; letter-spacing: .04em }
@@ -570,22 +507,9 @@ fieldset.model-fields { min-inline-size: 0 }
 @keyframes model-spin { to { transform:rotate(360deg) } }
 .rebuild-button { min-height:28px; border-radius:8px; background:rgba(255,255,255,.06); color:var(--ink); font-weight:570; padding:0 10px }
 .rebuild-button:hover:not(:disabled) { background:rgba(255,255,255,.1) }
-.agent-stream { margin-top:10px; display:grid; gap:6px }
-.model-progress { display:grid; gap:5px; margin:0; padding:2px 0 2px 1px; list-style:none }
-.model-progress li { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:10px; line-height:1.3 }
-.model-progress i { width:12px; height:12px; display:grid; place-items:center; border:1px solid var(--line-strong); border-radius:50%; color:transparent; font-size:8px; font-style:normal }
-.model-progress li.done { color:var(--muted-strong) }
-.model-progress li.done i { border-color:var(--good); background:var(--good); color:#17211e }
-.model-progress li.active { color:var(--ink) }
-.model-progress li.active i { border-color:var(--ink); box-shadow:0 0 0 3px rgba(255,255,255,.08); animation:model-pulse 1.2s ease-in-out infinite }
 @keyframes model-pulse { 50% { opacity:.5 } }
-.agent-log { max-height:160px; overflow:auto; display:grid; gap:4px; padding:8px 10px; border-radius:9px; background:rgba(255,255,255,.035); border:1px solid var(--line); font:11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric:slashed-zero }
-.agent-log-line { color:var(--muted-strong); white-space:pre-wrap; word-break:break-word }
-.agent-log-line.muted { color:var(--muted); font-style:italic }
-.model-success { margin-top:10px; padding:8px 10px; border-radius:9px; background:rgba(103,185,159,.12); color:#7fd0b3; font-size:11px; border:1px solid rgba(103,185,159,.18) }
 .note-row { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) 20px; gap: 5px; align-items: center; margin-bottom: 5px }
 .agent-drawer-banner { margin: 8px 12px; padding: 8px 10px; border-radius: 9px; background: rgba(210,154,58,.12); border: 1px solid rgba(210,154,58,.22); color: #e8c07a; font-size: 11px; display: flex; align-items: center; gap: 6px }
-.agent-draft-ready { margin-top: 8px; border-radius: 8px; background: rgba(103,185,159,.1); color: #8bd3bb; padding: 7px 8px; font-size: 10px; line-height: 1.35 }
 .pending-outcome { margin: 8px 12px; padding: 10px; border-radius: 10px; background: #191919; border: 1px solid var(--line-strong); display: grid; gap: 8px }
 .pending-outcome b { font-size: 11px; display: block }
 .pending-outcome span { color: var(--muted-strong); font-size: 10px; display: block; margin-top: 2px; overflow-wrap: anywhere }
@@ -594,7 +518,6 @@ fieldset.model-fields { min-inline-size: 0 }
 .river-tools { display: flex; justify-content: flex-end; gap: 6px; padding: 6px 12px }
 .river-tools button { min-height: 32px; border-radius: 8px; background: transparent; color: var(--muted-strong); padding: 0 4px; font-size: 9px }
 .river-tools button:hover { background: transparent; color: var(--ink) }
-.living-hint { font-size: 9px; color: var(--good); margin-top: 4px }
 .model-build-report { width: min(440px, 100%); flex: 0 0 auto; margin: 12px auto 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); text-align: left }
 .model-build-report-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 590 }
 .model-build-report-head small { color: var(--accent); font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em }

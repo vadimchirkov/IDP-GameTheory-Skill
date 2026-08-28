@@ -219,14 +219,13 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [modelError, setModelError] = useState("");
   const [nextSeed, setNextSeed] = useState<number>();
   const [agentKey, setAgentKey] = useState(savedSelection);
-  const [runAgentKey, setRunAgentKey] = useState("");
   const [settingsAgentKey, setSettingsAgentKey] = useState("");
   const [keyProvider, setKeyProvider] = useState("openai");
   const [apiKey, setApiKey] = useState("");
   const [keyError, setKeyError] = useState("");
   const [agentPanel, setAgentPanel] = useState(() => {
     const saved = localStorage.getItem("pane-agent");
-    return saved ? saved === "open" : window.matchMedia("(min-width: 901px)").matches;
+    return saved === "open";
   });
   const [relabelPending, setRelabelPending] = useState(false);
   const [chatError, setChatError] = useState("");
@@ -554,7 +553,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const openModel = () => {
     if (!current) return;
     setModelError("");
-    setRunAgentKey(selectedAgent ? selectionValue(selectedAgent) : agentKey);
     openDialog(modelDialog.current);
   };
 
@@ -666,7 +664,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       const seed = rawSeed ? Number(rawSeed) : undefined;
       if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 1 || seed > 2_147_483_647)) throw new Error("Seed must be an integer from 1 to 2147483647");
       setNextSeed(seed);
-      if (runAgentKey) { setAgentKey(runAgentKey); saveSelection(runAgentKey, models); }
       modelDialog.current?.close();
     } catch (error) { setModelError(error instanceof Error ? error.message : String(error)); }
   };
@@ -797,7 +794,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
         </div>}
       </div> : centerTab === "model" ? <div className="model-pane">
         {task.isPending && taskId && <div className="empty-runs">Loading situation…</div>}
-        {task.isError && <ErrorState error={task.error} retry={() => void task.refetch()} />}
+        {task.isError && !current && <ErrorState error={task.error} retry={() => void task.refetch()} />}
         {!taskId && <div className="empty-runs">Select a situation or create a new one.</div>}
         {current && <div className="model-workspace">
           <section className={`workflow-card ${streaming || buildActive ? "toy" : ""}`} aria-label="Scenario workflow">
@@ -875,7 +872,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     </dialog>
 
     <dialog className="model-dialog" ref={modelDialog}>
-      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><div className="advanced-field"><span>Pi for AI labeling</span><AgentPicker providers={agent.data?.providers ?? []} models={models} value={runAgentKey} onChange={setRunAgentKey} prefix="Labeling" /><small>Optional. The simulation remains deterministic; Pi only labels the resulting worlds.</small></div><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label>{modelError &&<div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending}>Save</button></div></form>
+      <form className="dialog-form" onSubmit={(event) => void saveModel(event)}><div className="dialog-kicker">Current situation</div><h2>Run settings</h2><p>Parameters for the next run. You can usually leave them unchanged.</p><label className="advanced-field"><span>Next run seed</span><input type="number" name="seed" min="1" max="2147483647" defaultValue={nextSeed} placeholder="Random" /><small>Leave this blank to generate a new seed automatically.</small></label>{modelError &&<div className="error" role="alert">{modelError}</div>}<div className="dialog-actions"><button type="button" onClick={() => modelDialog.current?.close()}>Cancel</button><button className="primary" disabled={commandMutation.isPending}>Save</button></div></form>
     </dialog>
 
     <dialog className="settings-dialog" ref={settingsDialog}>
