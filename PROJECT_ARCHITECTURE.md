@@ -31,6 +31,12 @@ engine interface or inheriting from framework classes.
   weight;
 - the module contains no graph algorithms or game rules.
 
+`src/simulation.ts` composes the two primitives. A `SimulationSpec` supplies a
+domain model and topology prior; a `SimulationAdapter` simulates one sampled
+world; the runner returns worlds, metric distributions, paths, and sensitivity.
+`src/stochastic-process.ts` is the first concrete adapter and a template for
+queues, markets, cascades, reliability models, or agent-based systems.
+
 ## Compatibility model
 
 `src/analysis.ts` is not the universal engine. It is the existing repeated C/D

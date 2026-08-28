@@ -4,17 +4,18 @@
 
 ![Flumina — a scenario river for "Competition in the AI Model Market in 2026", showing branching outcomes and the AI assistant panel](screenshot.png)
 
-Flumina is a local decision laboratory that combines a game-theory
-engine, an event-sourced TEOB workflow, and an AI agent built on headless Pi. It
-turns an ordinary description of a recurring conflict or partnership into hundreds
-or thousands of reproducible possible futures.
+Flumina is a local simulation laboratory that combines a universal Monte Carlo
+engine, uncertain interaction topology, an event-sourced TEOB workflow, and an AI
+agent built on headless Pi. It turns an ordinary description of a process,
+network, conflict, market, or partnership into hundreds or thousands of
+reproducible possible futures.
 
 Instead of producing one confident prediction, the application shows which outcomes
 remain plausible, which strategies perform well across them, and which assumption
 changes the conclusion. It helps answer three practical questions:
 
-- who tends to come out ahead across plausible versions of the situation;
-- whether cooperation survives, oscillates, or collapses;
+- which outcomes remain plausible across uncertain inputs;
+- how the system moves through its main paths and states;
 - which assumption changes the conclusion and is therefore worth checking first.
 
 The river metaphor is functional: assumptions create currents, actions split them
@@ -29,8 +30,12 @@ AI.
 
 The three parts have distinct responsibilities:
 
-- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** supplies the repeated-game model, strategies, payoffs, reputation,
-  punishment, coalitions, and other interaction mechanisms.
+- **Monte Carlo + topology** supplies deterministic worlds, sampled parameters,
+  uncertain links and generic metrics. It has no knowledge of games, players or
+  payoffs.
+- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** is one compatibility
+  adapter, supplying repeated-game strategies, payoffs, reputation and other
+  interaction mechanisms.
 - **[TEOB](https://github.com/lambda-house/teob-ts)** supplies the experiment lifecycle: commands, immutable events, revision
   checks, durable history, recovery after restart, and projections for current
   views. It makes runs traceable and resumable rather than making the math loop fast.
@@ -47,9 +52,8 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 A scenario is **one context**, **one editable model**, and **one Run button**.
 
-1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
-   shared resource, or another relationship in which 2–10 sides meet repeatedly. What
-   you write becomes the first fact.
+1. **Describe a situation.** Start with a process, network, market, resource,
+   rivalry, alliance, or another evolving system. What you write becomes the first fact.
 2. **Let the agent fill in the rest.** It researches materially useful public facts,
    shows the sources it used, keeps uncertain values broad, and raises only what cannot
    be verified publicly as optional questions. Questions never block anything: answer
@@ -60,9 +64,9 @@ A scenario is **one context**, **one editable model**, and **one Run button**.
 4. **Press Run.** One action validates the current model against the engine's domain
    rules and explores 1–5000 worlds (default 600). Editing context or outcome evidence
    never triggers a run by itself.
-5. **Explore the result.** An interactive river groups worlds by approach, opening,
-   response, development, and outcome. Select a branch to inspect it or replay a
-   representative pair round by round.
+5. **Explore the result.** The report groups worlds by their simulated paths and
+   exposes generic metrics, ranges, sensitivities, and topology-driven branches.
+   The older game adapter additionally supports pair replay.
 6. **Say what actually happened.** An outcome fact reweights the finished run instantly
    — no re-run — to the worlds consistent with it, and reports how many still match.
    Outcome facts never enter the model, so the analysis stays a forecast rather than a
@@ -184,7 +188,19 @@ search plan, validates every public HTTP target, limits response sizes and redir
 and supplies only cleaned excerpts to the modelling prompt. The agent never receives
 filesystem, shell, or unrestricted browser access.
 
-## Simulation model
+## Simulation models
+
+The universal model is a typed simulation specification with four pieces: a
+domain model, an adapter that simulates one world, a topology prior, and generic
+metrics. Every world samples its own uncertain inputs and topology, then the
+engine aggregates distributions, paths, quantiles, and input sensitivity.
+
+The first built-in universal adapter is a bounded stochastic process: nodes have
+initial ranges, drift, volatility, shocks and interactions. New domains should
+implement an adapter against the same core instead of changing the Monte Carlo
+engine.
+
+### Game-theory compatibility adapter
 
 Each pair repeatedly chooses **C** (cooperate) or **D** (defect). Per-round payoffs
 use the conventional values:
@@ -336,9 +352,9 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `example_*.json` | Ready-to-run scenario models |
 ## Limits
 
-- The Monte Carlo and topology core is game-agnostic. The included compatibility
-  model implements repeated, simultaneous 2×2 games; other games plug in as new
-  simulation callbacks and are intentionally not implemented yet.
+- The Monte Carlo and topology core is game-agnostic. The repository currently
+  includes a bounded stochastic-process adapter and a repeated-game compatibility
+  adapter; additional domains plug in as new simulation adapters.
 - Teams are fixed during a run; there is no endogenous coalition formation.
 - AI helps formulate and label the model, but simulated participants follow explicit
   strategies; they are not autonomous LLM agents.
