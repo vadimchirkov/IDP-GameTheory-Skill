@@ -31,22 +31,8 @@ export class Rng {
 }
 
 export function deriveSeed(root: number, ...parts: readonly number[]): number {
-  // Phase 0: extend with optional stateHash/nHash for eco/transitions without shifting legacy seed=42.
-  // If the last two parts are both 0, they are dropped — legacy 4-part path stays bit-identical (verify-pack 2.1).
-  let effective: readonly number[] = parts;
-  if (effective.length >= 6 && effective[effective.length - 1] === 0 && effective[effective.length - 2] === 0) {
-    effective = effective.slice(0, -2);
-  } else if (effective.length === 6 && effective[4] === 0 && effective[5] === 0) {
-    effective = effective.slice(0, 4);
-  }
-  // Also handle the generic 2-zero suffix case (future eco nHash/stateHash == 0 → no extra entropy)
-  if (effective.length > 4 && effective[effective.length - 1] === 0 && effective[effective.length - 2] === 0) {
-    // only strip if stripping keeps at least the original 4 match coords (g,i,j,rep)
-    const stripped = effective.slice(0, -2);
-    if (stripped.length >= 4) effective = stripped;
-  }
   let hash = (root >>> 0) || 0x811c9dc5;
-  for (const part of effective) {
+  for (const part of parts) {
     hash ^= part >>> 0;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }

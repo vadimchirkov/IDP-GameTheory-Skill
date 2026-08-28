@@ -91,6 +91,11 @@ assert.equal(complete.interactions.length, 3, "complete topology creates every p
 assert.equal(interactionsFor(complete, "A").length, 2, "topology queries interactions by participant");
 const sampled = sampleTopology({ nodes: ["A", "B"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [2, 2] }] }, new Rng(1));
 assert.equal(sampled.interactions[0]?.weight, 2, "topology samples uncertain interaction weights");
+assert.throws(() => sampleTopology({ nodes: ["A", "B"], interactions: [{ id: "bad", participants: ["A", "missing"], probability: [0, 0] }] }, new Rng(1)), /unknown node/, "excluded interactions are still validated");
+const uncertain = { id: "B:C", participants: ["B", "C"], probability: [0.5, 0.5] as const, weight: [0, 1] as const };
+const withoutFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [uncertain] }, new Rng(7));
+const withFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [1, 1] }, uncertain] }, new Rng(7));
+assert.deepEqual(withFixed.interactions.find((interaction) => interaction.id === uncertain.id), withoutFixed.interactions[0], "fixed interactions do not shift later random samples");
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
