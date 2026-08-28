@@ -43,6 +43,7 @@ export interface OpenQuestion {
   field?: string;
 }
 
+/** "model" is legacy: old journals carry it, new messages use "context" — both are one pre-run thread. */
 export type AgentMode = "context" | "model" | "river";
 
 /** Persisted conversation memory. The mode records which job the agent was doing for this turn. */

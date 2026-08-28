@@ -3,11 +3,13 @@ import { EntityId } from "@lambda-house/teob-ts/core";
 import { Value } from "typebox/value";
 import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
 import { analyzeScenario, replayScenarioWorld } from "./analysis.js";
+import { sequentialActionAdapter } from "./action-simulation.js";
 import type { ScenarioModel } from "./domain.js";
 import { playMatch, strategies } from "./kernel.js";
 import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
 import { Rng } from "./rng.js";
 import { runStochasticProcess, type StochasticProcessSpec } from "./stochastic-process.js";
+import { runSimulation } from "./simulation.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
@@ -20,6 +22,36 @@ const payoff = { T: 5, R: 3, P: 1, S: 0 };
 const match = playMatch(strategies.exploitative, strategies.trusting, payoff, payoff, 20, 0, new Rng(1));
 assert.equal(match.scoreA, 100);
 assert.equal(match.scoreB, 0);
+
+// Action adapters reuse the same Monte Carlo/topology runner: actions affect state,
+// while topology changes the transition rule rather than the engine contract.
+type Reservoir = { water: number; shortage: number };
+const reservoirSpec = {
+  schemaVersion: 1 as const, adapter: "reservoir-actions", situation: "shared reservoir",
+  topology: { nodes: ["farm-a", "farm-b", "farm-c"], interactions: [{ id: "ab", participants: ["farm-a", "farm-b"], probability: [0, 1] as const }, { id: "bc", participants: ["farm-b", "farm-c"], probability: [0, 1] as const }] },
+  model: { steps: 20, initial: [60, 90] as const, rain: [0, 8] as const, demand: [4, 10] as const },
+};
+const reservoir = sequentialActionAdapter<typeof reservoirSpec.model, Reservoir, number, { final: Reservoir; actionSteps: number }>({
+  id: "reservoir-actions", validate: () => {}, steps: (model) => model.steps,
+  actors: () => ["farm-a", "farm-b", "farm-c"],
+  initialState: (model, rng) => ({ water: rng.between(model.initial), shortage: 0 }),
+  chooseAction: (model, _actor, _state, _topology, rng) => model.demand[0] + rng.unit() * (model.demand[1] - model.demand[0]),
+  transition: (model, state, actions, topology, rng) => {
+    const use = Object.values(actions).reduce((sum, value) => sum + Number(value), 0);
+    const coordination = topology.interactions.length ? 0.9 : 1.1;
+    const water = Math.max(0, Math.min(100, state.water + rng.between(model.rain) - use * coordination));
+    return { water, shortage: state.shortage + (water < 15 ? 1 : 0) };
+  },
+  observe: (_model, initial, final, history, topology) => ({
+    inputs: { initial_water: initial.water, links: topology.interactions.length },
+    metrics: { final_water: final.water, shortage_steps: final.shortage },
+    path: [topology.interactions.length ? "connected" : "fragmented", final.water < 15 ? "shortage" : "survives"],
+    payload: { final, actionSteps: history.length },
+  }),
+});
+const reservoirRun = runSimulation(reservoirSpec, reservoir, 200, 17);
+assert.ok(reservoirRun.metrics.final_water && reservoirRun.paths["connected → shortage"] !== undefined, "action adapter produces topology-dependent worlds");
+assert.deepEqual(runSimulation(reservoirSpec, reservoir, 20, 17), runSimulation(reservoirSpec, reservoir, 20, 17), "action adapter remains deterministic for a fixed seed");
 
 const scenario: ScenarioModel = {
   situation: "exploit check",
