@@ -3,6 +3,7 @@ export * from "./rng.js";
 export * from "./monte-carlo.js";
 export * from "./topology.js";
 export * from "./simulation.js";
+export * from "./action-simulation.js";
 export * from "./stochastic-process.js";
 export * from "./model.js";
 export * from "./generic-report.js";

@@ -229,8 +229,9 @@ async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, t
   if (answer.tag === "Rejected") throw new Error(answer.reason);
 }
 
-const conversationOf = (state: TaskState, mode: AgentMode) => (state.messages ?? [])
-  .filter((message) => message.mode === mode)
+/** Two conversations, not three: everything before a run is one thread ("model" is a legacy mode). */
+const conversationOf = (state: TaskState, bucket: "context" | "river") => (state.messages ?? [])
+  .filter((message) => (bucket === "river" ? message.mode === "river" : message.mode !== "river"))
   .slice(-12)
   .map(({ role, text }) => ({ role, text }));
 
@@ -379,7 +380,7 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
     if (completed.tag === "Rejected") throw new Error(completed.reason);
     await ask(id, { tag: "RecordResearch", sources: built.sources, now: new Date().toISOString() });
     await ask(id, { tag: "SuggestQuestions", questions: built.questions.map((question) => ({ id: randomUUID(), ...question })), now: new Date().toISOString() });
-    await addMessage(id, "agent", "model", built.completionMessage);
+    await addMessage(id, "agent", "context", built.completionMessage);
   } catch (error) {
     await progress.catch(() => {});
     if (signal.aborted) return;
@@ -512,19 +513,18 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const clarifyId = clarifyMatch[1]!;
     const input = await body(req); const state = detail(clarifyId);
     if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
-    const mode: "context" | "model" = input.mode === "model" ? "model" : "context";
     const message = String(input.message ?? "").trim();
     if (message.length > 4_000) { send(res, 422, { error: "The message is too long" }); return; }
     const stream = req.headers.accept?.includes("text/event-stream") ? startEventStream(res) : undefined;
     const emit = (payload: unknown) => stream?.emit(payload);
-    if (message) await addMessage(clarifyId, "user", mode, message, undefined, String(input.clientMessageId ?? ""));
+    if (message) await addMessage(clarifyId, "user", "context", message, undefined, String(input.clientMessageId ?? ""));
     const fresh = detail(clarifyId)!;
     const controller = new AbortController();
     req.once("aborted", () => controller.abort());
     res.once("close", () => { if (!res.writableEnded) controller.abort(); });
     try {
-      emit({ kind: "status", stage: "reading", message: mode === "model" ? "Reading the model…" : "Reading the context…" });
-      let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }));
+      emit({ kind: "status", stage: "reading", message: "Reading the context…" });
+      let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }));
       let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
       if (guided.researchQueries.length) {
         emit({ kind: "status", stage: "research", message: "Checking public sources…" });
@@ -532,7 +532,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         if (researched.length) {
           emit({ kind: "text", text: "" });
           emit({ kind: "status", stage: "synthesis", message: "Connecting the evidence…" });
-          guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, mode), message || undefined, mode, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }));
+          guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }));
         }
       }
       if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
@@ -546,7 +546,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const now = new Date().toISOString();
       await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
       await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
-      await addMessage(clarifyId, "agent", mode, guided.message, guided.suggestions);
+      await addMessage(clarifyId, "agent", "context", guided.message, guided.suggestions);
       const result = { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId) };
       if (stream) { emit({ kind: "done", result }); stream.end(); } else send(res, 200, result);
     } catch (error) {

@@ -67,7 +67,6 @@ export async function continueContext(
   current: unknown | undefined,
   history: readonly ConversationMessage[],
   userMessage: string | undefined,
-  mode: "context" | "model",
   selection?: AgentSelection,
   researchSources: readonly ResearchSource[] = [],
   signal?: AbortSignal,
@@ -85,7 +84,7 @@ export async function continueContext(
     ...(onText ? { onText } : {}),
     prompt: `You help a user turn a real situation into a simulation. Reply in the same language as the user's latest message (or the situation when there is no latest message), using plain language. Do not mention game theory, mathematical terms, hidden schemas, or internal modes.
 
-The current mode is ${mode}. ${mode === "context" ? "No model exists yet." : "A model exists, but the user is discussing its assumptions before an explicit rebuild."}
+${current ? "A model exists, but the user is discussing its assumptions before an explicit rebuild." : "No model exists yet."}
 Classify the latest message as:
 - kind="context" when it supplies or corrects a material fact about the situation. Put a concise standalone version of that fact in contextNote.
 - kind="answer" when it is a question, request, or conversational remark. Set contextNote to null.
