@@ -598,6 +598,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const assetsOf = (analysis: TaskAnalysis) => [analysis.visualUrl, analysis.artifactUrl].filter((value): value is string => !!value);
       const reports = command.tag === "DeleteTask" ? before?.analyses.flatMap(assetsOf) ?? [] : removed ? assetsOf(removed) : [];
       const answer = await ask(id, command);
+      if (answer.tag === "Accepted" && command.tag === "DeleteTask") {
+        analysisJobs.get(id)?.abort();
+        modelBuildJobs.get(id)?.controller.abort();
+        listeners.get(id)?.forEach((listener) => listener.end());
+        listeners.delete(id);
+      }
       if (answer.tag === "Accepted") await Promise.all(reports.map(removeReport));
       if (answer.tag === "Accepted" && command.tag === "CancelAnalysis") analysisJobs.get(id)?.abort();
       if (answer.tag === "Accepted" && command.tag === "CancelModelBuild") modelBuildJobs.get(id)?.controller.abort();
