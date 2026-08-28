@@ -7,6 +7,7 @@ import type { ScenarioModel } from "./domain.js";
 import { playMatch, strategies } from "./kernel.js";
 import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
 import { Rng } from "./rng.js";
+import { runStochasticProcess, type StochasticProcessSpec } from "./stochastic-process.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
@@ -96,6 +97,26 @@ const uncertain = { id: "B:C", participants: ["B", "C"], probability: [0.5, 0.5]
 const withoutFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [uncertain] }, new Rng(7));
 const withFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [1, 1] }, uncertain] }, new Rng(7));
 assert.deepEqual(withFixed.interactions.find((interaction) => interaction.id === uncertain.id), withoutFixed.interactions[0], "fixed interactions do not shift later random samples");
+const processSpec: StochasticProcessSpec = {
+  schemaVersion: 1,
+  adapter: "stochastic-process",
+  situation: "A shock spreads through two connected components",
+  topology: { nodes: ["source", "target"], interactions: [{ id: "link", participants: ["source", "target"], probability: [0.5, 0.5], weight: [0.5, 1] }] },
+  model: {
+    horizon: [4, 8], bounds: [0, 100], interactionRate: [0.1, 0.3],
+    nodes: [
+      { id: "source", initial: [70, 90], drift: [-2, 0], volatility: [0, 2] },
+      { id: "target", initial: [10, 30], drift: [0, 1], volatility: [0, 2] },
+    ],
+    shocks: [{ id: "outage", probability: [0.05, 0.2], delta: [-25, -10] }],
+    metrics: [{ id: "health", kind: "mean" }, { id: "failures", kind: "below", threshold: 20 }],
+  },
+};
+const processRun = runStochasticProcess(processSpec, 80, 123);
+assert.deepEqual(processRun, runStochasticProcess(processSpec, 80, 123), "stochastic processes replay exactly from one seed");
+assert.equal(processRun.worlds.length, 80, "the generic process produces one persisted world per trial");
+assert.ok(processRun.worlds.some((world) => world.topology.interactions.length === 0) && processRun.worlds.some((world) => world.topology.interactions.length === 1), "uncertain topology is sampled inside every world");
+assert.ok(processRun.metrics.health && processRun.sensitivity.health?.length, "generic metrics and sensitivity are summarized without game semantics");
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.

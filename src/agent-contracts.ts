@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { feasiblePayoffRanges, strategyIds, type GameType, type PayoffRanges, type ScenarioModel } from "./domain.js";
+import type { StochasticProcessSpec } from "./stochastic-process.js";
 
 const closed = { additionalProperties: false } as const;
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
@@ -7,6 +8,75 @@ const stringEnum = <const T extends readonly string[]>(values: T) =>
   Type.Unsafe<T[number]>({ type: "string", enum: [...values] });
 
 export const rangeSchema = Type.Object({ min: Type.Number(), max: Type.Number() }, closed);
+
+const processNodeSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 80 }),
+  label: Type.String({ minLength: 1, maxLength: 120 }),
+  initial: rangeSchema,
+  drift: rangeSchema,
+  volatility: rangeSchema,
+}, closed);
+const processInteractionSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 80 }),
+  participants: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { minItems: 2 }),
+  probability: rangeSchema,
+  weight: rangeSchema,
+}, closed);
+const processShockSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 80 }),
+  probability: rangeSchema,
+  delta: rangeSchema,
+  nodes: Type.Array(Type.String({ minLength: 1, maxLength: 80 })),
+}, closed);
+const processMetricSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 80 }),
+  kind: stringEnum(["mean", "sum", "min", "max", "above", "below"] as const),
+  threshold: nullable(Type.Number()),
+}, closed);
+export const stochasticProcessDraftSchema = Type.Object({
+  horizon: rangeSchema,
+  bounds: rangeSchema,
+  interactionRate: rangeSchema,
+  nodes: Type.Array(processNodeSchema, { minItems: 1, maxItems: 30 }),
+  interactions: Type.Array(processInteractionSchema, { maxItems: 120 }),
+  shocks: Type.Array(processShockSchema, { maxItems: 20 }),
+  metrics: Type.Array(processMetricSchema, { minItems: 1, maxItems: 8 }),
+  questions: Type.Array(Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 200 }), field: nullable(Type.String({ minLength: 1, maxLength: 80 })) }, closed), { maxItems: 4 }),
+  completionMessage: Type.String({ minLength: 1, maxLength: 320 }),
+}, closed);
+export type StochasticProcessDraft = Static<typeof stochasticProcessDraftSchema>;
+
+const id = (value: string, fallback: string): string => value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback;
+export function normalizeStochasticProcessDraft(output: StochasticProcessDraft, situation: string): StochasticProcessSpec {
+  const used = new Set<string>();
+  const nodes = output.nodes.map((node, index) => {
+    let nodeId = id(node.id, `node-${index + 1}`);
+    while (used.has(nodeId)) nodeId = `${nodeId}-${index + 1}`;
+    used.add(nodeId);
+    return { id: nodeId, label: node.label.trim(), initial: normalizeRange(node.initial), drift: normalizeRange(node.drift), volatility: normalizeRange(node.volatility) };
+  });
+  const sourceIds = new Map(output.nodes.map((node, index) => [node.id, nodes[index]!.id]));
+  const resolveNode = (value: string) => sourceIds.get(value) ?? id(value, value);
+  return {
+    schemaVersion: 1,
+    adapter: "stochastic-process",
+    situation,
+    topology: {
+      nodes: nodes.map((node) => node.id),
+      interactions: output.interactions.map((interaction, index) => ({
+        id: id(interaction.id, `interaction-${index + 1}`),
+        participants: interaction.participants.map(resolveNode),
+        probability: normalizeRange(interaction.probability),
+        weight: normalizeRange(interaction.weight),
+      })),
+    },
+    model: {
+      horizon: normalizeRange(output.horizon), bounds: normalizeRange(output.bounds), interactionRate: normalizeRange(output.interactionRate), nodes,
+      shocks: output.shocks.map((shock, index) => ({ id: id(shock.id, `shock-${index + 1}`), probability: normalizeRange(shock.probability), delta: normalizeRange(shock.delta), ...(shock.nodes.length ? { nodes: shock.nodes.map(resolveNode) } : {}) })),
+      metrics: output.metrics.map((metric, index) => ({ id: id(metric.id, `metric-${index + 1}`), kind: metric.kind, ...(metric.threshold !== null ? { threshold: metric.threshold } : {}) })),
+    },
+  };
+}
 export const payoffSchema = Type.Object({ T: rangeSchema, R: rangeSchema, P: rangeSchema, S: rangeSchema }, closed);
 const gameSchema = stringEnum(["prisoners_dilemma", "chicken", "stag_hunt", "snowdrift"] as const);
 
