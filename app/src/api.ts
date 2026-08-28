@@ -117,7 +117,7 @@ export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
 export const createTask = (text: string) => post<TaskState>("/api/tasks", { text });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
 export const understandTask = (id: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
-export const clarifyTask = (id: string, value: { message?: string; mode: "context" | "model"; agent?: AgentSelection }, signal?: AbortSignal) => api<ChatResult & { task: TaskState }>(`/api/tasks/${id}/clarify`, { method: "POST", body: JSON.stringify(value), signal });
+export const clarifyTask = (id: string, value: { message?: string; agent?: AgentSelection }, signal?: AbortSignal) => api<ChatResult & { task: TaskState }>(`/api/tasks/${id}/clarify`, { method: "POST", body: JSON.stringify(value), signal });
 export async function understandTaskStream(id: string, agent: AgentSelection | undefined, onEvent: (ev: Record<string, unknown>) => void): Promise<TaskState> {
   const response = await fetch(`/api/tasks/${id}/understand/stream`, {
     method: "POST",
