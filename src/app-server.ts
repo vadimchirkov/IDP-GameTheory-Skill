@@ -7,9 +7,10 @@ import { CategoryId, EntityId, SequenceNr } from "@lambda-house/teob-ts/core";
 import { createInMemoryProjectionStore, runProjection } from "@lambda-house/teob-ts/projection";
 import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite";
 import type { ScenarioModel } from "./domain.js";
+import { isStochasticProcess, type SimulationModel } from "./model.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildScenarioModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
+import { buildStochasticProcessModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
@@ -17,6 +18,7 @@ import {
   type AgentMode, type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
+import type { SimulationArtifact } from "./simulation.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { researchPublicContext } from "./web-research.js";
 
@@ -197,7 +199,7 @@ function commandFrom(input: Record<string, unknown>): TaskCommand {
     case "EditFact": return { tag: "EditFact", factId: String(input.factId ?? ""), text: String(input.text ?? ""), now };
     case "RemoveFact": return { tag: "RemoveFact", factId: String(input.factId ?? ""), now };
     case "SetSituation": return { tag: "SetSituation", text: String(input.text ?? ""), now };
-    case "SetModel": return { tag: "SetModel", model: input.model as ScenarioModel, now };
+    case "SetModel": return { tag: "SetModel", model: input.model as SimulationModel, now };
     case "DismissQuestion": return { tag: "DismissQuestion", questionId: String(input.questionId ?? ""), now };
     case "RemoveAnalysis": return { tag: "RemoveAnalysis", analysisId: String(input.analysisId ?? ""), now };
     case "DeleteTask": return { tag: "DeleteTask", now };
@@ -232,7 +234,7 @@ const conversationOf = (state: TaskState, mode: AgentMode) => (state.messages ??
   .slice(-12)
   .map(({ role, text }) => ({ role, text }));
 
-function analysisWorker(model: ScenarioModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
+function analysisWorker(model: SimulationModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact | SimulationArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
     const worker = new Worker(new URL("./analysis-worker.ts", import.meta.url), { workerData: { model, trials, seed } });
     let settled = false;
@@ -240,7 +242,7 @@ function analysisWorker(model: ScenarioModel, trials: number, seed: number, sign
     const abort = () => { void worker.terminate(); finish(() => reject(new Error("Analysis was cancelled"))); };
     const timer = setTimeout(() => { void worker.terminate(); finish(() => reject(new Error(`Analysis timed out after ${analysisTimeoutMs}ms`))); }, analysisTimeoutMs);
     signal.addEventListener("abort", abort, { once: true });
-    worker.once("message", (message: { ok: boolean; html?: string; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
+    worker.once("message", (message: { ok: boolean; html?: string; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact | SimulationArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
       if (message.ok && message.html && message.labelNodes && message.artifact && message.summary) finish(() => resolvePromise({ html: message.html!, labelNodes: message.labelNodes!, artifact: message.artifact!, summary: message.summary! }));
       else finish(() => reject(new Error(message.error ?? "Analysis failed")));
     });
@@ -289,7 +291,7 @@ function completedRunMessage(model: ScenarioModel, analysis: TaskAnalysis): stri
  * The stored model is the source of truth, but if the situation text changed since the model was built
  * we rebuild first — otherwise Run would simulate stale assumptions. Outcome facts are never part of the build.
  */
-async function modelForRun(id: string, agent: AgentSelection | undefined, now: string): Promise<ScenarioModel> {
+async function modelForRun(id: string, agent: AgentSelection | undefined, now: string): Promise<SimulationModel> {
   const state = detail(id);
   if (!state) throw new Error("Task not found");
   const stale = Boolean(state.model && state.situation.trim() && state.model.situation.trim() !== state.situation.trim());
@@ -297,9 +299,9 @@ async function modelForRun(id: string, agent: AgentSelection | undefined, now: s
   if (state.model && stale && !agent && !state.agent) {
     throw new Error("Situation changed — rebuild the model before running (agent not configured)");
   }
-  const current = stale ? state.model : undefined;
+  const current = stale && state.model && isStochasticProcess(state.model) ? state.model : undefined;
   const effectiveAgent = agent ?? state.agent;
-  const built = await buildScenarioModel(state.situation, current, effectiveAgent);
+  const built = await buildStochasticProcessModel(state.situation, current, effectiveAgent);
   const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
   if (stored.tag === "Rejected") throw new Error(stored.reason);
   return built.model;
@@ -326,8 +328,13 @@ async function runAnalysis(id: string, requested: { revision: number; trials: nu
     const recorded = await ask(id, { tag: "RecordAnalysis", analysis });
     if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     unrecordedAssets.length = 0;
-    await labelAnalysis(id, analysis, model, agent, signal, result.html, result.labelNodes);
-    if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model, analysis));
+    if (isStochasticProcess(model)) {
+      await ask(id, { tag: "CompleteAnalysisLabels", analysisId, worldLabels: {}, now: new Date().toISOString() });
+      if (!signal.aborted) await addMessage(id, "agent", "river", `Simulation complete: ${analysis.trials} worlds. Metrics and topology are available in the report.`);
+    } else {
+      await labelAnalysis(id, analysis, model, agent, signal, result.html, result.labelNodes);
+      if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model, analysis));
+    }
   } catch (error) {
     await Promise.all(unrecordedAssets.map(removeReport));
     if (!signal.aborted) await ask(id, { tag: "FailAnalysis", revision: requested.revision, reason: error instanceof Error ? error.message : String(error), now: new Date().toISOString() });
@@ -338,7 +345,7 @@ function startAnalysis(id: string, requested: NonNullable<TaskState["activeAnaly
   const controller = new AbortController();
   analysisJobs.set(id, controller);
   const state = detail(id);
-  const work = requested.analysisId && state?.model
+  const work = requested.analysisId && state?.model && !isStochasticProcess(state.model)
     ? resumeAnalysisLabels(id, state.analyses.find((analysis) => analysis.id === requested.analysisId)!, state.model, requested.agent ?? state.agent, controller.signal)
     : runAnalysis(id, requested, controller.signal);
   void work.finally(() => { if (analysisJobs.get(id) === controller) analysisJobs.delete(id); });
@@ -364,7 +371,8 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
   try {
     const state = detail(id);
     if (!state) throw new Error("Task not found");
-    const built = await buildScenarioModel(state.situation, state.model, agent, persistProgress, signal);
+    const current = state.model && isStochasticProcess(state.model) ? state.model : undefined;
+    const built = await buildStochasticProcessModel(state.situation, current, agent, persistProgress, signal);
     if (signal.aborted) return;
     await progress;
     const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
@@ -491,6 +499,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
     const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === analysisId);
     if (!analysis) { send(res, 404, { error: "Run not found" }); return; }
+    if (analysis.adapter) { send(res, 409, { error: "This simulation adapter does not support posterior reweighting" }); return; }
     if (!analysis.artifactUrl) { send(res, 200, { usesTeams: false, baseline: null, posterior: null }); return; }
     const artifact = await readRiverArtifact(analysis.artifactUrl);
     const view = runPosterior(artifact, outcomeObservations(state, artifact));
@@ -647,7 +656,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       await addMessage(id, "agent", "river", routed.message, routed.suggestions);
       if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, suggestions: routed.suggestions, task: detail(id) }); return; }
       // outcome: return preview without persisting; caller must POST /chat/confirm to file it
-      const previewObservation = analysis?.artifactUrl
+      const previewObservation = analysis?.artifactUrl && state.model && !isStochasticProcess(state.model)
         ? (() => { try { return observationFrom({ ...routed.observation }, state.model!); } catch { return undefined; } })()
         : undefined;
       // Validate against model if we have one, but don't require artifact
@@ -666,6 +675,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const analysisId = String(input.analysisId ?? "");
     const analysis = state.analyses.find((a) => (a.id ?? a.visualUrl) === analysisId);
     if (!analysis || !analysis.artifactUrl) { send(res, 404, { error: "Analysis not found or not relabelable" }); return; }
+    if (analysis.adapter) { send(res, 409, { error: "This simulation adapter does not support relabeling" }); return; }
     if (state.status === "running" || state.status === "labeling") { send(res, 409, { error: "Wait for the current run to finish" }); return; }
     const artifact = await readRiverArtifact(analysis.artifactUrl);
     const agent = agentFor(state, input.agent);
@@ -699,19 +709,19 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const rawObs = (input.observation ?? {}) as Record<string, unknown>;
     const analysis = state.analyses.at(-1);
     let observation: Observation | undefined;
-    if (analysis?.artifactUrl) {
+    if (analysis?.artifactUrl && !analysis.adapter) {
       try {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         observation = observationFrom(rawObs, artifact.model);
       } catch (error) { send(res, 422, { error: error instanceof Error ? error.message : String(error) }); return; }
-    } else if (state.model) {
+    } else if (state.model && !isStochasticProcess(state.model)) {
       try { observation = observationFrom(rawObs, state.model); } catch { observation = undefined; }
     }
     const now = new Date().toISOString();
     const added = await ask(confirmId, { tag: "AddFact", factId: randomUUID(), text: text.slice(0, 2000), kind: "outcome", source: "user", ...(observation ? { observation } : {}), now });
     if (added.tag === "Rejected") { send(res, 409, added); return; }
     let note = "";
-    if (analysis?.artifactUrl && observation) {
+    if (analysis?.artifactUrl && !analysis.adapter && observation) {
       const artifact = await readRiverArtifact(analysis.artifactUrl);
       const fresh = detail(confirmId)!;
       const view = runPosterior(artifact, outcomeObservations(fresh, artifact));
@@ -734,7 +744,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const visualUrl = `/reports/tasks/${reportMatch[1]}`;
       const analysis = summaries().flatMap((summary) => detail(summary.id)?.analyses ?? []).find((candidate) => candidate.visualUrl === visualUrl);
       let html: string | Buffer;
-      if (analysis?.artifactUrl) {
+      if (analysis?.artifactUrl && !analysis.adapter) {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         html = injectWorldLabels(generateWorldsVisual(artifact.model, analysis.trials, analysis.seed, artifact), analysis.worldLabels ?? {});
       } else html = await readFile(join(reportDirectory, reportMatch[1]));

@@ -1,9 +1,10 @@
 import type { AgentSelection } from "../../src/agent-contracts";
 import type { ScenarioModel } from "../../src/domain";
+import type { SimulationModel } from "../../src/model";
 import type { AgentMode, Fact, FactKind, OpenQuestion, TaskMessage, TaskState } from "../../src/task";
 import type { TaskSummary } from "../../src/task-projections";
 
-export type { AgentMode, AgentSelection, Fact, FactKind, OpenQuestion, ScenarioModel, TaskMessage, TaskState, TaskSummary };
+export type { AgentMode, AgentSelection, Fact, FactKind, OpenQuestion, ScenarioModel, SimulationModel, TaskMessage, TaskState, TaskSummary };
 
 export interface AgentStatus {
   available: boolean;
@@ -102,7 +103,7 @@ export type FactCommand =
   | { tag: "EditFact"; factId: string; text: string }
   | { tag: "RemoveFact"; factId: string }
   | { tag: "SetSituation"; text: string }
-  | { tag: "SetModel"; model: ScenarioModel }
+  | { tag: "SetModel"; model: SimulationModel }
   | { tag: "DismissQuestion"; questionId: string }
   | { tag: "RemoveAnalysis"; analysisId: string }
   | { tag: "CancelAnalysis" }

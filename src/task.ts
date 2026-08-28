@@ -2,9 +2,10 @@ import {
   CategoryId, EntityId, andReply, categoryTypes, objectCodec, persist, reply, tagCodec,
   type Aggregate, type Effect,
 } from "@lambda-house/teob-ts/core";
-import { assertScenario, type ScenarioModel } from "./domain.js";
+import { assertSimulationModel, type SimulationModel } from "./model.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 import type { ResearchSource } from "./web-research.js";
+import type { MetricSummary } from "./simulation.js";
 
 /**
  * The model (built from the `situation` prose seed) is the source of truth for the scenario.
@@ -79,6 +80,10 @@ export interface TaskAnalysis {
   seed: number;
   /** Engine that computed this analysis; absent on analyses recorded before provenance stamping. */
   kernelVersion?: string;
+  adapter?: string;
+  metrics?: Record<string, MetricSummary>;
+  primaryMetric?: string;
+  paths?: Record<string, number>;
   report: string;
   winPct: Record<string, number>;
   winPctTeam: Record<string, number>;
@@ -113,7 +118,7 @@ export interface TaskState {
   /** Bumped when the model or situation prose changes — the fingerprint a run is measured against. */
   revision: number;
   status: TaskStatus;
-  model?: ScenarioModel;
+  model?: SimulationModel;
   agent?: AgentSelection;
   analyses: readonly TaskAnalysis[];
   activeAnalysis?: { revision: number; trials: number; seed: number; agent?: AgentSelection; analysisId?: string };
@@ -135,10 +140,10 @@ export type TaskCommand =
   | { tag: "AddMessage"; message: TaskMessage }
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
-  | { tag: "SetModel"; model: ScenarioModel; agent?: AgentSelection; now: string }
+  | { tag: "SetModel"; model: SimulationModel; agent?: AgentSelection; now: string }
   | { tag: "StartModelBuild"; buildId: string; revision: number; now: string }
   | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
-  | { tag: "CompleteModelBuild"; buildId: string; model: ScenarioModel; agent?: AgentSelection; now: string }
+  | { tag: "CompleteModelBuild"; buildId: string; model: SimulationModel; agent?: AgentSelection; now: string }
   | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
   | { tag: "CancelModelBuild"; buildId: string; now: string }
   | { tag: "RemoveAnalysis"; analysisId: string; now: string }
@@ -166,7 +171,7 @@ export type TaskEvent =
   | { tag: "MessageAdded"; message: TaskMessage }
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
-  | { tag: "ModelBuilt"; model: ScenarioModel; revision: number; agent?: AgentSelection; now: string }
+  | { tag: "ModelBuilt"; model: SimulationModel; revision: number; agent?: AgentSelection; now: string }
   | { tag: "ModelBuildStarted"; buildId: string; revision: number; now: string }
   | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
   | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
@@ -185,9 +190,9 @@ export type TaskEvent =
   | { tag: "ContextAdded"; text: string; revision: number; invalidatesModel?: boolean; now: string }
   | { tag: "ContextEdited"; index: number; text: string; revision: number; now: string }
   | { tag: "ContextRemoved"; index: number; revision: number; now: string }
-  | { tag: "ModelReplaced"; model: ScenarioModel; revision: number; now: string }
+  | { tag: "ModelReplaced"; model: SimulationModel; revision: number; now: string }
   | { tag: "AgentProposalRecorded"; proposal: { title?: string }; now: string }
-  | { tag: "AgentProposalAccepted"; model: ScenarioModel; agent?: AgentSelection; revision: number; now: string }
+  | { tag: "AgentProposalAccepted"; model: SimulationModel; agent?: AgentSelection; revision: number; now: string }
   | { tag: "AgentProposalRejected"; proposalId?: string; now: string }
   | { tag: "ObservationRecorded"; analysisId: string; observation: { fact: string; observation: FactObservation; now: string }; now: string }
   | { tag: "ObservationsCleared"; analysisId: string; now: string };
@@ -244,7 +249,7 @@ const readyStatus = (state: TaskState): TaskStatus => state.analyses.length ? "c
  * Journals written before the situation prose existed carry it only inside the model. Seeding it back
  * on replay keeps those tasks editable — without it the form opens blank and the agent refuses to run.
  */
-const situationFor = (state: TaskState, model: ScenarioModel): string => state.situation || model.situation;
+const situationFor = (state: TaskState, model: SimulationModel): string => state.situation || model.situation;
 
 export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   switch (event.tag) {
@@ -389,7 +394,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         return andReply(persist<TaskEvent, TaskReply>({ tag: "TitleSet", title, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "SetModel": {
-        try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
+        try { assertSimulationModel(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         const changed = JSON.stringify(state.model) !== JSON.stringify(command.model);
         const revision = changed ? state.revision + 1 : state.revision;
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
@@ -403,7 +408,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildProgressed", buildId: command.buildId, stage: command.stage.slice(0, 40), message: command.message.slice(0, 500), attempt: Math.max(1, command.attempt ?? state.activeBuild.attempt), now: command.now }), { tag: "Accepted", revision: state.revision });
       case "CompleteModelBuild": {
         if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
-        try { assertScenario(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
+        try { assertSimulationModel(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         const revision = JSON.stringify(state.model) !== JSON.stringify(command.model) ? state.revision + 1 : state.revision;
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
       }
