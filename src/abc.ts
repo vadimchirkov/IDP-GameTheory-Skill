@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import type { ScenarioResult, Trial } from "./analysis.js";
+import { conditionWorlds, weightedMean, weightedStandardDeviation } from "./monte-carlo.js";
 
 export interface Observation {
   /** Observed overall cooperation level (0..1), matched softly against each world's cooperation. */
@@ -87,22 +88,15 @@ function agreement(t: Trial, obs: Observation): number {
  */
 export function fitPosterior(result: ScenarioResult, obs: Observation | readonly Observation[]): PosteriorResult {
   const trials = result.trials;
-  if (trials.length === 0) throw new Error("no trials to condition on");
   const list = Array.isArray(obs) ? obs : [obs as Observation];
-  const raw = trials.map((t) => list.reduce((w, o) => w * agreement(t, o), 1));
-
-  const total = raw.reduce((s, w) => s + w, 0);
-  // total is > 0: an empty observation gives every world weight 1, and the winner penalty is > 0.
-  const weights = raw.map((w) => w / total);
-  const effectiveSampleSize = 1 / weights.reduce((s, w) => s + w * w, 0);
+  const conditioned = conditionWorlds(trials, list, agreement);
+  const { weights, effectiveSampleSize, fit } = conditioned;
 
   const winPct: Record<string, number> = Object.fromEntries(Object.keys(result.winPct).map((k) => [k, 0]));
   const winPctTeam: Record<string, number> = Object.fromEntries(Object.keys(result.winPctTeam).map((k) => [k, 0]));
   const strategyPosterior: Record<string, Record<string, number>> = {};
-  let cMean = 0;
   trials.forEach((t, i) => {
     const w = weights[i]!;
-    cMean += w * t.cooperation;
     for (const name of t.winners) winPct[name] = (winPct[name] ?? 0) + w / t.winners.length;
     for (const team of t.teamWinners) winPctTeam[team] = (winPctTeam[team] ?? 0) + w / t.teamWinners.length;
     for (const [player, sid] of Object.entries(t.digest.strategies)) {
@@ -110,15 +104,16 @@ export function fitPosterior(result: ScenarioResult, obs: Observation | readonly
       row[sid] = (row[sid] ?? 0) + w;
     }
   });
-  const cVar = trials.reduce((s, t, i) => s + weights[i]! * (t.cooperation - cMean) ** 2, 0);
+  const cooperation = trials.map((trial) => trial.cooperation);
+  const cMean = weightedMean(cooperation, weights);
 
   return {
     weights,
     effectiveSampleSize,
-    fit: total / trials.length,
+    fit,
     winPct: Object.fromEntries(Object.entries(winPct).map(([k, v]) => [k, 100 * v])),
     winPctTeam: Object.fromEntries(Object.entries(winPctTeam).map(([k, v]) => [k, 100 * v])),
-    cooperation: { mean: cMean, std: Math.sqrt(Math.max(0, cVar)) },
+    cooperation: { mean: cMean, std: weightedStandardDeviation(cooperation, weights) },
     strategyPosterior,
   };
 }
