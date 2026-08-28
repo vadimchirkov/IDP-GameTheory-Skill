@@ -134,6 +134,7 @@ export const stochasticProcessAdapter: SimulationAdapter<StochasticProcessModel,
     for (const shock of model.shocks ?? []) inputs[`shock.${shock.id}`] = shockProbability[shock.id]!;
     return {
       inputs, metrics,
+      entities: Object.fromEntries(model.nodes.map((node) => [node.id, { value: state[node.id]! }])),
       path: [`start:${band(average(initial), model.bounds)}`, `middle:${band(average(midpoint), model.bounds)}`, `end:${band(average(state), model.bounds)}`],
       payload: { steps, initial, final: state },
     };

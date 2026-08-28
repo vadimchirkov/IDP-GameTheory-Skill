@@ -13,6 +13,8 @@ export interface SimulationSpec<M = unknown> {
 export interface WorldSample<P = unknown> {
   inputs: Record<string, number>;
   metrics: Record<string, number>;
+  /** Optional adapter-provided per-entity projection for generic reports. */
+  entities?: Record<string, Record<string, number>>;
   path: readonly string[];
   payload: P;
 }
@@ -97,7 +99,8 @@ export function runSimulation<M, P>(
   const worlds = runMonteCarlo(trials, seed, (rng, worldSeed, index) => {
     const topology = sampleTopology(spec.topology, rng);
     const sample = adapter.simulate(spec.model, topology, rng);
-    for (const [id, value] of [...Object.entries(sample.inputs), ...Object.entries(sample.metrics)]) {
+    const entityValues = Object.values(sample.entities ?? {}).flatMap((metrics) => Object.entries(metrics));
+    for (const [id, value] of [...Object.entries(sample.inputs), ...Object.entries(sample.metrics), ...entityValues]) {
       if (!Number.isFinite(value)) throw new Error(`world ${index} produced non-finite ${id}`);
     }
     return { ...sample, index, seed: worldSeed, topology };
