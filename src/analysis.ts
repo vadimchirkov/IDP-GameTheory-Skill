@@ -3,8 +3,10 @@ import {
   type ScenarioModel, type StrategyId,
 } from "./domain.js";
 import { memoryN, playMatch, strategies, type EcoState, type MatchDigest, type MatchRound, type TransitionState } from "./kernel.js";
+import { correlation, mean, monteCarloWorldSeed, runMonteCarlo, simulateMonteCarloWorld, standardDeviation } from "./monte-carlo.js";
 import { assess, gossipBlend, type Image, type NormId } from "./reputation.js";
-import { deriveSeed, Rng } from "./rng.js";
+import { Rng } from "./rng.js";
+import { completeTopology } from "./topology.js";
 
 interface RepState { norm: NormId; quantitative: boolean; theta: number; gossipProb: number }
 
@@ -209,11 +211,12 @@ export function oneTrial(
   let envSum = 0;
   let ecoMatches = 0;
   const occSum: Record<string, number> = transCfg ? Object.fromEntries(Object.keys(transCfg.states).map((s) => [s, 0])) : {};
-  for (let i = 0; i < model.players.length; i += 1) {
-    for (let j = i + 1; j < model.players.length; j += 1) {
-      const a = model.players[i];
-      const b = model.players[j];
-      if (!a || !b) continue;
+  const playersByName = new Map(model.players.map((player) => [player.name, player]));
+  const topology = completeTopology(names);
+  for (const interaction of topology.interactions) {
+      const a = playersByName.get(interaction.participants[0]!);
+      const b = playersByName.get(interaction.participants[1]!);
+      if (!a || !b) throw new Error("Incomplete topology");
       const aPayoff = payoffByName.get(a.name);
       const bPayoff = payoffByName.get(b.name);
       const aId = strategyByName.get(a.name);
@@ -252,7 +255,6 @@ export function oneTrial(
       if (match.envFinal !== undefined) { envSum += match.envFinal; ecoMatches += 1; }
       if (match.stateOccupancy) for (const [s, f] of Object.entries(match.stateOccupancy)) occSum[s] = (occSum[s] ?? 0) + f;
       coopMatches += 1;
-    }
   }
   const opponents = model.players.length - 1;
   for (const player of model.players) {
@@ -302,15 +304,6 @@ export function oneTrial(
   };
 }
 
-const mean = (numbers: readonly number[]) => numbers.reduce((sum, n) => sum + n, 0) / numbers.length;
-const std = (numbers: readonly number[]) => Math.sqrt(mean(numbers.map((n) => (n - mean(numbers)) ** 2)));
-const corr = (xs: readonly number[], ys: readonly number[]) => {
-  const mx = mean(xs); const my = mean(ys);
-  const numerator = xs.reduce((sum, x, i) => sum + (x - mx) * ((ys[i] ?? 0) - my), 0);
-  const denominator = Math.sqrt(xs.reduce((sum, x) => sum + (x - mx) ** 2, 0) * ys.reduce((sum, y) => sum + (y - my) ** 2, 0));
-  return denominator === 0 ? 0 : numerator / denominator;
-};
-
 export interface Sensitivity {
   input: string;
   /** Signed Pearson correlation — the sign tells you which way the input pushes. */
@@ -335,13 +328,9 @@ export interface ScenarioResult {
   stateOccupancy?: Record<string, number>;
 }
 
-const WORLD_SEED_TAG = 0x776f726c;
-
 /** Stable address of a world inside a river. */
 export function scenarioWorldSeed(seed: number, index: number): number {
-  if (!Number.isSafeInteger(seed)) throw new Error("seed must be a safe integer");
-  if (!Number.isInteger(index) || index < 0) throw new Error("world index must be a non-negative integer");
-  return deriveSeed(seed, WORLD_SEED_TAG, index);
+  return monteCarloWorldSeed(seed, index);
 }
 
 /** Reconstruct one world exactly; optionally retain only one match's round-by-round trace. */
@@ -351,16 +340,11 @@ export function replayScenarioWorld(
   index: number,
   tracePair?: readonly [string, string],
 ): Trial {
-  const worldSeed = scenarioWorldSeed(seed, index);
-  return oneTrial(model, new Rng(worldSeed), true, worldSeed, tracePair);
+  return simulateMonteCarloWorld(seed, index, (rng, worldSeed) => oneTrial(model, rng, true, worldSeed, tracePair));
 }
 
 export function analyzeScenario(model: ScenarioModel, trials: number, seed: number): ScenarioResult {
-  if (!Number.isInteger(trials) || trials < 1) throw new Error("trials must be a positive integer");
-  const runs = Array.from({ length: trials }, (_, index) => {
-    const worldSeed = scenarioWorldSeed(seed, index);
-    return oneTrial(model, new Rng(worldSeed), false, worldSeed);
-  });
+  const runs = runMonteCarlo(trials, seed, (rng, worldSeed) => oneTrial(model, rng, false, worldSeed));
   const wins: Record<string, number> = Object.fromEntries(model.players.map((p) => [p.name, 0]));
   const teamWins: Record<string, number> = {};
   const perCapitaWins: Record<string, number> = {};
@@ -386,7 +370,7 @@ export function analyzeScenario(model: ScenarioModel, trials: number, seed: numb
     return winnersOf.includes(target) ? 1 / winnersOf.length : 0;
   });
   const against = (ys: readonly number[]) => allInputs
-    .map((input) => ({ input, correlation: corr(runs.map((run) => (run.inputs as Record<string, number>)[input] ?? 0), ys) }))
+    .map((input) => ({ input, correlation: correlation(runs.map((run) => (run.inputs as Record<string, number>)[input] ?? 0), ys) }))
     .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
 
   return {
@@ -394,11 +378,11 @@ export function analyzeScenario(model: ScenarioModel, trials: number, seed: numb
     winPct,
     winPctTeam,
     winPctPerCapita: Object.fromEntries(Object.entries(perCapitaWins).map(([t, w]) => [t, 100 * w / trials])),
-    cooperation: { mean: mean(cooperation), std: std(cooperation) },
+    cooperation: { mean: mean(cooperation), std: standardDeviation(cooperation) },
     sensitivity: against(cooperation),
     sensitivityWin: against(won),
     sensitivityWinTarget: target,
-    ...(model.structure.eco ? { environment: (() => { const e = runs.map((r) => r.envFinal ?? 0); return { mean: mean(e), std: std(e) }; })() } : {}),
+    ...(model.structure.eco ? { environment: (() => { const e = runs.map((r) => r.envFinal ?? 0); return { mean: mean(e), std: standardDeviation(e) }; })() } : {}),
     ...(model.structure.transitions ? { stateOccupancy: (() => {
       const names = Object.keys(model.structure.transitions!.states);
       return Object.fromEntries(names.map((s) => [s, mean(runs.map((r) => r.stateOccupancy?.[s] ?? 0))]));

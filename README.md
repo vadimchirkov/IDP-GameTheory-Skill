@@ -132,7 +132,6 @@ Useful commands:
 |---|---|
 | `pnpm build` | Type-checks the engine and frontend, then builds the app |
 | `pnpm test` | Runs the self-check and model/engine verification pack |
-| `pnpm demo` | Runs the evolution demo |
 | `pnpm app` | Builds and starts the local application |
 | `pnpm app:server` | Starts the API in watch mode |
 | `pnpm app:dev` | Starts the Vite frontend dev server |
@@ -221,10 +220,10 @@ The geometric horizon is controlled by `w` and capped at 10,000 rounds per match
 - peer or pool punishment with explicit cost and penalty;
 - pre-play cheap talk with credibility and lying cost;
 - continuous eco-feedback or discrete outcome-driven game transitions;
-- deterministic seeds, winner/cooperation sensitivity, evolution, tournaments,
-  heatmaps, and a separate spatial visualization sandbox.
+- deterministic seeds, winner/cooperation sensitivity, posterior reweighting, and
+  exact replay of any sampled world.
 
-For the precise schema and game mechanics, see [GAME_THEORY.md](GAME_THEORY.md).
+For the included compatibility model, see [GAME_THEORY.md](GAME_THEORY.md).
 For the event-sourced design, see
 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). Benchmark datasets, provenance,
 and reproduction notes are in [data/README.md](data/README.md).
@@ -309,11 +308,7 @@ The second positional argument is the number of worlds; it defaults to `600`.
 The default seed is `42`.
 
 ```bash
-pnpm scenario example_model.json 600 --build       # report + improvement hints
 pnpm scenario example_model.json 600 --visual      # reports/visual.html
-pnpm scenario example_model.json --heatmap         # reports/heatmap.html
-pnpm scenario example_model.json --tournament
-pnpm scenario example_model.json --evolve 500 --seed 42
 ```
 
 Example models cover Prisoner's Dilemma, Chicken, Stag Hunt, teams, drift,
@@ -331,41 +326,20 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `src/scenario-agent.ts` | Situation understanding, model construction, and river labels |
 | `src/domain.ts` | Scenario types and domain validation |
 | `src/kernel.ts` | Repeated-game strategies and match mechanics |
-| `src/analysis.ts` | Monte Carlo analysis, sensitivity, artifacts, and replay |
+| `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
+| `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
+| `src/analysis.ts` | C/D compatibility model implemented on the generic core |
 | `src/worlds-report.ts` | Interactive river report generation |
 | `src/cli.ts` | Standalone command-line entry point |
 | `data/` | SQLite app state plus benchmark manifest and raw datasets |
 | `reports/tasks/` | Generated run visualizations and replay artifacts |
 | `example_*.json` | Ready-to-run scenario models |
-| `SKILL.md` | Optional Claude Code skill instructions |
-
-## Optional Claude Code skill
-
-The repository can still be installed as a standalone Claude Code skill. This is an
-alternative interface; the web application does not depend on Claude Code or the
-Claude CLI.
-
-Install globally:
-
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
-  ~/.claude/skills/flumina
-```
-
-Or install for one project:
-
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
-  .claude/skills/flumina
-```
-
 ## Limits
 
-- The core engine models repeated, simultaneous 2×2 games. It does not implement
-  N-player public-goods games or sequential trust games.
+- The Monte Carlo and topology core is game-agnostic. The included compatibility
+  model implements repeated, simultaneous 2×2 games; other games plug in as new
+  simulation callbacks and are intentionally not implemented yet.
 - Teams are fixed during a run; there is no endogenous coalition formation.
-- The spatial topology is a separate visualization/evolution sandbox and does not
-  decide the standard scenario winner.
 - AI helps formulate and label the model, but simulated participants follow explicit
   strategies; they are not autonomous LLM agents.
 - Results are conditional on the supplied ranges and assumptions. They are scenario

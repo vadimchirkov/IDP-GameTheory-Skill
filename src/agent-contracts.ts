@@ -130,11 +130,6 @@ const reputationSchema = Type.Object({
 }, closed);
 const punishmentSchema = Type.Object({ beta: rangeSchema, gamma: rangeSchema, pool: Type.Boolean() }, closed);
 const cheapTalkSchema = Type.Object({ credibility: rangeSchema, lieCost: rangeSchema }, closed);
-const topologySchema = Type.Object({
-  type: stringEnum(["lattice", "small_world", "scale_free"] as const),
-  size: nullable(Type.Integer({ minimum: 2 })),
-  K: nullable(Type.Integer({ minimum: 1 })),
-}, closed);
 const structureSchema = Type.Object({
   w: rangeSchema,
   noise: rangeSchema,
@@ -152,7 +147,6 @@ const scenarioBase = {
   game: gameSchema,
   players: Type.Array(playerSchema, { minItems: 1 }),
   structure: structureSchema,
-  topology: nullable(topologySchema),
   rationale: rationaleSchema,
 };
 
@@ -291,11 +285,6 @@ function normalizeBase(draft: SharedScenarioDraft | AsymmetricScenarioDraft): Om
         lieCost: normalizeRange(draft.structure.cheapTalk.lieCost),
       } } : {}),
     },
-    ...(draft.topology ? { topology: {
-      type: draft.topology.type,
-      ...(draft.topology.size !== null ? { size: draft.topology.size } : {}),
-      ...(draft.topology.K !== null ? { K: draft.topology.K } : {}),
-    } } : {}),
     ...(draft.rationale.length ? { rationale: Object.fromEntries(draft.rationale.map((item) => [item.key, item.note])) } : {}),
   };
 }

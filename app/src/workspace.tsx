@@ -84,7 +84,7 @@ const FIELD_LABELS: Record<string, string> = {
   "structure.sigma": "option to leave", "structure.reputation": "reputation",
   "structure.punishment": "sanctions", "structure.cheapTalk": "promises and signals",
   "structure.eco": "changing conditions", "structure.transitions": "state changes",
-  topology: "who interacts with whom", rationale: "model reasoning",
+  rationale: "model reasoning",
 };
 const fieldLabel = (field: string | undefined) => field ? FIELD_LABELS[field] ?? field : "";
 const shortTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;

@@ -1,6 +1,6 @@
 {
   "generated": "2026-08-23",
-  "pipeline": "K=3 prev->actual (TFT provocable), same as src/predictive.ts:predictiveReport",
+  "pipeline": "K=3 prev->actual (TFT provocable), evaluated by scripts/live-bench.mjs",
   "files": [
     {
       "file": "data/raw/dilemmaRL_all_data.csv",

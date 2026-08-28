@@ -32,13 +32,14 @@ fa00331f MIDA_5.0.csv
 
 ## How the benchmarks are reproduced — two levels
 
-**A. Strategy move-level (K=3) — `scripts/live-bench.mjs` (`pred = prev` = TFT `provocable`, `src/predictive.ts:21`):**
+**A. Strategy move-level (K=3) — `scripts/live-bench.mjs` (`pred = prev` = TFT `provocable`):**
 
 - **human**: `pred = other.decision1 (1->coop 0->defect NA->coop)`, `actual = my.decision`, filter `period>3`. Baseline `ALL-D 56.7%` → TFT 82.1%.
 - **MID**: dyad `(a,b)` -> `Set(year)` -> `seq[y]= D if y in disputes else C` over `min..max` -> `19,808y, ALL-C 81.3%, TFT 85.6%`.
 - **TIES**: `sender1-state2` -> `startyear..endyear` -> same `seq`, `358y, ALL-D 69.3% → TFT 91.1%`.
 
-See `balancedAccuracy/macroF1/retention vs transition` (`src/predictive.ts:21`) — otherwise `ALL-C 81%` / `ALL-D 69%` inflate accuracy.
+The script reports balanced accuracy, macro F1, and retention versus transition;
+otherwise `ALL-C 81%` / `ALL-D 69%` inflate accuracy.
 
 **B. Engine scenario-level (holdout, Brier/ECE/MAE) — `npx tsx src/bench-engine.ts`:**
 

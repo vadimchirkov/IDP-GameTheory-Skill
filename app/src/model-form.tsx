@@ -173,7 +173,7 @@ function RawJson({ model, onModel }: { model: ScenarioModel; onModel: (next: Sce
           onModel(parsed);
         } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
       }} />
-    <small>The escape hatch for memory tables and network topology, which have no field of their own yet.</small>
+    <small>The escape hatch for memory tables, which have no field of their own yet.</small>
     {error && <div className="error" role="alert">{error}</div>}
   </div>;
 }

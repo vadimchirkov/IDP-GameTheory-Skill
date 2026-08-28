@@ -36,7 +36,7 @@ export interface ScenarioPlayer {
 }
 
 const PLAYER_KEYS = new Set(["name", "dispositions", "team", "values", "betrayalProb", "memory", "note"]);
-const MODEL_KEYS = new Set(["situation", "game", "players", "payoffs", "structure", "topology", "rationale"]);
+const MODEL_KEYS = new Set(["situation", "game", "players", "payoffs", "structure", "rationale"]);
 const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma", "reputation", "punishment", "cheapTalk"]);
 const ECO_KEYS = new Set(["A1", "game1", "theta", "epsilon", "n0"]);
 const TRANSITION_KEYS = new Set(["states", "start", "next"]);
@@ -154,7 +154,6 @@ export interface ScenarioModel {
     punishment?: PunishmentConfig;
     cheapTalk?: CheapTalkConfig;
   };
-  topology?: { type: "lattice" | "small_world" | "scale_free"; size?: number; K?: number };
   /** Human-readable elicitation notes; ignored by the simulation kernel. */
   rationale?: Record<string, string>;
 }
@@ -170,26 +169,6 @@ export type StrategyId = (typeof strategyIds)[number];
 
 /** `loner` opts out of the C/D game entirely and is resolved at the match level, so it has no move function. */
 export const LONER: StrategyId = "loner";
-
-export type EvolutionRule = "replicator" | "moran";
-export type Shares = Record<StrategyId, number>;
-
-export interface RunConfig {
-  game: GameType;
-  payoff: Payoff;
-  rounds: number;
-  matchReps: number;
-  noise: number;
-  initialShares: Partial<Shares>;
-  generations: number;
-  rule: EvolutionRule;
-  populationSize: number;
-  stepDelayMs: number;
-  /** Loner opt-out payoff; required if `loner` has positive initial share. */
-  sigma?: number;
-  /** Punishment fine/cost; required if `punisher` has positive initial share. */
-  punishment?: { beta: number; gamma: number; pool: boolean };
-}
 
 export function isValidPayoff(game: GameType, p: Payoff): boolean {
   if (game === "chicken" || game === "snowdrift") return p.T > p.R && p.R > p.S && p.S > p.P;
@@ -343,13 +322,6 @@ export function assertScenario(model: ScenarioModel): void {
     assertRange(c.credibility, "cheapTalk.credibility", 1);
     assertRange(c.lieCost, "cheapTalk.lieCost");
   }
-  if (model.topology !== undefined) {
-    const topology = model.topology;
-    for (const key of Object.keys(topology)) if (key !== "type" && key !== "size" && key !== "K") throw new Error(`Unknown topology field "${key}"`);
-    if (!["lattice", "small_world", "scale_free"].includes(topology.type)) throw new Error("Unknown topology type");
-    if (topology.size !== undefined && (!Number.isInteger(topology.size) || topology.size < 2)) throw new Error("topology.size must be an integer >= 2");
-    if (topology.K !== undefined && (!Number.isInteger(topology.K) || topology.K < 1)) throw new Error("topology.K must be a positive integer");
-  }
   if (model.rationale !== undefined) {
     if (!model.rationale || Array.isArray(model.rationale) || Object.values(model.rationale).some((value) => typeof value !== "string")) throw new Error("rationale must contain string notes");
   }
@@ -412,27 +384,4 @@ function assertEco(model: ScenarioModel): void {
   assertRange(eco.theta, "eco.theta", 100);
   assertRange(eco.epsilon, "eco.epsilon", 1);
   assertRange(eco.n0, "eco.n0", 1);
-}
-
-export function assertRunConfig(config: RunConfig): void {
-  if (!isValidPayoff(config.game, config.payoff)) throw new Error("Payoff does not match the selected game");
-  if (!Number.isInteger(config.rounds) || config.rounds < 1) throw new Error("rounds must be a positive integer");
-  if (!Number.isInteger(config.matchReps) || config.matchReps < 1) throw new Error("matchReps must be a positive integer");
-  if (config.noise < 0 || config.noise > 1) throw new Error("noise must be between 0 and 1");
-  if (!Number.isInteger(config.generations) || config.generations < 1) throw new Error("generations must be a positive integer");
-  if (!Number.isInteger(config.populationSize) || config.populationSize < 2) throw new Error("populationSize must be at least two");
-  if (Object.keys(config.initialShares).length === 0) throw new Error("initialShares must not be empty");
-  normalizeShares(config.initialShares);
-}
-
-export function normalizeShares(input: Partial<Shares>): Shares {
-  for (const [id, value] of Object.entries(input)) {
-    if (!strategyIds.includes(id as StrategyId) || value === undefined || !Number.isFinite(value) || value < 0) {
-      throw new Error(`Invalid share for ${id}`);
-    }
-  }
-  const total = Object.values(input).reduce((sum, value) => sum + (value ?? 0), 0);
-  if (!Number.isFinite(total) || total <= 0) throw new Error("shares must have a positive total");
-  const result = Object.fromEntries(strategyIds.map((id) => [id, (input[id] ?? 0) / total])) as Shares;
-  return result;
 }

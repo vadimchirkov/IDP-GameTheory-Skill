@@ -1,8 +1,7 @@
 import {
-  type Move, type Outcome, type Payoff, type RunConfig, type Shares, type StrategyId,
-  normalizeShares, score, strategyIds,
+  type Move, type Outcome, type Payoff, type StrategyId, score,
 } from "./domain.js";
-import { deriveSeed, Rng } from "./rng.js";
+import { Rng } from "./rng.js";
 
 export type Strategy = (mine: readonly Move[], theirs: readonly Move[], rng: Rng) => Move;
 
@@ -197,7 +196,7 @@ export const strategies: Record<StrategyId, Strategy> = {
   memory2: memory2Hilbe(),
   shaper: shaperStrategy(),
   // Voluntary opt-out (Szabó & Hauert 2002): never plays a C/D move — resolved at the match level
-  // (tournament / oneTrial award σ to both sides). This stub fires only if a caller forgets to intercept.
+  // oneTrial awards σ to both sides. This stub fires only if a caller forgets to intercept.
   loner: () => { throw new Error("loner opts out of the C/D game — resolve it at the match level with σ, do not call it as a move"); },
   // Institutional punisher (Sigmund 2010): cooperates in moves; its costly fining of defectors is
   // applied at the payoff layer via MatchModifiers.punishment (set by the caller from strategy identity).
@@ -413,97 +412,5 @@ export function playMatch(
     ...(eco ? { envFinal: ecoN } : {}),
     ...(transition ? { stateOccupancy: Object.fromEntries(Object.entries(occupancy).map(([s, n]) => [s, n / rounds])) } : {}),
     ...(trace ? { trace } : {}),
-  };
-}
-
-export interface TournamentResult {
-  fitness: Shares;
-  cooperation: number;
-}
-
-/** One round-robin generation. Match seeds make later parallelisation reproducible. */
-export function tournament(config: RunConfig, generation: number, rootSeed: number): TournamentResult {
-  const active = strategyIds.filter((id) => (config.initialShares[id] ?? 0) > 0);
-  if (active.includes("loner") && config.sigma === undefined) throw new Error("loner has a share but config.sigma is not set");
-  if (active.includes("punisher") && config.punishment === undefined) throw new Error("punisher has a share but config.punishment is not set");
-  const scores = Object.fromEntries(strategyIds.map((id) => [id, 0])) as Shares;
-  let cooperation = 0;
-  let matches = 0;
-  let coopMatches = 0;
-  for (let i = 0; i < active.length; i += 1) {
-    for (let j = i; j < active.length; j += 1) {
-      const left = active[i];
-      const right = active[j];
-      if (!left || !right) continue;
-      for (let rep = 0; rep < config.matchReps; rep += 1) {
-        // A loner opts out: both sides collect σ per round, no C/D game, no cooperation contribution.
-        if (left === "loner" || right === "loner") {
-          const optOut = config.sigma! * config.rounds;
-          if (left === right) scores[left] += optOut;
-          else { scores[left] += optOut; scores[right] += optOut; }
-          matches += 1;
-          continue;
-        }
-        const punishment = config.punishment && (left === "punisher" || right === "punisher")
-          ? { beta: config.punishment.beta, gamma: config.punishment.gamma, pool: config.punishment.pool, aPunishes: left === "punisher", bPunishes: right === "punisher" }
-          : undefined;
-        const result = playMatch(
-          strategies[left], strategies[right], config.payoff, config.payoff,
-          config.rounds, config.noise, new Rng(deriveSeed(rootSeed, generation, i, j, rep)),
-          { punishment },
-        );
-        if (left === right) {
-          scores[left] += (result.scoreA + result.scoreB) / 2;
-        } else {
-          scores[left] += result.scoreA;
-          scores[right] += result.scoreB;
-        }
-        cooperation += result.cooperation;
-        matches += 1;
-        coopMatches += 1;
-      }
-    }
-  }
-  const divisor = Math.max(1, active.length * config.matchReps);
-  for (const id of strategyIds) scores[id] /= divisor;
-  return { fitness: scores, cooperation: cooperation / Math.max(1, coopMatches) };
-}
-
-function weightedPick(shares: Shares, rng: Rng): StrategyId {
-  let cursor = rng.unit();
-  for (const id of strategyIds) {
-    cursor -= shares[id];
-    if (cursor <= 0) return id;
-  }
-  return strategyIds.at(-1) ?? "provocable";
-}
-
-export function evolve(shares: Shares, fitness: Shares, rule: RunConfig["rule"], populationSize: number, rng: Rng): Shares {
-  if (rule === "replicator") {
-    const meanFitness = strategyIds.reduce((sum, id) => sum + shares[id] * fitness[id], 0);
-    const scale = Math.max(1, ...strategyIds.map((id) => Math.abs(fitness[id] - meanFitness)));
-    return normalizeShares(Object.fromEntries(strategyIds.map((id) => [id, shares[id] * (1 + 0.5 * (fitness[id] - meanFitness) / scale)])) as Partial<Shares>);
-  }
-  const minimum = Math.min(...strategyIds.map((id) => fitness[id]));
-  const parentWeights = normalizeShares(Object.fromEntries(strategyIds.map((id) => [id, shares[id] * (fitness[id] - minimum + 1e-9)])) as Partial<Shares>);
-  const parent = weightedPick(parentWeights, rng);
-  const victim = weightedPick(shares, rng);
-  if (parent === victim) return shares;
-  const next = { ...shares, [parent]: shares[parent] + 1 / populationSize, [victim]: shares[victim] - 1 / populationSize };
-  return normalizeShares(next);
-}
-
-export interface Generation {
-  shares: Shares;
-  meanScores: Shares;
-  cooperationRate: number;
-}
-
-export function stepGeneration(config: RunConfig, shares: Shares, generation: number, seed: number): Generation {
-  const result = tournament({ ...config, initialShares: shares }, generation, seed);
-  return {
-    meanScores: result.fitness,
-    cooperationRate: result.cooperation,
-    shares: evolve(shares, result.fitness, config.rule, config.populationSize, new Rng(deriveSeed(seed, generation, 0xfeed))),
   };
 }
