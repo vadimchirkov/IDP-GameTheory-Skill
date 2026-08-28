@@ -6,7 +6,6 @@ import {
   type AgentMode, type AgentModelStatus, type AgentSelection, type FactCommand, type RiverSelection, type TaskState, type TaskSummary, type WorldReplay,
 } from "./api";
 import { OutcomeFacts } from "./facts";
-import { ModelForm } from "./model-form";
 import { RiverActivity } from "./river-activity";
 import { relativeTime } from "./relative-time";
 
@@ -213,7 +212,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [runError, setRunError] = useState("");
   const [rebuildDone, setRebuildDone] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [modelBuildStage, setModelBuildStage] = useState(0);
   const [buildActivity, setBuildActivity] = useState<BuildActivityItem[]>([]);
   const [streamError, setStreamError] = useState("");
   const [modelError, setModelError] = useState("");
@@ -266,7 +264,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   useEffect(() => {
     setNextSeed(undefined);
     setRunError("");
-    setModelBuildStage(1);
     setBuildActivity([]);
     buildCancelled.current = false;
     setStreaming(false);
@@ -290,7 +287,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   useEffect(() => {
     const build = current?.activeBuild;
     if (!build || streaming) return;
-    setModelBuildStage(build.stage === "frame" ? 0 : build.stage === "draft" ? 1 : 2);
     setBuildActivity([{ id: build.buildId, stage: build.stage, message: build.error ?? build.message, status: build.status === "failed" ? "failed" : "active" }]);
   }, [current?.activeBuild?.buildId, current?.activeBuild?.stage, current?.activeBuild?.message, current?.activeBuild?.status, current?.activeBuild?.error, current?.activeBuild?.updatedAt, streaming]);
 
@@ -385,18 +381,11 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     if (!agentAvailable) { setRunError(agentStatusText); openSettings(); return; }
     setRunError("");
     setRebuildDone(false);
-    setModelBuildStage(1);
     setBuildActivity([]);
     setStreaming(true);
     setCenterTab("model");
     const advanceStage = (ev: Record<string, unknown>) => {
       const stage = String(ev.stage ?? "");
-      const index = stage === "frame" || stage === "research-plan" || stage === "research" ? 0
-        : stage === "draft" ? 1
-          : stage === "validate" || stage === "review" || stage === "repair" ? 2
-            : stage === "smoke" || stage === "check" || stage === "save" ? 3
-              : 1;
-      setModelBuildStage(index);
       if (ev.kind === "error") {
         const message = String(ev.error ?? "The model build stopped").trim();
         setBuildActivity((items) => {
@@ -815,24 +804,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
               <QuestionList questions={current.openQuestions} stale={questionsStale} busy={busy} onAnswer={answerQuestion} onDismiss={(questionId) => void runCommand({ tag: "DismissQuestion", questionId })} />
             </section>}
           </div>}
-          {!streaming && !buildActive && <div className="model-scroll"><ModelForm
-            situation={current.situation}
-            model={current.model}
-            questions={current.openQuestions}
-            sources={[]}
-            busy={busy}
-            error={undefined}
-            justRebuilt={rebuildDone}
-            streaming={streaming}
-            buildStage={modelBuildStage}
-            buildElapsed={streaming ? elapsed : 0}
-            agentAvailable={agentAvailable}
-            agentStatusText={agentStatusText}
-            onSituation={(text) => void runCommand({ tag: "SetSituation", text })}
-            onModel={(model) => void runCommand({ tag: "SetModel", model })}
-            onUnderstand={() => void reviewWithAgent()}
-            onDismissQuestion={(questionId) => void runCommand({ tag: "DismissQuestion", questionId })}
-          /></div>}
           {streamError && <div className="error model-run-error" role="status">{streamError}</div>}
         </div>}
       </div> : <>
