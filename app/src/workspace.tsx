@@ -252,8 +252,10 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId!), enabled: Boolean(taskId) });
   const agent = useQuery({ queryKey: ["agent-status"], queryFn: getAgentStatus, retry: 0 });
   const current = task.data;
-  const assistantMode: AgentMode = !current?.model || centerTab === "context" ? "context" : centerTab === "model" ? "model" : "river";
-  const chatMessages = (current?.messages ?? []).filter((message) => message.mode === assistantMode);
+  // Two roles, not three: one thread guides the situation before a run, the other reads the river after
+  // it. The agent cannot edit the model in either, so a separate "model" chat promised what it can't do.
+  const assistantMode: AgentMode = current?.model && centerTab === "river" ? "river" : "context";
+  const chatMessages = (current?.messages ?? []).filter((message) => (assistantMode === "river" ? message.mode === "river" : message.mode !== "river"));
   const storedFollowUps = [...chatMessages].reverse().find((message) => message.role === "agent" && message.suggestions?.length)?.suggestions ?? [];
 
   useEffect(() => {
@@ -327,7 +329,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       chatAbort.current = controller;
       const routed = assistantMode === "river"
         ? await chatTask(taskId, vars.message, selectedAgent, riverSelection, selectedAnalysisId)
-        : await clarifyTask(taskId, { message: vars.message, mode: assistantMode, agent: selectedAgent }, controller.signal).catch((error: unknown) => {
+        : await clarifyTask(taskId, { message: vars.message, agent: selectedAgent }, controller.signal).catch((error: unknown) => {
           // A running pre-upgrade server has no /clarify route yet; keep context prompts usable.
           if (error instanceof Error && error.message === "Not found") return chatTask(taskId, vars.message, selectedAgent);
           throw error;
@@ -448,7 +450,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       await navigate({ to: "/tasks/$taskId", params: { taskId: created.id } });
       setAgentPanel(true);
       if (agentAvailable) {
-        const guided = await clarifyTask(created.id, { mode: "context", agent: selectedAgent });
+        const guided = await clarifyTask(created.id, { agent: selectedAgent });
         cacheTask(guided.task);
       }
     } catch (error) { setPromptError(error instanceof Error ? error.message : String(error)); }
@@ -687,14 +689,14 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const researchStale = current?.researchRevision !== undefined && current.researchRevision !== current.revision;
   const firstQuestion = !questionsStale ? current?.openQuestions[0] : undefined;
   const contextualSuggestions = assistantMode === "context"
-    ? [firstQuestion ? `Why does “${firstQuestion.prompt}” matter?` : "What important context is still missing?", ...(current?.researchSources?.length ? ["Which public evidence matters most here?"] : ["What could you verify from public sources?"])]
-    : assistantMode === "model"
+    ? current?.model
       ? ["Which assumption changes the result most?", "What is the weakest part of this model?"]
-      : riverSelection && riverSelection.kind !== "all"
-        ? [`Why does “${riverSelection.label}” emerge?`, "What would make this branch less likely?"]
-        : selectedAnalysis
-          ? ["What drives the most likely outcome?", "Which assumption changes this run most?"]
-          : ["What will the first run reveal?", "What should I check before running it?"];
+      : [firstQuestion ? `Why does “${firstQuestion.prompt}” matter?` : "What important context is still missing?", ...(current?.researchSources?.length ? ["Which public evidence matters most here?"] : ["What could you verify from public sources?"])]
+    : riverSelection && riverSelection.kind !== "all"
+      ? [`Why does “${riverSelection.label}” emerge?`, "What would make this branch less likely?"]
+      : selectedAnalysis
+        ? ["What drives the most likely outcome?", "Which assumption changes this run most?"]
+        : ["What will the first run reveal?", "What should I check before running it?"];
   const chatSuggestions = chatFollowUps.length ? chatFollowUps : storedFollowUps.length ? [...storedFollowUps] : contextualSuggestions;
 
   useEffect(() => { if (current?.status === "completed" && selectedAnalysis) setCenterTab("river"); }, [current?.status, selectedAnalysisId]);
@@ -736,7 +738,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     catch (error) { setReplayError(error instanceof Error ? error.message : String(error)); }
   };
   const appClass = ["app", hideSituations && "hide-situations", agentPanel && "agent-open", situationsOpen && "mobile-situations"].filter(Boolean).join(" ");
-  const assistantTitle = assistantMode === "context" ? "Context guide" : assistantMode === "model" ? "Model copilot" : "River analyst";
+  const assistantTitle = assistantMode === "river" ? "River analyst" : "Context guide";
   const chatScopeLabel = assistantMode === "river"
     ? riverSelection?.label ?? "Entire river"
     : `${assistantTitle} · r${current?.revision ?? 0}`;
