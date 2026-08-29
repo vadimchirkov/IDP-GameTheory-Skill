@@ -1,9 +1,8 @@
 # Universal Monte Carlo architecture
-The old `Run` and `Participant` aggregates, tournament/evolution layers, lattice
-sandbox, heatmap generator, build-hints path, and duplicate predictive helpers were
-experimental or disconnected from the shipping workflow. They were removed instead
-of being generalized. New game types should start as a simulation callback and add
-abstractions only after two real implementations need the same behavior.
+The old `Run` and `Participant` aggregates, heatmap UI, build-hints path, and duplicate
+predictive helpers were disconnected from the shipping workflow and remain removed.
+Tournament, population evolution, and spatial play are useful C/D capabilities, so
+they live in a domain adapter rather than in the universal engine.
 The reusable engine is deliberately smaller than the Flumina application around it.
 It has two independent modules and no knowledge of games, players, actions, payoffs,
 or equilibrium concepts.
@@ -44,6 +43,11 @@ scenario model implemented as one client of the core. It constructs a complete
 pair topology, supplies the world callback, and reduces its domain-specific trials
 into winners, cooperation, sensitivity, replay data, and the river artifact.
 
+`src/adapters/repeated-game-dynamics.ts` adds three optional views over the same C/D
+kernel: disposition tournaments, replicator/Moran population evolution, and spatial
+lattice updates. These modes keep their domain types and algorithms inside the adapter;
+the generic Monte Carlo, topology, and simulation modules do not depend on them.
+
 `src/abc.ts` keeps its domain-specific observation vocabulary but delegates generic
 world conditioning and weighted summaries to `src/monte-carlo.ts`.
 
@@ -73,10 +77,10 @@ C/D compatibility model ---- future simulation callbacks
               deterministic RNG
 ```
 
-## Removed boundaries
+## Boundaries kept out
 
-The old `Run` and `Participant` aggregates, tournament/evolution layers, lattice
-sandbox, heatmap generator, build-hints path, and duplicate predictive helpers were
-experimental or disconnected from the shipping workflow. They were removed instead
-of being generalized. New game types should start as a simulation callback and add
-abstractions only after two real implementations need the same behavior.
+The old `Run` and `Participant` aggregates, spatial heatmap UI, build-hints path, and
+duplicate predictive helpers stay removed. The dynamics adapter exposes pure,
+deterministic functions; persistence and presentation can be added when a product
+workflow actually needs them. New game types should start as a simulation callback
+and add abstractions only after two real implementations need the same behavior.

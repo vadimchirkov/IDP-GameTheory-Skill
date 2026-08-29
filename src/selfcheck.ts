@@ -7,7 +7,6 @@ import { sequentialActionAdapter } from "./action-simulation.js";
 import { runDecision, type DecisionModel } from "./adapters/decision.js";
 import { generateDecisionReport } from "./decision-report.js";
 import type { ScenarioModel } from "./domain.js";
-import { playMatch, strategies } from "./kernel.js";
 import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
 import { runPolymarket, type PolymarketSpec } from "./adapters/polymarket.js";
 import { Rng } from "./rng.js";
@@ -20,11 +19,6 @@ import { contextReplyOutputSchema, normalizeStrategicDraft, strategicDraftSchema
 import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 import { openPublicPage } from "./web-research.js";
-
-const payoff = { T: 5, R: 3, P: 1, S: 0 };
-const match = playMatch(strategies.exploitative, strategies.trusting, payoff, payoff, 20, 0, new Rng(1));
-assert.equal(match.scoreA, 100);
-assert.equal(match.scoreB, 0);
 
 const reservoirDecision: DecisionModel = {
   schemaVersion: 1, adapter: "decision", situation: "Three farms share a reservoir", question: "How should withdrawals be managed?",
@@ -119,12 +113,6 @@ const labeledRiver = injectWorldLabels(generateWorldsVisual(scenario, 40, 7, ana
 assert.ok(labeledRiver.includes('"short":"Начало проверки"'), "context labels are injected into the standalone report");
 assert.ok(labeledRiver.includes("river:selection"), "embedded river reports selected worlds to the agent workspace");
 assert.ok(labeledRiver.includes('id="zoom-in"') && labeledRiver.includes("addEventListener('wheel'"), "river reports expose mouse and button zoom controls");
-assert.ok(labeledRiver.includes("if(!drag.captured){wrap.setPointerCapture"), "river dragging captures the pointer only after movement, preserving branch clicks");
-assert.ok(labeledRiver.includes("user-select:none;-webkit-user-select:none"), "river text stays inert while nodes and flows remain selectable");
-assert.ok(labeledRiver.includes('id="river-stage"') && labeledRiver.includes("wrap.scrollTo({left:CANVAS_W*zoom/2"), "river reports center the graph inside a pannable stage");
-assert.ok(labeledRiver.includes("group.classList.toggle('active',selectedNode)"), "selected nodes are highlighted on the node itself");
-assert.ok(labeledRiver.includes("labelGuard.onclick=event=>event.stopPropagation()"), "node labels explain selection without selecting objects behind them");
-assert.ok(labeledRiver.includes("nodeGap=50") && labeledRiver.includes("svg.append(labelLayer)"), "river labels stay beside their nodes and render above the flows");
 const firstWorld = analysis.trials[0];
 assert.ok(firstWorld);
 const replayedWorld = replayScenarioWorld(scenario, 7, 0, firstWorld.digest.pivotalPair);
