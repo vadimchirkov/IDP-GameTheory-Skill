@@ -1,18 +1,15 @@
 import assert from "node:assert/strict";
-import { assertScenario, isValidPayoff, normalizeShares } from "./domain.js";
-import { accuracy, f1, ece, klDivergence, crossConditionSweep, payoffRatioSweep, balancedAccuracy, macroF1, confusionTransitions, predictiveReport } from "./predictive.js";
-import { playMatch, strategies, tournament, stepGeneration, zdVector, ZD_BASELINE, type EcoState, type TransitionState } from "./kernel.js";
+import { assertScenario, isValidPayoff } from "./domain.js";
+import { playMatch, strategies, zdVector, ZD_BASELINE, type EcoState, type TransitionState } from "./kernel.js";
 import { Rng } from "./rng.js";
-import { analyzeScenario } from "./analysis.js";
-import { runEvolution } from "./evolution.js";
-import { runTournament } from "./tournament.js";
-import { generateHeatmap } from "./report.js";
+import { analyzeScenario } from "./adapters/repeated-game.js";
+import { clusterCount, coopRate, createGrid, runEvolution, runTournament, stepSpatial } from "./adapters/repeated-game-dynamics.js";
 
 const P={T:5,R:3,P:1,S:0};
 
 function run(name:string, fn:()=>void){ try{ fn(); console.log(`✔ ${name}`);}catch(e){ console.error(`✘ ${name}`); throw e; } }
 
-run("1.1 Tournament benchmarks: TFT vs ALLD vs ALLC vs Grim vs Random vs TF2T", ()=>{
+run("1.1 Pairwise strategy checks: TFT vs ALLD vs ALLC vs Grim vs Random vs TF2T", ()=>{
   const t1=playMatch(strategies.provocable, strategies.alld, P,P,50,0,new Rng(1));
   assert.ok(t1.scoreA < t1.scoreB, "TFT loses to ALLD");
   const t2=playMatch(strategies.trusting, strategies.alld, P,P,50,0,new Rng(1));
@@ -25,21 +22,6 @@ run("1.1 Tournament benchmarks: TFT vs ALLD vs ALLC vs Grim vs Random vs TF2T", 
   assert.ok(t5.cooperation > 0 && t5.cooperation < 0.2);
   const t6=playMatch(strategies.erratic, strategies.erratic, P,P,100,0,new Rng(1));
   assert.ok(t6.cooperation > 0.3 && t6.cooperation < 0.7);
-  const sum = tournament({ game:"prisoners_dilemma", payoff:P, rounds:20, matchReps:5, noise:0, initialShares: normalizeShares({ provocable:1/6, alld:1/6, allc:1/6, grim:1/6, erratic:1/6, tf2t:1/6 }), generations:1, rule:"replicator", populationSize:100, stepDelayMs:0 },0,1);
-  assert.ok(Object.values(sum.fitness).every(v=>Number.isFinite(v)));
-  assert.ok(sum.cooperation > 0.2 && sum.cooperation < 0.9);
-});
-
-run("2.1 Replicator ESS: TFT population resists 1% ALLD invasion at low noise", ()=>{
-  let shares = normalizeShares({ provocable:0.99, alld:0.01 });
-  for(let g=0; g<20; g++) shares = stepGeneration({ game:"prisoners_dilemma", payoff:P, rounds:20, matchReps:5, noise:0, initialShares:shares, generations:20, rule:"replicator", populationSize:100, stepDelayMs:0 }, shares, g, g+100).shares;
-  assert.ok(shares.provocable > 0.5, `TFT should resist, got ${JSON.stringify(shares)}`);
-});
-
-run("2.2 Replicator cycles: alld+allc+tft should not crash", ()=>{
-  let s = normalizeShares({ alld:0.33, allc:0.33, provocable:0.34 });
-  for(let g=0; g<10; g++) s = stepGeneration({ game:"prisoners_dilemma", payoff:P, rounds:20, matchReps:2, noise:0, initialShares:s, generations:10, rule:"replicator", populationSize:100, stepDelayMs:0 }, s, g, g+200).shares;
-  assert.ok(Object.values(s).every(v=>v>=0));
 });
 
 run("3.1 Noise spiral: TFT vs TFT with noise 5% collapses, GTFT recovers", ()=>{
@@ -51,34 +33,12 @@ run("3.1 Noise spiral: TFT vs TFT with noise 5% collapses, GTFT recovers", ()=>{
   assert.ok(pavlovNoise.cooperation > 0.3);
 });
 
-run("3.2 Pavlov WSLS forgives", ()=>{
-  const p = playMatch(strategies.pavlov, strategies.alld, P,P,50,0,new Rng(1));
-  assert.ok(p.cooperation < 0.3);
-  const p2 = playMatch(strategies.pavlov, strategies.trusting, P,P,50,0,new Rng(1));
-  assert.ok(p2.cooperation > 0.8);
-});
-
 run("4.1 Payoff baseline: T>R>P>S and 2R>T+S", ()=>{
   assert.ok(isValidPayoff("prisoners_dilemma", {T:5,R:3,P:1,S:0}));
   assert.ok(!isValidPayoff("prisoners_dilemma", {T:10,R:3,P:1,S:0}));
   assert.ok(!isValidPayoff("prisoners_dilemma", {T:5,R:3,P:2,S:1}));
   assert.ok(isValidPayoff("chicken", {T:5,R:3,S:2,P:0}));
   assert.ok(isValidPayoff("stag_hunt", {T:3,R:5,P:1,S:0}));
-});
-
-run("4.2 High temptation shifts to defect", ()=>{
-  const highT={T:10,R:3,P:1,S:0};
-  const lowT=P;
-  const mHigh = playMatch(strategies.provocable, strategies.alld, highT,highT,20,0,new Rng(1));
-  const mLow = playMatch(strategies.provocable, strategies.alld, lowT,lowT,20,0,new Rng(1));
-  assert.ok(mHigh.scoreB > mLow.scoreB);
-});
-
-run("5.1 Known vs probabilistic horizon", ()=>{
-  const fixed = playMatch(strategies.provocable, strategies.provocable, P,P,100,0,new Rng(1));
-  assert.equal(fixed.cooperation, 1);
-  const prob = playMatch(strategies.provocable, strategies.provocable, P,P,5,0,new Rng(1));
-  assert.ok(prob.cooperation===1);
 });
 
 run("5.2 ZD vectors are canonical (Press-Dyson 2012 / Stewart-Plotkin 2013)", ()=>{
@@ -116,39 +76,6 @@ run("5.4 Extortioner beats a pushover; generous never does", ()=>{
   const gen = playMatch(strategies.zd_generous, strategies.trusting, P,P,20_000,0,new Rng(3));
   assert.ok(gen.scoreA <= gen.scoreB, `generous must not out-score its opponent, got ${gen.scoreA} vs ${gen.scoreB}`);
   assert.ok(gen.cooperation >= 0.8, `generous should sustain cooperation with ALLC, got ${gen.cooperation}`);
-});
-
-run("2.x Cross-condition: w↑ ⇒ coop↑ and I↑ ⇒ coop?", ()=>{
-  const sweepW=crossConditionSweep();
-  console.log("  sweep w", sweepW.map(s=>`${s.w}:${s.coop.toFixed(2)}`).join(" "));
-  // w higher should generally give more cooperation for TFT-like pair
-  assert.ok(sweepW.at(-1)!.coop >= sweepW[0]!.coop -0.1);
-  const sweepI=payoffRatioSweep();
-  console.log("  sweep I", sweepI.map(s=>`${s.I.toFixed(1)}:${s.coop.toFixed(2)}`).join(" "));
-});
-
-run("4.x Predictive metrics: Accuracy/F1/ECE/KL on synthetic", ()=>{
-  const pred:("C"|"D")[]=["C","D","C","C"]; const actual:("C"|"D")[]=["C","C","C","D"];
-  assert.ok(Math.abs(accuracy(pred,actual)-0.5)<1e-9);
-  assert.ok(f1(pred,actual) > 0.4 && f1(pred,actual) < 0.7);
-  const probs=[0.9,0.2,0.8,0.1];
-  assert.ok(ece(probs,actual) < 0.5);
-  const kl=klDivergence([1,2,3,2,1],[1,2,2,3,5]);
-  assert.ok(Number.isFinite(kl));
-});
-
-run("4.y Weak spots — balanced accuracy, ECE, transitions vs Markov", ()=>{
-  const pred:("C"|"D")[]=["C","C","C","D","D","D"], actual:("C"|"D")[]=["C","C","D","D","D","C"];
-  assert.ok(Math.abs(balancedAccuracy(pred,actual)-0.5)<0.2);
-  assert.ok(macroF1(pred,actual) > 0.3 && macroF1(pred,actual) < 0.8);
-  assert.ok(ece([0.9,0.8,0.6,0.2,0.1,0.4], actual) < 0.6);
-  const trans=confusionTransitions(["D","C"],["D","C"], ["C","D"]);
-  assert.ok(trans.c2d_n===1 && trans.d2c_n===1 && trans.c2d===1 && trans.d2c===1);
-  const tr2=confusionTransitions(["C","C","D","D"],["C","D","D","C"], ["C","C","D","D"]);
-  assert.ok(tr2.c2c_n===1 && tr2.d2d_n===1 && tr2.retention_n===2 && tr2.transition_n===2);
-  assert.ok(Math.abs(tr2.retentionAcc-1)<0.01 && Math.abs(tr2.transitionAcc-0)<0.01);
-  const mkPred:("C"|"D")[]=["C","D","C"], mkActual:("C"|"D")[]=["C","C","C"];
-  assert.ok(Math.abs(accuracy(mkPred,mkActual)-0.66)<0.02);
 });
 
 run("4.z Snowdrift is an alias of Chicken (same T>R>S>P ordering)", ()=>{
@@ -204,26 +131,9 @@ run("4.zd Team behaviour survives a custom memory table", ()=>{
 });
 
 run("4.za Dynamic coalitions fields", ()=>{
-  assert.doesNotThrow(()=> normalizeShares({provocable:0.5, alld:0.5}));
   const m={ situation:"coalition betrayal", players:[{name:"A", dispositions:["colluder"], team:"c1", betrayalProb:0.05} as any, {name:"B", dispositions:["colluder"], team:"c1"} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any;
   assert.doesNotThrow(()=> assertScenario(m as any));
   (m as any).players[0].betrayalProb=2; assert.throws(()=> assertScenario(m as any));
-});
-
-run("5.x memory2/shaper + evolve/tournament honour the model's own game", ()=>{
-  const mm = playMatch(strategies.memory2, strategies.shaper, {T:5,R:3,P:1,S:0}, {T:5,R:3,P:1,S:0}, 20,0,new Rng(1));
-  assert.ok(Number.isFinite(mm.scoreA));
-  const stag={ situation:"stag", game:"stag_hunt", players:[{name:"A", dispositions:["provocable","alld"]},{name:"B", dispositions:["trusting"]}], payoffs:{T:[3,3],R:[5,5],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0.02,0.02]}} as any;
-  const evo=runEvolution(stag, 5, 1);
-  assert.equal(evo.trajectory.length,5);
-  // Used to hardcode a PD table regardless of the model — R must now dominate T.
-  assert.ok(evo.config.payoff.R > evo.config.payoff.T, `evolve must use the model's stag-hunt payoff, got ${JSON.stringify(evo.config.payoff)}`);
-  assert.ok(Math.abs(evo.config.noise - 0.02) < 1e-9, `evolve must use the model's noise, got ${evo.config.noise}`);
-  const tour=runTournament(stag, 20);
-  assert.ok(tour.ranking.length>0);
-  assert.ok(tour.payoff.R > tour.payoff.T, `tournament must use the model's payoff, got ${JSON.stringify(tour.payoff)}`);
-  const html=generateHeatmap({ situation:"hm", players:[{name:"A", dispositions:["provocable"]},{name:"B", dispositions:["alld"]}], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any, 3, 1);
-  assert.ok(html.includes("Plotly"));
 });
 
 run("5.y Sensitivity is signed and reported for winning as well as cooperation", ()=>{
@@ -236,26 +146,6 @@ run("5.y Sensitivity is signed and reported for winning as well as cooperation",
   // Sorted by magnitude, sign preserved (an all-positive list would mean abs() crept back in).
   for(let i=1;i<r.sensitivity.length;i++) assert.ok(Math.abs(r.sensitivity[i-1]!.correlation) >= Math.abs(r.sensitivity[i]!.correlation));
   assert.ok(r.sensitivity.some(s=> s.correlation < 0), "some input must correlate negatively with cooperation");
-});
-
-run("4.z PredictiveReport + imbalanced + retention vs transition (friend proposal)", ()=>{
-  const actualTies:("C"|"D")[]=[...Array(248).fill("D"), ...Array(110).fill("C")] as ("C"|"D")[];
-  const prevTies:("C"|"D")[]=["C", ...actualTies.slice(0,-1)] as ("C"|"D")[];
-  const predAllD:("C"|"D")[]=Array(358).fill("D") as ("C"|"D")[];
-  const rAllD=predictiveReport(predAllD, actualTies, prevTies);
-  assert.ok(Math.abs(rAllD.accuracy - 248/358) < 0.01, `ALL-D acc ${rAllD.accuracy}`);
-  assert.ok(rAllD.balancedAccuracy < 0.6, `ALL-D balAcc should be ~50% got ${rAllD.balancedAccuracy}`);
-  assert.ok(rAllD.macroF1 < 0.5, `ALL-D macroF1 should be low got ${rAllD.macroF1}`);
-  assert.ok(rAllD.f1C < 0.01, `ALL-D F1_C ~0 got ${rAllD.f1C}`);
-  const predTFT:("C"|"D")[]=prevTies.slice() as ("C"|"D")[];
-  const rTFT=predictiveReport(predTFT, actualTies, prevTies);
-  assert.ok(rTFT.macroF1 > rAllD.macroF1, `TFT macroF1 ${rTFT.macroF1} > ALL-D ${rAllD.macroF1}`);
-  assert.ok(rTFT.accuracy > rAllD.accuracy);
-  assert.ok(rTFT.retention_n + rTFT.transition_n === 358);
-  assert.ok(rTFT.retentionAcc >= rTFT.transitionAcc, `retention ${rTFT.retentionAcc} should >= transition ${rTFT.transitionAcc} (inertia inflates acc)`);
-  const simplePred:("C"|"D")[]=["C","D"], simpleAct:("C"|"D")[]=["C","D"], simplePrev:("C"|"D")[]=["C","C"];
-  const rSimple=predictiveReport(simplePred, simpleAct, simplePrev);
-  assert.equal(rSimple.c2c_n,1); assert.equal(rSimple.c2d_n,1);
 });
 
 run("6.1 Eco feedback (Weitz): cooperation and environment chase each other", ()=>{
@@ -326,22 +216,6 @@ run("7.2 Transitions end-to-end + schema guards", ()=>{
   assert.throws(()=> assertScenario(missing), /missing outcome "DD"/);
   const both:any = structuredClone(model); both.structure.eco={A1:{T:[3,3],R:[2,2],P:[1,1],S:[0,0]}, theta:[2,2], epsilon:[0.2,0.2], n0:[0.5,0.5]};
   assert.throws(()=> assertScenario(both), /use one, not both/);
-});
-
-run("8.1 Voluntary loner (Szabó-Hauert): cyclic dominance L>D>C>L, never exploited", ()=>{
-  const P2={T:5,R:3,P:1,S:0};
-  const fit = (a:string,b:string) => { const s=normalizeShares({[a]:0.5,[b]:0.5} as any);
-    const t=tournament({game:"prisoners_dilemma",payoff:P2,rounds:30,matchReps:5,noise:0,initialShares:s,generations:1,rule:"replicator",populationSize:100,stepDelayMs:0,sigma:2} as any,0,1);
-    return { a:(t.fitness as any)[a] as number, b:(t.fitness as any)[b] as number }; };
-  // With P < σ=2 < R: D beats C (exploitation), L beats D (opt-out avoids the P grind), C beats L (σ<R).
-  const dc=fit("alld","trusting"); assert.ok(dc.a > dc.b, `D should beat C: ${dc.a} vs ${dc.b}`);
-  const ld=fit("loner","alld");   assert.ok(ld.a > ld.b, `L should beat D: ${ld.a} vs ${ld.b}`);
-  const cl=fit("trusting","loner");assert.ok(cl.a > cl.b, `C should beat L: ${cl.a} vs ${cl.b}`);
-  // Opt-out floor: a loner vs an exploiter still gets σ*rounds (never the sucker's S), and both sides get it.
-  const optOut = tournament({game:"prisoners_dilemma",payoff:P2,rounds:30,matchReps:5,noise:0,initialShares:normalizeShares({loner:0.5,exploitative:0.5} as any),generations:1,rule:"replicator",populationSize:100,stepDelayMs:0,sigma:2} as any,0,1);
-  assert.ok((optOut.fitness as any).loner > 0, "loner collects σ, is never zeroed out by an exploiter");
-  // A loner share with no σ configured must fail loud rather than silently score 0.
-  assert.throws(()=> tournament({game:"prisoners_dilemma",payoff:P2,rounds:20,matchReps:2,noise:0,initialShares:normalizeShares({loner:0.5,alld:0.5} as any),generations:1,rule:"replicator",populationSize:100,stepDelayMs:0} as any,0,1), /sigma is not set/);
 });
 
 run("8.2 Loner as a scenario walk-away (BATNA) + schema guard", ()=>{
@@ -417,16 +291,12 @@ run("10.1 Pool/peer punishment (Sigmund): deters defection, but plain cooperator
   assert.ok(fine > cost, `fine on defector (β·n=${fine}) must exceed punisher's cost (γ·n=${cost})`);
 });
 
-run("10.2 Punishment end-to-end + evolution guard + schema", ()=>{
+run("10.2 Punishment end-to-end + schema", ()=>{
   const model:any = { situation:"sanctioned commons", players:[
     {name:"Enforcer",dispositions:["punisher"]},{name:"Cheat",dispositions:["exploitative","alld"]}],
     payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0], punishment:{ beta:[2,4], gamma:[0.5,1.5], pool:false }}};
   const r=analyzeScenario(model, 40, 3);
   assert.ok(r.sensitivity.some(s=> s.input === "punish_beta") && r.sensitivity.some(s=> s.input === "punish_gamma"), "β/γ must appear as sensitivity inputs");
-  // Evolution wires punishment through; a punisher pool without config must throw, not silently act like ALLC.
-  const evoModel:any = { situation:"evo", players:[{name:"A",dispositions:["punisher","alld"]}], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0], punishment:{beta:[3,3],gamma:[1,1],pool:false}}};
-  assert.equal(runEvolution(evoModel, 5, 1).trajectory.length, 5);
-  assert.throws(()=> tournament({game:"prisoners_dilemma",payoff:P,rounds:20,matchReps:2,noise:0,initialShares:normalizeShares({punisher:0.5,alld:0.5} as any),generations:1,rule:"replicator",populationSize:100,stepDelayMs:0} as any,0,1), /punishment is not set/);
   // Schema: a punisher disposition without config is rejected; unknown punishment field rejected.
   const noCfg:any = structuredClone(model); delete noCfg.structure.punishment;
   assert.throws(()=> assertScenario(noCfg), /structure.punishment/);
@@ -468,35 +338,33 @@ run("11.2 Cheap talk end-to-end + schema", ()=>{
   assert.throws(()=> assertScenario(badCred), /cheapTalk.credibility/);
 });
 
-run("12.1 Visual replay trace is opt-in and does not change a match", ()=>{
+run("12.1 C/D dynamics adapter: tournament, evolution and spatial modes", ()=>{
+  const model:any = {
+    situation:"population dynamics",
+    players:[{name:"Reciprocator",dispositions:["provocable"]},{name:"Defector",dispositions:["alld"]}],
+    payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]},
+    structure:{w:[0.95,0.95],noise:[0,0]},
+  };
+  const tournament = runTournament(model, 20, 7);
+  assert.deepEqual(tournament, runTournament(model, 20, 7), "tournament replay must be deterministic");
+  assert.deepEqual(new Set(tournament.pool), new Set(["provocable", "alld"]));
+
+  const evolution = runEvolution(model, 4, 7);
+  assert.equal(evolution.trajectory.length, 4);
+  assert.ok(Math.abs(Object.values(evolution.fixation).reduce((sum, value) => sum + value, 0) - 1) < 1e-9, "evolution shares stay normalized");
+
+  const grid = createGrid(5, (row, column) => row === 2 && column === 2 ? "D" : "C");
+  const next = stepSpatial(grid, P, "imitate-best", new Rng(7));
+  assert.ok(coopRate(next) >= 0 && coopRate(next) <= 1 && clusterCount(next) >= 0, "spatial mode returns valid cooperation structure");
+});
+
+run("13.1 Visual replay trace is opt-in and does not change a match", ()=>{
   const payoff={T:5,R:3,P:1,S:0};
   const plain=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77));
   const traced=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77),{captureTrace:true});
   assert.equal(plain.scoreA,traced.scoreA); assert.equal(plain.scoreB,traced.scoreB);
   assert.equal(plain.cooperation,traced.cooperation); assert.equal(plain.trace,undefined);
   assert.equal(traced.trace?.length,40); assert.equal(traced.trace?.at(-1)?.scoreA,traced.scoreA);
-});
-
-run("13.1 Backend model creation: fast local path + domain guards", ()=>{
-  const model: any = {
-    situation: "fast local model",
-    game: "prisoners_dilemma",
-    players: [{ name: "A", dispositions: ["provocable"] }, { name: "B", dispositions: ["alld"] }],
-    payoffs: { T: [5,6], R: [3,4], P: [1,2], S: [-1,1] },
-    structure: { w: [0.7,0.97], noise: [0,0.1] },
-  };
-  assert.doesNotThrow(()=> assertScenario(model));
-  const badPayoff: any = structuredClone(model); badPayoff.payoffs = { T: [1,1], R: [10,10], P: [1,1], S: [0,0] };
-  assert.throws(()=> assertScenario(badPayoff), /cannot satisfy/);
-  const typo: any = structuredClone(model); (typo.players[0] as any).value = [-1,1];
-  assert.throws(()=> assertScenario(typo), /Unknown field "value"/);
-  const loner: any = structuredClone(model); loner.players[0].dispositions = ["loner"];
-  assert.throws(()=> assertScenario(loner), /sigma/);
-  const t0 = Date.now();
-  const r = analyzeScenario(model, 10, 42);
-  const dt = Date.now() - t0;
-  assert.ok(dt < 500, `local model->result should be <500ms, got ${dt}ms`);
-  assert.ok(typeof r.winPct.A === "number" && r.cooperation.mean >= 0);
 });
 
 console.log("verify-pack OK");

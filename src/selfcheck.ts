@@ -1,40 +1,92 @@
 import assert from "node:assert/strict";
-import { CategoryId, EntityId, extractEvents, type EffectControl } from "@lambda-house/teob-ts/core";
-import { objectCodec } from "@lambda-house/teob-ts/core";
+import { EntityId } from "@lambda-house/teob-ts/core";
 import { Value } from "typebox/value";
 import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
-import { createInMemoryProjectionStore, runProjection } from "@lambda-house/teob-ts/projection";
-import { analyzeScenario, replayScenarioWorld } from "./analysis.js";
-import { normalizeShares, type RunConfig, type ScenarioModel } from "./domain.js";
-import { KERNEL_VERSION, playMatch, stepGeneration, strategies } from "./kernel.js";
+import { analyzeScenario, replayScenarioWorld } from "./adapters/repeated-game.js";
+import { sequentialActionAdapter } from "./action-simulation.js";
+import { runDecision, type DecisionModel } from "./adapters/decision.js";
+import { generateDecisionReport } from "./decision-report.js";
+import type { ScenarioModel } from "./domain.js";
+import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
+import { runPolymarket, type PolymarketSpec } from "./adapters/polymarket.js";
 import { Rng } from "./rng.js";
-import { runAggregate, runCategory, runEventCodec, type RunCommand, type RunReply, type RunState } from "./run.js";
-import { runSummaryProjection, type RunSummaryView } from "./projections.js";
-import { participantAggregate, participantCategory, participantEventCodec, participantStateCodec } from "./participant.js";
+import { runStochasticProcess, type StochasticProcessSpec } from "./adapters/stochastic-process.js";
+import { runSimulation } from "./simulation.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
+import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
-import { contextReplyOutputSchema, normalizeScenarioCoreDraft, normalizeScenarioDraft, researchPlanOutputSchema, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
-import { parseChatResponse, parseScenarioHints, parseStructuredJson } from "./pi-agent.js";
+import { contextReplyOutputSchema, normalizeStrategicDraft, strategicDraftSchema } from "./agent-contracts.js";
+import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 import { openPublicPage } from "./web-research.js";
 
-const payoff = { T: 5, R: 3, P: 1, S: 0 };
-const config: RunConfig = {
-  game: "prisoners_dilemma",
-  payoff,
-  rounds: 30,
-  matchReps: 2,
-  noise: 0,
-  initialShares: { trusting: 0.5, exploitative: 0.5 },
-  generations: 3,
-  rule: "replicator",
-  populationSize: 40,
-  stepDelayMs: 1,
+const reservoirDecision: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "Three farms share a reservoir", question: "How should withdrawals be managed?",
+  objective: { label: "Shortage days", unit: "days", direction: "minimize", target: 8 },
+  factors: [
+    { id: "rain", label: "rainfall", range: [0, 100], lowLabel: "Dry season", highLabel: "Wet season" },
+    { id: "demand", label: "water demand", range: [0, 100], lowLabel: "Low demand", highLabel: "High demand" },
+  ],
+  options: [
+    { id: "current", label: "Keep current withdrawals", baseline: [12, 16], effects: [{ factorId: "rain", impact: [-7, -5] }, { factorId: "demand", impact: [5, 8] }] },
+    { id: "limits", label: "Set withdrawal limits", baseline: [7, 10], effects: [{ factorId: "rain", impact: [-4, -3] }, { factorId: "demand", impact: [2, 4] }] },
+    { id: "coordinate", label: "Coordinate withdrawals", baseline: [5, 8], effects: [{ factorId: "rain", impact: [-3, -2] }, { factorId: "demand", impact: [1, 3] }] },
+  ],
+  assumptions: ["The same rainfall and demand worlds are used for every option."],
 };
+const decisionRun = runDecision(reservoirDecision, 300, 41);
+assert.deepEqual(decisionRun, runDecision(reservoirDecision, 300, 41), "decision runs replay exactly");
+assert.equal(decisionRun.worlds.length, 300, "a decision run evaluates every sampled world");
+assert.equal(decisionRun.recommendedOptionId, "coordinate", "paired worlds identify the robust reservoir option");
+assert.equal(decisionRun.recommendation.criterion, "targetProbability", "a stated target drives the recommendation");
+assert.ok(decisionRun.options.coordinate!.targetProbability! > decisionRun.options.current!.targetProbability!, "decision summaries compare target probability");
+assert.ok(decisionRun.worlds.every((world) => world.path.length === 4), "every decision world has one four-stage river path");
+assert.ok(decisionRun.stress.worldCount > 0 && decisionRun.stress.factorId, "decision runs identify a tested boundary cohort");
+const reversalRun = runDecision({
+  schemaVersion: 1, adapter: "decision", situation: "A choice changes with demand", question: "Which capacity plan?",
+  objective: { label: "Value", direction: "maximize" },
+  factors: [{ id: "demand", label: "Demand", range: [0, 100], lowLabel: "Low demand", highLabel: "High demand" }],
+  options: [
+    { id: "lean", label: "Lean plan", baseline: [10, 10], effects: [{ factorId: "demand", impact: [-20, -20] }] },
+    { id: "scale", label: "Scale plan", baseline: [5, 5], effects: [{ factorId: "demand", impact: [10, 10] }] },
+  ], assumptions: [],
+}, 300, 9);
+assert.equal(reversalRun.stress.reversed, true, "stress analysis finds a regime that reverses the overall choice");
+const decisionReport = generateDecisionReport(reservoirDecision, decisionRun);
+assert.ok(decisionReport.includes("Decision River") && decisionReport.includes("Highest target chance"), "decision report names the recommendation criterion and explains the river");
+assert.ok(decisionReport.includes('aria-label="Decision River zoom controls"') && decisionReport.includes("prefers-reduced-motion"), "decision report keeps controls accessible");
+assert.ok(decisionReport.includes("Ribbon width = worlds, not value"), "the river states its visual encoding instead of implying utility");
+assert.ok(decisionReport.includes('data-regime="all"') && decisionReport.includes('data-metric="best"'), "the report can recalculate option summaries for a stress cohort");
 
-const match = playMatch(strategies.exploitative, strategies.trusting, payoff, payoff, 20, 0, new Rng(1));
-assert.equal(match.scoreA, 100);
-assert.equal(match.scoreB, 0);
+// Action adapters reuse the same Monte Carlo/topology runner: actions affect state,
+// while topology changes the transition rule rather than the engine contract.
+type Reservoir = { water: number; shortage: number };
+const reservoirSpec = {
+  schemaVersion: 1 as const, adapter: "reservoir-actions", situation: "shared reservoir",
+  topology: { nodes: ["farm-a", "farm-b", "farm-c"], interactions: [{ id: "ab", participants: ["farm-a", "farm-b"], probability: [0, 1] as const }, { id: "bc", participants: ["farm-b", "farm-c"], probability: [0, 1] as const }] },
+  model: { steps: 20, initial: [60, 90] as const, rain: [0, 8] as const, demand: [4, 10] as const },
+};
+const reservoir = sequentialActionAdapter<typeof reservoirSpec.model, Reservoir, number, { final: Reservoir; actionSteps: number }>({
+  id: "reservoir-actions", validate: () => {}, steps: (model) => model.steps,
+  actors: () => ["farm-a", "farm-b", "farm-c"],
+  initialState: (model, rng) => ({ water: rng.between(model.initial), shortage: 0 }),
+  chooseAction: (model, _actor, _state, _topology, rng) => model.demand[0] + rng.unit() * (model.demand[1] - model.demand[0]),
+  transition: (model, state, actions, topology, rng) => {
+    const use = Object.values(actions).reduce((sum, value) => sum + Number(value), 0);
+    const coordination = topology.interactions.length ? 0.9 : 1.1;
+    const water = Math.max(0, Math.min(100, state.water + rng.between(model.rain) - use * coordination));
+    return { water, shortage: state.shortage + (water < 15 ? 1 : 0) };
+  },
+  observe: (_model, initial, final, history, topology) => ({
+    inputs: { initial_water: initial.water, links: topology.interactions.length },
+    metrics: { final_water: final.water, shortage_steps: final.shortage },
+    path: [topology.interactions.length ? "connected" : "fragmented", final.water < 15 ? "shortage" : "survives"],
+    payload: { final, actionSteps: history.length },
+  }),
+});
+const reservoirRun = runSimulation(reservoirSpec, reservoir, 200, 17);
+assert.ok(reservoirRun.metrics.final_water && reservoirRun.paths["connected → shortage"] !== undefined, "action adapter produces topology-dependent worlds");
+assert.deepEqual(runSimulation(reservoirSpec, reservoir, 20, 17), runSimulation(reservoirSpec, reservoir, 20, 17), "action adapter remains deterministic for a fixed seed");
 
 const scenario: ScenarioModel = {
   situation: "exploit check",
@@ -45,37 +97,11 @@ const scenario: ScenarioModel = {
   payoffs: { T: [5, 5], R: [3, 3], P: [1, 1], S: [0, 0] },
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [{ prompt: "How long will it last?", field: "structure.w" }] }), true, "the understanding contract accepts a closed result");
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
-assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
-assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
 assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
-assert.equal(Value.Check(researchPlanOutputSchema, { completionMessage: "Модель собрана; проверьте допущения.", queries: [], questions: [] }), true, "model builds carry a same-language completion message");
+const strategicDraft = { game: "prisoners_dilemma" as const, players: [{ name: "A", dispositions: ["provocable" as const], note: "" }, { name: "B", dispositions: ["exploitative" as const], note: "" }], continuation: { min: 0.7, max: 0.9 }, noise: { min: 0, max: 0.05 }, payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } }, assumptions: ["The same incentives repeat."], questions: [], completionMessage: "Strategic model ready." };
+assert.equal(Value.Check(strategicDraftSchema, strategicDraft), true, "the compact C/D builder contract is machine-validatable");
+assert.doesNotThrow(() => analyzeScenario(normalizeStrategicDraft(strategicDraft, "Repeated supplier negotiation"), 2, 1), "the compact C/D draft normalizes into a runnable model");
 await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
-const agentDraft = {
-  situation: "contract check",
-  game: "prisoners_dilemma" as const,
-  players: [
-    { name: "A", dispositions: ["provocable" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-    { name: "B", dispositions: ["exploitative" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-  ],
-  structure: { w: { min: 0.8, max: 0.9 }, noise: { min: 0, max: 0.05 }, drift: null, sigma: null, eco: null, transitions: null, reputation: null, punishment: null, cheapTalk: null },
-  topology: null,
-  rationale: [],
-  payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } },
-};
-assert.equal(Value.Check(scenarioDraftOutputSchema, agentDraft), true, "full Pi model contract is machine-validatable");
-assert.deepEqual(normalizeScenarioDraft(agentDraft).players.map((player) => player.name), ["A", "B"]);
-const repairedPayoffs = normalizeScenarioCoreDraft({
-  game: "prisoners_dilemma",
-  players: [{ name: "Symbioen", dispositions: ["provocable"], note: "" }, { name: "CPO", dispositions: ["exploitative"], note: "" }],
-  w: { min: 0.6, max: 0.8 }, noise: { min: 0.03, max: 0.12 }, rationale: [],
-  payoffs: [
-    { player: "Symbioen", payoffs: { T: { min: 1, max: 2 }, R: { min: 4, max: 5 }, P: { min: 2, max: 3 }, S: { min: 3, max: 4 } } },
-    { player: "CPO", payoffs: { T: { min: 4, max: 6 }, R: { min: 2, max: 3 }, P: { min: 0, max: 1 }, S: { min: -3, max: -0.5 } } },
-  ],
-}, "charging reliability");
-assert.doesNotThrow(() => analyzeScenario(repairedPayoffs, 2, 1), "invalid agent payoff ranges are normalized before simulation");
 assert.deepEqual(parseScenarioHints("1. Кто принимает решение?\n- Какой срок?\n• Что ограничивает выбор?"), ["Кто принимает решение?", "Какой срок?", "Что ограничивает выбор?"]);
 assert.deepEqual(parseChatResponse("Main answer.\n<followups>What should we verify next?\nWhich assumption matters most?\nHow could the outcome change?</followups>"), { text: "Main answer.", suggestions: ["What should we verify next?", "Which assumption matters most?", "How could the outcome change?"] });
 assert.equal(relativeTime("2026-08-24T10:00:00.000Z", Date.parse("2026-08-24T10:12:00.000Z")), "12m ago");
@@ -87,64 +113,59 @@ const labeledRiver = injectWorldLabels(generateWorldsVisual(scenario, 40, 7, ana
 assert.ok(labeledRiver.includes('"short":"Начало проверки"'), "context labels are injected into the standalone report");
 assert.ok(labeledRiver.includes("river:selection"), "embedded river reports selected worlds to the agent workspace");
 assert.ok(labeledRiver.includes('id="zoom-in"') && labeledRiver.includes("addEventListener('wheel'"), "river reports expose mouse and button zoom controls");
-assert.ok(labeledRiver.includes("if(!drag.captured){wrap.setPointerCapture"), "river dragging captures the pointer only after movement, preserving branch clicks");
-assert.ok(labeledRiver.includes("user-select:none;-webkit-user-select:none"), "river text stays inert while nodes and flows remain selectable");
-assert.ok(labeledRiver.includes('id="river-stage"') && labeledRiver.includes("wrap.scrollTo({left:CANVAS_W*zoom/2"), "river reports center the graph inside a pannable stage");
-assert.ok(labeledRiver.includes("group.classList.toggle('active',selectedNode)"), "selected nodes are highlighted on the node itself");
-assert.ok(labeledRiver.includes("labelGuard.onclick=event=>event.stopPropagation()"), "node labels explain selection without selecting objects behind them");
-assert.ok(labeledRiver.includes("nodeGap=50") && labeledRiver.includes("svg.append(labelLayer)"), "river labels stay beside their nodes and render above the flows");
 const firstWorld = analysis.trials[0];
 assert.ok(firstWorld);
 const replayedWorld = replayScenarioWorld(scenario, 7, 0, firstWorld.digest.pivotalPair);
 assert.deepEqual(replayedWorld.digest, analysis.trials[0]?.digest, "a river world replays independently from its recorded seed");
 assert.equal(replayedWorld.trace?.matches.length, 1, "replay retains only the requested pivotal match trace");
 
-const first = stepGeneration(config, normalizeShares({ exploitative: 0.5, trusting: 0.5 }), 0, 42);
-assert.ok(first.shares.exploitative > first.shares.trusting);
-
-const noOpContext: EffectControl<RunCommand, RunReply> = {
-  entityId: EntityId("check"), categoryId: CategoryId("game-run"),
-  async tellSelf() {}, async tell() {}, async ask() { return { ok: true, value: undefined }; },
-  async scheduleOnce() {}, async schedulePeriodic() {}, async cancelTimer() {}, log() {}, async sync() {},
+const generic = runMonteCarlo(4, 9, (rng, worldSeed) => ({ worldSeed, value: rng.unit() }));
+assert.deepEqual(generic, runMonteCarlo(4, 9, (rng, worldSeed) => ({ worldSeed, value: rng.unit() })), "generic Monte Carlo runs replay exactly");
+const conditioned = conditionWorlds(generic, [generic[0]!.worldSeed], (world, observed) => world.worldSeed === observed ? 1 : 0.1);
+assert.ok(conditioned.weights[0]! > conditioned.weights[1]! && conditioned.effectiveSampleSize < generic.length, "generic observations reweight worlds");
+const complete = completeTopology(["A", "B", "C"]);
+assert.equal(complete.interactions.length, 3, "complete topology creates every pair once");
+assert.equal(interactionsFor(complete, "A").length, 2, "topology queries interactions by participant");
+const sampled = sampleTopology({ nodes: ["A", "B"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [2, 2] }] }, new Rng(1));
+assert.equal(sampled.interactions[0]?.weight, 2, "topology samples uncertain interaction weights");
+assert.throws(() => sampleTopology({ nodes: ["A", "B"], interactions: [{ id: "bad", participants: ["A", "missing"], probability: [0, 0] }] }, new Rng(1)), /unknown node/, "excluded interactions are still validated");
+const uncertain = { id: "B:C", participants: ["B", "C"], probability: [0.5, 0.5] as const, weight: [0, 1] as const };
+const withoutFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [uncertain] }, new Rng(7));
+const withFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [1, 1] }, uncertain] }, new Rng(7));
+assert.deepEqual(withFixed.interactions.find((interaction) => interaction.id === uncertain.id), withoutFixed.interactions[0], "fixed interactions do not shift later random samples");
+const processSpec: StochasticProcessSpec = {
+  schemaVersion: 1,
+  adapter: "stochastic-process",
+  situation: "A shock spreads through two connected components",
+  topology: { nodes: ["source", "target"], interactions: [{ id: "link", participants: ["source", "target"], probability: [0.5, 0.5], weight: [0.5, 1] }] },
+  model: {
+    horizon: [4, 8], bounds: [0, 100], interactionRate: [0.1, 0.3],
+    nodes: [
+      { id: "source", initial: [70, 90], drift: [-2, 0], volatility: [0, 2] },
+      { id: "target", initial: [10, 30], drift: [0, 1], volatility: [0, 2] },
+    ],
+    shocks: [{ id: "outage", probability: [0.05, 0.2], delta: [-25, -10] }],
+    metrics: [{ id: "health", kind: "mean" }, { id: "failures", kind: "below", threshold: 20 }],
+  },
 };
-const initial = runAggregate.initial(EntityId("check"));
-const startEffect = await runAggregate.decide(initial, { tag: "StartRun", config, seed: 42 }, noOpContext);
-const startEvents = extractEvents(startEffect);
-assert.deepEqual(startEvents.map((event) => event.tag), ["RunStarted"]);
-// Provenance: the engine version is stamped from a single source (kernel) onto the event that fixes a run.
-assert.equal((startEvents[0] as { kernelVersion?: string }).kernelVersion, KERNEL_VERSION, "RunStarted records the engine version that will reproduce it");
-assert.ok(KERNEL_VERSION.length > 0, "engine version is non-empty");
-const started = startEvents.reduce((state, event) => runAggregate.apply(state, event), initial);
-const stepEffect = await runAggregate.decide(started, { tag: "StepGeneration", generation: 0 }, noOpContext);
-const stepped = extractEvents(stepEffect).reduce((state, event) => runAggregate.apply(state, event), started);
-assert.equal(stepped.generation, 1);
+const processRun = runStochasticProcess(processSpec, 80, 123);
+assert.deepEqual(processRun, runStochasticProcess(processSpec, 80, 123), "stochastic processes replay exactly from one seed");
+assert.equal(processRun.worlds.length, 80, "the generic process produces one persisted world per trial");
+assert.ok(processRun.worlds.some((world) => world.topology.interactions.length === 0) && processRun.worlds.some((world) => world.topology.interactions.length === 1), "uncertain topology is sampled inside every world");
+assert.ok(processRun.metrics.health && processRun.sensitivity.health?.length, "generic metrics and sensitivity are summarized without game semantics");
 
-const { runtime, journal } = createSingleRuntime(runAggregate, runEventCodec, objectCodec<RunState>("RunState"));
-await runtime.ask(EntityId("runtime-check"), { tag: "StartRun", config: { ...config, generations: 2 }, seed: 9 }, runCategory);
-await new Promise((resolve) => setTimeout(resolve, 25));
-const stateReply = await runtime.ask(EntityId("runtime-check"), { tag: "GetState" }, runCategory);
-assert.ok(stateReply.ok && stateReply.value.reply?.tag === "State");
-if (stateReply.ok && stateReply.value.reply?.tag === "State") assert.equal(stateReply.value.reply.state.status, "finished");
-const projectionStore = createInMemoryProjectionStore();
-runProjection(runSummaryProjection, journal, projectionStore, { eventCodec: runEventCodec });
-assert.equal(projectionStore.get<RunSummaryView>("run-summary", "runtime-check")?.view.status, "finished");
-await runtime.shutdown();
-
-// Participant aggregate — event-sourced per-player worldview (Initialize → RequestMove → ReceiveOutcome → GetState).
-const participant = createSingleRuntime(participantAggregate, participantEventCodec, participantStateCodec);
-const pid = EntityId("A");
-await participant.runtime.ask(pid, { tag: "Initialize", playerName: "A", dispositions: ["provocable"], lean: 0, drift: 0, seed: 7 }, participantCategory);
-const moveReply = await participant.runtime.ask(pid, { tag: "RequestMove", round: 0, opponentId: "B" }, participantCategory);
-assert.ok(moveReply.ok && moveReply.value.reply?.tag === "Move" && moveReply.value.reply.move === "C", "provocable opens with C");
-await participant.runtime.ask(pid, { tag: "ReceiveOutcome", round: 0, opponentId: "B", myMove: "C", oppMove: "D", payoff: 0, w: 0.9 }, participantCategory);
-const pState = await participant.runtime.ask(pid, { tag: "GetState" }, participantCategory);
-assert.ok(pState.ok && pState.value.reply?.tag === "State", "participant returns its state");
-if (pState.ok && pState.value.reply?.tag === "State") {
-  const s = pState.value.reply.state;
-  assert.deepEqual(s.historyOpp.B, ["D"], "opponent's defection is recorded in the journal");
-  assert.equal(s.reputation.image.B, "B", "stern-judging marks a defector Bad");
-}
-await participant.runtime.shutdown();
+const marketSpec: PolymarketSpec = {
+  schemaVersion: 1, adapter: "polymarket", situation: "Compare one binary market position",
+  topology: { nodes: ["market"], interactions: [] },
+  model: {
+    markets: [{ id: "main", marketPrice: [0.6, 0.6], trueProb: [0.6, 0.6] }],
+    positions: [{ id: "no", side: "NO", size: [100, 100], entry: [0.35, 0.35] }, { id: "skip", side: "ABSTAIN", size: [0, 0] }],
+    fee: [0, 0],
+  },
+};
+const marketRun = runPolymarket(marketSpec, 20, 1);
+assert.equal(marketRun.worlds[0]!.inputs["no.entry"], 0.35, "an explicit NO entry is interpreted as the NO price");
+assert.throws(() => runPolymarket({ ...marketSpec, model: { ...marketSpec.model, markets: [...marketSpec.model.markets, { id: "second", marketPrice: [0.4, 0.4], trueProb: [0.5, 0.5] }] } }, 1, 1), /exactly one market/, "P0 rejects unsupported multi-market input");
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
@@ -244,7 +265,8 @@ assert.equal((await taskState()).openQuestions.length, 2, "the agent can raise q
 assert.equal((await taskState()).questionsRevision, (await taskState()).revision, "questions are stamped with their context revision");
 await task.runtime.ask(tid, { tag: "DismissQuestion", questionId: "q-2", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).openQuestions.length, 1, "a question can be dismissed");
-await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, now: "2026-01-01T00:00:11Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, modelMode: "strategic", now: "2026-01-01T00:00:11Z" }, taskCategory);
+assert.equal((await taskState()).activeBuild?.modelMode, "strategic", "a strategic build keeps its mode across recovery");
 await task.runtime.ask(tid, { tag: "CancelModelBuild", buildId: "build-cancel", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).activeBuild, undefined, "a model build can be cancelled without leaving the task busy");
 

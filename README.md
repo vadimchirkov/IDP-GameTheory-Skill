@@ -4,18 +4,17 @@
 
 ![Flumina — a scenario river for "Competition in the AI Model Market in 2026", showing branching outcomes and the AI assistant panel](screenshot.png)
 
-Flumina is a local decision laboratory that combines a game-theory
-engine, an event-sourced TEOB workflow, and an AI agent built on headless Pi. It
-turns an ordinary description of a recurring conflict or partnership into hundreds
-or thousands of reproducible possible futures.
+Flumina is a local decision-rehearsal tool. It turns an ordinary description of a
+difficult choice into explicit options, an objective, shared uncertainties, and
+hundreds or thousands of reproducible paired worlds.
 
 Instead of producing one confident prediction, the application shows which outcomes
 remain plausible, which strategies perform well across them, and which assumption
 changes the conclusion. It helps answer three practical questions:
 
-- who tends to come out ahead across plausible versions of the situation;
-- whether cooperation survives, oscillates, or collapses;
-- which assumption changes the conclusion and is therefore worth checking first.
+- which option is most robust across the same uncertain worlds;
+- what downside and target probability each option carries;
+- which uncertainty can reverse the recommendation and is worth checking first.
 
 The river metaphor is functional: assumptions create currents, actions split them
 into branches, and repeated simulations reveal the courses that remain viable.
@@ -27,10 +26,13 @@ scenario model. A deterministic TypeScript engine then explores the uncertainty
 space at speed; the outcomes are calculated by the simulation, not invented by the
 AI.
 
-The three parts have distinct responsibilities:
+The main parts have distinct responsibilities:
 
-- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** supplies the repeated-game model, strategies, payoffs, reputation,
-  punishment, coalitions, and other interaction mechanisms.
+- **Paired-world Monte Carlo** samples each environment once and evaluates every
+  option in it, so comparisons are not distorted by different random draws.
+- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** is one compatibility
+  adapter, supplying repeated-game strategies, payoffs, reputation and other
+  interaction mechanisms.
 - **[TEOB](https://github.com/lambda-house/teob-ts)** supplies the experiment lifecycle: commands, immutable events, revision
   checks, durable history, recovery after restart, and projections for current
   views. It makes runs traceable and resumable rather than making the math loop fast.
@@ -45,29 +47,26 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 ## What the application does
 
-A scenario is **one context**, **one editable model**, and **one Run button**.
+A scenario is **one context**, **one built model**, and **one Run button**.
 
-1. **Describe a situation.** Start with a rivalry, alliance, price war, standoff,
-   shared resource, or another relationship in which 2–10 sides meet repeatedly. What
-   you write becomes the first fact.
+1. **Describe a decision.** State the situation, available actions, what success
+   means, and what is uncertain. The agent can infer missing structure conservatively.
 2. **Let the agent fill in the rest.** It researches materially useful public facts,
    shows the sources it used, keeps uncertain values broad, and raises only what cannot
    be verified publicly as optional questions. Questions never block anything: answer
    one to replace the assumption or ignore it to keep the default.
-3. **Review the model.** Situation details live in the editable model. Separately, tell
-   the agent what actually happened after a run; those outcome facts reweight the river
-   without being baked back into its assumptions.
+3. **Review the model.** Check the decision question, options, objective, uncertain
+   factors, option effects, assumptions, and sources. To change it, change the context
+   and rebuild.
 4. **Press Run.** One action validates the current model against the engine's domain
    rules and explores 1–5000 worlds (default 600). Editing context or outcome evidence
    never triggers a run by itself.
-5. **Explore the result.** An interactive river groups worlds by approach, opening,
-   response, development, and outcome. Select a branch to inspect it or replay a
-   representative pair round by round.
-6. **Say what actually happened.** An outcome fact reweights the finished run instantly
-   — no re-run — to the worlds consistent with it, and reports how many still match.
-   Outcome facts never enter the model, so the analysis stays a forecast rather than a
-   restatement of the answer.
-7. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
+5. **Explore the result.** Comparable option cards lead with robustness, target
+   probability, downside, median, and regret. The Decision River then explains how
+   worlds flow through the strongest decision boundary to the winning option and outcome.
+   Its stress lens recalculates the comparison for low, typical, or high boundary
+   regimes without inventing new worlds or rerunning the model.
+6. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
    seed, metrics, visual report, and replay artifact. New situation facts mark older
    runs stale without erasing them.
 
@@ -132,10 +131,10 @@ Useful commands:
 |---|---|
 | `pnpm build` | Type-checks the engine and frontend, then builds the app |
 | `pnpm test` | Runs the self-check and model/engine verification pack |
-| `pnpm demo` | Runs the evolution demo |
 | `pnpm app` | Builds and starts the local application |
 | `pnpm app:server` | Starts the API in watch mode |
 | `pnpm app:dev` | Starts the Vite frontend dev server |
+| `pnpm forecast` | Records and scores immutable adapter forecasts |
 | `pnpm bench:engine` | Runs scenario-level engine benchmarks |
 | `pnpm bench:live` | Runs move-level benchmarks against datasets in `data/raw/` |
 | `pnpm bench:all` | Runs both benchmark layers and cross-validation |
@@ -185,7 +184,59 @@ search plan, validates every public HTTP target, limits response sizes and redir
 and supplies only cleaned excerpts to the modelling prompt. The agent never receives
 filesystem, shell, or unrestricted browser access.
 
-## Simulation model
+## Simulation models
+
+The primary model is a small typed decision specification: one question, two to
+five options, one objective, shared uncertain factors, and explicit effects. Every
+world samples the factors once, evaluates every option, and aggregates quantiles,
+target probability, best-world share, regret, and reversal sensitivity.
+
+The Model step offers two AI-built modes: **Decision comparison** for actions under
+shared uncertainty, and **Strategic interaction** for repeated C/D reactions between
+parties. Imported stochastic-process models and the single-market Polymarket adapter
+run on the same Monte Carlo core but are not inferred by the web agent.
+
+### Forecast validation
+
+`src/forecast.ts` is a small adapter-neutral evaluation boundary. An adapter records
+an immutable categorical forecast before the outcome is known; a later resolution
+record supplies the observed outcome. The shared scorer reports Brier score, log
+loss, accuracy, calibration bins, an optional external baseline, and the settled
+value of the paper decision. A future adapter only needs to produce this record; it
+does not depend on Polymarket or its APIs.
+
+Polymarket is the first live bridge. It reads public market data from the official
+Gamma API, keeps the market price as the baseline, chooses a paper-only YES, NO, or
+ABSTAIN position from the model's probability, and uses the live bid/ask and
+price-dependent taker fee. LP is not selected for paper decisions because the
+current LP simulation is deliberately simplified.
+
+```bash
+# Record a forecast before the market resolves. Estimate trueProb independently;
+# copying the market price into it would make the comparison circular.
+pnpm forecast snapshot example_polymarket.json <market-id-or-slug>
+
+# Later, resolve finished Polymarket snapshots and print current scores.
+pnpm forecast sync
+
+# Score offline, or record a non-Polymarket outcome manually.
+pnpm forecast score
+pnpm forecast resolve <snapshot-id> YES
+
+# Snapshot every model in markets/polymarket (safe to repeat).
+pnpm forecast batch
+
+# Keep the collector running; repeat every 60 minutes by default.
+pnpm forecast watch --interval 60
+```
+
+The default append-only ledger is `data/forecasts.jsonl`; `--ledger PATH` selects
+another file. `sync` is intentionally a one-shot command so a scheduler can run it
+without keeping another daemon alive. `watch` is the self-running paper collector;
+leave it under launchd/systemd to start it automatically after login or reboot.
+Forecasts are paper records and never place orders or require wallet credentials.
+
+### Game-theory compatibility adapter
 
 Each pair repeatedly chooses **C** (cooperate) or **D** (defect). Per-round payoffs
 use the conventional values:
@@ -221,10 +272,10 @@ The geometric horizon is controlled by `w` and capped at 10,000 rounds per match
 - peer or pool punishment with explicit cost and penalty;
 - pre-play cheap talk with credibility and lying cost;
 - continuous eco-feedback or discrete outcome-driven game transitions;
-- deterministic seeds, winner/cooperation sensitivity, evolution, tournaments,
-  heatmaps, and a separate spatial visualization sandbox.
+- deterministic seeds, winner/cooperation sensitivity, posterior reweighting, and
+  exact replay of any sampled world.
 
-For the precise schema and game mechanics, see [GAME_THEORY.md](GAME_THEORY.md).
+For the included compatibility model, see [GAME_THEORY.md](GAME_THEORY.md).
 For the event-sourced design, see
 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). Benchmark datasets, provenance,
 and reproduction notes are in [data/README.md](data/README.md).
@@ -309,11 +360,7 @@ The second positional argument is the number of worlds; it defaults to `600`.
 The default seed is `42`.
 
 ```bash
-pnpm scenario example_model.json 600 --build       # report + improvement hints
 pnpm scenario example_model.json 600 --visual      # reports/visual.html
-pnpm scenario example_model.json --heatmap         # reports/heatmap.html
-pnpm scenario example_model.json --tournament
-pnpm scenario example_model.json --evolve 500 --seed 42
 ```
 
 Example models cover Prisoner's Dilemma, Chicken, Stag Hunt, teams, drift,
@@ -325,47 +372,32 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | Path | Responsibility |
 |---|---|
 | `app/` | React workspace, API client, routing, and visual design contract |
+| `src/adapters/` | Concrete decision, repeated-game, stochastic-process, and Polymarket adapters |
 | `src/app-server.ts` | Local HTTP API, static files, SSE, jobs, and report lifecycle |
 | `src/task.ts` | Event-sourced task aggregate and revision rules |
 | `src/pi-agent.ts` | Headless Pi runtime, model discovery/auth, and typed agent runs |
 | `src/scenario-agent.ts` | Situation understanding, model construction, and river labels |
 | `src/domain.ts` | Scenario types and domain validation |
 | `src/kernel.ts` | Repeated-game strategies and match mechanics |
-| `src/analysis.ts` | Monte Carlo analysis, sensitivity, artifacts, and replay |
+| `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
+| `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
+| `src/adapters/repeated-game.ts` | C/D compatibility model implemented on the generic core |
+| `src/adapters/repeated-game-dynamics.ts` | C/D tournaments, population evolution, and spatial dynamics |
+| `src/adapters/decision.ts` | Paired-world decision model, validation, runner, and summaries |
+| `src/decision-report.ts` | Option comparison and interactive Decision River |
 | `src/worlds-report.ts` | Interactive river report generation |
 | `src/cli.ts` | Standalone command-line entry point |
 | `data/` | SQLite app state plus benchmark manifest and raw datasets |
 | `reports/tasks/` | Generated run visualizations and replay artifacts |
 | `example_*.json` | Ready-to-run scenario models |
-| `SKILL.md` | Optional Claude Code skill instructions |
-
-## Optional Claude Code skill
-
-The repository can still be installed as a standalone Claude Code skill. This is an
-alternative interface; the web application does not depend on Claude Code or the
-Claude CLI.
-
-Install globally:
-
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
-  ~/.claude/skills/flumina
-```
-
-Or install for one project:
-
-```bash
-git clone https://github.com/vadimchirkov/game-theory-scenarios.git \
-  .claude/skills/flumina
-```
 
 ## Limits
 
-- The core engine models repeated, simultaneous 2×2 games. It does not implement
-  N-player public-goods games or sequential trust games.
+- P0 deliberately supports one primary objective and an inspectable linear response
+  surface. It does not infer causality, optimize a portfolio, or route between adapters.
+- The Polymarket adapter deliberately supports exactly one binary market; multi-market
+  portfolios need an explicit market-to-position contract before they are safe to add.
 - Teams are fixed during a run; there is no endogenous coalition formation.
-- The spatial topology is a separate visualization/evolution sandbox and does not
-  decide the standard scenario winner.
 - AI helps formulate and label the model, but simulated participants follow explicit
   strategies; they are not autonomous LLM agents.
 - Results are conditional on the supplied ranges and assumptions. They are scenario

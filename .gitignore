@@ -8,6 +8,7 @@ reports/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/forecasts.jsonl
 *.report.json
 *.tips.md
 *.visual.html
@@ -18,3 +19,4 @@ russia_*.json
 DYNAMIC_MODELS.md
 ROADMAP.md
 llm_autumn_2026.json
+/markets

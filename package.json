@@ -5,17 +5,15 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && pnpm app:build",
-    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts",
-    "demo": "tsx src/demo.ts",
+    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts && tsx src/forecast-selfcheck.ts",
     "scenario": "tsx src/cli.ts",
-    "scenario:build": "tsx src/cli.ts --build",
+    "forecast": "tsx src/forecast-cli.ts",
     "app": "pnpm app:build && tsx src/app-server.ts",
     "app:build": "tsc -p app/tsconfig.json --noEmit && vite build --config app/vite.config.ts",
     "app:dev": "vite --config app/vite.config.ts",
     "app:server": "tsx watch src/app-server.ts",
     "verify": "tsx src/verify-pack.ts",
     "bench:engine": "tsx src/bench-engine.ts",
-    "bench:abc": "tsx src/abc-live.ts",
     "bench:live": "node scripts/live-bench.mjs",
     "bench:all": "pnpm bench:live && pnpm bench:engine && pnpm cross:validate",
     "cross:validate": "tsx src/cross_validate.ts && python3 scripts/cross_validate.py"
@@ -35,7 +33,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "6.1.0",
-    "fast-check": "^4.9.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
     "vite": "8.2.2"

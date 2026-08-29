@@ -1,15 +1,16 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { analyzeScenario, scenarioReport } from "./analysis.js";
+import { analyzeScenario, scenarioReport } from "./adapters/repeated-game.js";
 import { fitPosterior, type Observation } from "./abc.js";
-import { buildSuggestions } from "./feedback.js";
+import { generateDecisionReport } from "./decision-report.js";
+import { runDecision } from "./adapters/decision.js";
 import type { ScenarioModel } from "./domain.js";
+import { generateSimulationReport } from "./generic-report.js";
+import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
+import { runPolymarket } from "./adapters/polymarket.js";
+import { runStochasticProcess } from "./adapters/stochastic-process.js";
 
 const args = process.argv.slice(2);
 const path = args[0];
-const buildMode = args.includes("--suggest") || args.includes("--improve") || args.includes("--build");
-const evolveMode = args.includes("--evolve");
-const heatmapMode = args.includes("--heatmap");
-const tournamentMode = args.includes("--tournament");
 const visualMode = args.includes("--visual");
 function flagValue(name: string): string | undefined {
   const i = args.indexOf(name);
@@ -39,7 +40,7 @@ function parseObservation(): Observation | undefined {
 }
 
 if (!path) {
-  console.error("Usage: pnpm scenario <model.json> [trials] [--seed N] [--suggest|--build|--evolve|--heatmap|--tournament|--visual]");
+  console.error("Usage: pnpm scenario <model.json> [trials] [--seed N] [--visual]");
   console.error("  condition on evidence: [--observe-coop 0..1] [--observe-winner NAME] [--observe-regime cooperation|oscillation|fragile|conflict|exit] [--observe-player NAME=RATE ...] [--observe-tol 0.15]");
   process.exitCode = 1;
 } else {
@@ -47,28 +48,25 @@ if (!path) {
   const trials = trialsArg ? Number(trialsArg) : 600;
   const seedIndex = args.indexOf("--seed");
   const seed = seedIndex >= 0 ? Number(args[seedIndex + 1]) : 42;
-  const model = JSON.parse(await readFile(path, "utf8")) as ScenarioModel;
-  if (tournamentMode) {
-    const { runTournament } = await import("./tournament.js");
-    const res = runTournament(model, 200);
-    console.log(JSON.stringify(res, null, 2));
-    process.exit(0);
-  }
-  if (evolveMode) {
-    const { runEvolution } = await import("./evolution.js");
-    const gens = Number(args[args.indexOf("--evolve")+1] ?? 500);
-    const evo = runEvolution(model, Number.isFinite(gens)?gens:500, seed);
-    console.log(JSON.stringify(evo, null, 2));
-    process.exit(0);
-  }
-  if (heatmapMode) {
-    const { generateHeatmap } = await import("./report.js");
-    const html = generateHeatmap(model, 10, seed);
+  const parsed = JSON.parse(await readFile(path, "utf8")) as SimulationModel;
+  const saveVisual = async (html: string) => {
     await mkdir("reports", { recursive:true });
-    await writeFile("reports/heatmap.html", html);
-    console.log("heatmap -> reports/heatmap.html");
+    await writeFile("reports/visual.html", html);
+    console.log("visual -> reports/visual.html");
+  };
+  if (isDecisionModel(parsed)) {
+    const run = runDecision(parsed, trials, seed);
+    if (visualMode) await saveVisual(generateDecisionReport(parsed, run));
+    else console.log(JSON.stringify({ recommendedOptionId: run.recommendedOptionId, recommendation: run.recommendation, options: run.options, stress: run.stress }, null, 2));
     process.exit(0);
   }
+  if (isPolymarket(parsed) || isStochasticProcess(parsed)) {
+    const run = isPolymarket(parsed) ? runPolymarket(parsed, trials, seed) : runStochasticProcess(parsed, trials, seed);
+    if (visualMode) await saveVisual(generateSimulationReport(parsed, run));
+    else console.log(JSON.stringify({ metrics: run.metrics, sensitivity: run.sensitivity, paths: run.paths }, null, 2));
+    process.exit(0);
+  }
+  const model = parsed as ScenarioModel;
   if (visualMode) {
     const { generateWorldsVisual } = await import("./worlds-report.js");
     const html = generateWorldsVisual(model, trials, seed);
@@ -76,9 +74,6 @@ if (!path) {
     await writeFile("reports/visual.html", html);
     console.log("visual -> reports/visual.html");
     process.exit(0);
-  }
-  if (model.topology) {
-    console.error("note: `topology` only drives the --visual lattice; scenario winners are always well-mixed round-robin.");
   }
   const result = analyzeScenario(model, trials, seed);
   console.log(scenarioReport(result));
@@ -110,17 +105,5 @@ if (!path) {
     process.exit(0);
   }
   const out: Record<string, unknown> = { winPct: result.winPct, winPctTeam: result.winPctTeam, winPctPerCapita: result.winPctPerCapita, cooperation: result.cooperation, sensitivity: result.sensitivity, sensitivityWin: result.sensitivityWin, sensitivityWinTarget: result.sensitivityWinTarget, ...(result.environment ? { environment: result.environment } : {}), ...(result.stateOccupancy ? { stateOccupancy: result.stateOccupancy } : {}) };
-  if (buildMode) {
-    const tips = buildSuggestions(model, result);
-    out.buildTips = tips;
-    console.log("\n-- build suggestions --");
-    for (const t of tips) console.log(`• ${t}`);
-    try {
-      await mkdir("reports", { recursive: true });
-      const base = path.replace(/\.json$/, "");
-      await writeFile(`${base}.report.json`, JSON.stringify(out, null, 2));
-      await writeFile(`${base}.tips.md`, tips.map(t => `- ${t}`).join("\n") + "\n");
-    } catch {}
-  }
   console.log(JSON.stringify(out, null, 2));
 }
