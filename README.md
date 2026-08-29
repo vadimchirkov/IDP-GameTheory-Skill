@@ -4,19 +4,17 @@
 
 ![Flumina — a scenario river for "Competition in the AI Model Market in 2026", showing branching outcomes and the AI assistant panel](screenshot.png)
 
-Flumina is a local simulation laboratory that combines a universal Monte Carlo
-engine, uncertain interaction topology, an event-sourced TEOB workflow, and an AI
-agent built on headless Pi. It turns an ordinary description of a process,
-network, conflict, market, or partnership into hundreds or thousands of
-reproducible possible futures.
+Flumina is a local decision-rehearsal tool. It turns an ordinary description of a
+difficult choice into explicit options, an objective, shared uncertainties, and
+hundreds or thousands of reproducible paired worlds.
 
 Instead of producing one confident prediction, the application shows which outcomes
 remain plausible, which strategies perform well across them, and which assumption
 changes the conclusion. It helps answer three practical questions:
 
-- which outcomes remain plausible across uncertain inputs;
-- how the system moves through its main paths and states;
-- which assumption changes the conclusion and is therefore worth checking first.
+- which option is most robust across the same uncertain worlds;
+- what downside and target probability each option carries;
+- which uncertainty can reverse the recommendation and is worth checking first.
 
 The river metaphor is functional: assumptions create currents, actions split them
 into branches, and repeated simulations reveal the courses that remain viable.
@@ -30,9 +28,8 @@ AI.
 
 The three parts have distinct responsibilities:
 
-- **Monte Carlo + topology** supplies deterministic worlds, sampled parameters,
-  uncertain links and generic metrics. It has no knowledge of games, players or
-  payoffs.
+- **Paired-world Monte Carlo** samples each environment once and evaluates every
+  option in it, so comparisons are not distorted by different random draws.
 - **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** is one compatibility
   adapter, supplying repeated-game strategies, payoffs, reputation and other
   interaction mechanisms.
@@ -52,27 +49,24 @@ why successful strategies often combine cooperation, retaliation, and forgivenes
 
 A scenario is **one context**, **one built model**, and **one Run button**.
 
-1. **Describe a situation.** Start with a process, network, market, resource,
-   rivalry, alliance, or another evolving system. What you write becomes the first fact.
+1. **Describe a decision.** State the situation, available actions, what success
+   means, and what is uncertain. The agent can infer missing structure conservatively.
 2. **Let the agent fill in the rest.** It researches materially useful public facts,
    shows the sources it used, keeps uncertain values broad, and raises only what cannot
    be verified publicly as optional questions. Questions never block anything: answer
    one to replace the assumption or ignore it to keep the default.
-3. **Review the model.** The agent builds the model from the context; you read it rather
-   than edit its fields. To change it, change the context and rebuild. Separately, tell
-   the agent what actually happened after a run; those outcome facts reweight the river
-   without being baked back into its assumptions.
+3. **Review the model.** Check the decision question, options, objective, uncertain
+   factors, option effects, assumptions, and sources. To change it, change the context
+   and rebuild.
 4. **Press Run.** One action validates the current model against the engine's domain
    rules and explores 1–5000 worlds (default 600). Editing context or outcome evidence
    never triggers a run by itself.
-5. **Explore the result.** The report groups worlds by their simulated paths and
-   exposes generic metrics, ranges, sensitivities, and topology-driven branches.
-   The older game adapter additionally supports pair replay.
-6. **Say what actually happened.** An outcome fact reweights the finished run instantly
-   — no re-run — to the worlds consistent with it, and reports how many still match.
-   Outcome facts never enter the model, so the analysis stays a forecast rather than a
-   restatement of the answer.
-7. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
+5. **Explore the result.** Comparable option cards lead with robustness, target
+   probability, downside, median, and regret. The Decision River then explains how
+   worlds flow through the strongest decision boundary to the winning option and outcome.
+   Its stress lens recalculates the comparison for low, typical, or high boundary
+   regimes without inventing new worlds or rerunning the model.
+6. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
    seed, metrics, visual report, and replay artifact. New situation facts mark older
    runs stale without erasing them.
 
@@ -191,15 +185,15 @@ filesystem, shell, or unrestricted browser access.
 
 ## Simulation models
 
-The universal model is a typed simulation specification with four pieces: a
-domain model, an adapter that simulates one world, a topology prior, and generic
-metrics. Every world samples its own uncertain inputs and topology, then the
-engine aggregates distributions, paths, quantiles, and input sensitivity.
+The primary model is a small typed decision specification: one question, two to
+five options, one objective, shared uncertain factors, and explicit effects. Every
+world samples the factors once, evaluates every option, and aggregates quantiles,
+target probability, best-world share, regret, and reversal sensitivity.
 
-The first built-in universal adapter is a bounded stochastic process: nodes have
-initial ranges, drift, volatility, shocks and interactions. New domains should
-implement an adapter against the same core instead of changing the Monte Carlo
-engine.
+The Model step offers two AI-built modes: **Decision comparison** for actions under
+shared uncertainty, and **Strategic interaction** for repeated C/D reactions between
+parties. Imported stochastic-process models and the single-market Polymarket adapter
+run on the same Monte Carlo core but are not inferred by the web agent.
 
 ### Game-theory compatibility adapter
 
@@ -346,6 +340,8 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
 | `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
 | `src/analysis.ts` | C/D compatibility model implemented on the generic core |
+| `src/decision.ts` | Paired-world decision model, validation, runner, and summaries |
+| `src/decision-report.ts` | Option comparison and interactive Decision River |
 | `src/worlds-report.ts` | Interactive river report generation |
 | `src/cli.ts` | Standalone command-line entry point |
 | `data/` | SQLite app state plus benchmark manifest and raw datasets |
@@ -353,9 +349,10 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `example_*.json` | Ready-to-run scenario models |
 ## Limits
 
-- The Monte Carlo and topology core is game-agnostic. The repository currently
-  includes a bounded stochastic-process adapter and a repeated-game compatibility
-  adapter; additional domains plug in as new simulation adapters.
+- P0 deliberately supports one primary objective and an inspectable linear response
+  surface. It does not infer causality, optimize a portfolio, or route between adapters.
+- The Polymarket adapter deliberately supports exactly one binary market; multi-market
+  portfolios need an explicit market-to-position contract before they are safe to add.
 - Teams are fixed during a run; there is no endogenous coalition formation.
 - AI helps formulate and label the model, but simulated participants follow explicit
   strategies; they are not autonomous LLM agents.

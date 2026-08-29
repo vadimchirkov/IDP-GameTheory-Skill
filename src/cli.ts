@@ -1,7 +1,13 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { analyzeScenario, scenarioReport } from "./analysis.js";
 import { fitPosterior, type Observation } from "./abc.js";
+import { generateDecisionReport } from "./decision-report.js";
+import { runDecision } from "./decision.js";
 import type { ScenarioModel } from "./domain.js";
+import { generateSimulationReport } from "./generic-report.js";
+import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
+import { runPolymarket } from "./polymarket.js";
+import { runStochasticProcess } from "./stochastic-process.js";
 
 const args = process.argv.slice(2);
 const path = args[0];
@@ -42,7 +48,25 @@ if (!path) {
   const trials = trialsArg ? Number(trialsArg) : 600;
   const seedIndex = args.indexOf("--seed");
   const seed = seedIndex >= 0 ? Number(args[seedIndex + 1]) : 42;
-  const model = JSON.parse(await readFile(path, "utf8")) as ScenarioModel;
+  const parsed = JSON.parse(await readFile(path, "utf8")) as SimulationModel;
+  const saveVisual = async (html: string) => {
+    await mkdir("reports", { recursive:true });
+    await writeFile("reports/visual.html", html);
+    console.log("visual -> reports/visual.html");
+  };
+  if (isDecisionModel(parsed)) {
+    const run = runDecision(parsed, trials, seed);
+    if (visualMode) await saveVisual(generateDecisionReport(parsed, run));
+    else console.log(JSON.stringify({ recommendedOptionId: run.recommendedOptionId, recommendation: run.recommendation, options: run.options, stress: run.stress }, null, 2));
+    process.exit(0);
+  }
+  if (isPolymarket(parsed) || isStochasticProcess(parsed)) {
+    const run = isPolymarket(parsed) ? runPolymarket(parsed, trials, seed) : runStochasticProcess(parsed, trials, seed);
+    if (visualMode) await saveVisual(generateSimulationReport(parsed, run));
+    else console.log(JSON.stringify({ metrics: run.metrics, sensitivity: run.sensitivity, paths: run.paths }, null, 2));
+    process.exit(0);
+  }
+  const model = parsed as ScenarioModel;
   if (visualMode) {
     const { generateWorldsVisual } = await import("./worlds-report.js");
     const html = generateWorldsVisual(model, trials, seed);

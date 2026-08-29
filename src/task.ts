@@ -3,6 +3,7 @@ import {
   type Aggregate, type Effect,
 } from "@lambda-house/teob-ts/core";
 import { assertSimulationModel, type SimulationModel } from "./model.js";
+import type { DecisionOptionSummary, DecisionRun } from "./decision.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 import type { ResearchSource } from "./web-research.js";
 import type { MetricSummary } from "./simulation.js";
@@ -64,6 +65,7 @@ export type TaskStatus = "new" | "ready" | "building" | "running" | "labeling" |
 export interface ActiveModelBuild {
   buildId: string;
   revision: number;
+  modelMode?: "decision" | "strategic";
   stage: string;
   message: string;
   attempt: number;
@@ -85,6 +87,14 @@ export interface TaskAnalysis {
   metrics?: Record<string, MetricSummary>;
   primaryMetric?: string;
   paths?: Record<string, number>;
+  decision?: {
+    recommendedOptionId: string;
+    recommendedOptionLabel?: string;
+    options: Record<string, DecisionOptionSummary>;
+    recommendation: DecisionRun["recommendation"];
+    driver: { factorId: string; correlation: number };
+    stress: DecisionRun["stress"];
+  };
   report: string;
   winPct: Record<string, number>;
   winPctTeam: Record<string, number>;
@@ -142,7 +152,7 @@ export type TaskCommand =
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
   | { tag: "SetModel"; model: SimulationModel; agent?: AgentSelection; now: string }
-  | { tag: "StartModelBuild"; buildId: string; revision: number; now: string }
+  | { tag: "StartModelBuild"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
   | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
   | { tag: "CompleteModelBuild"; buildId: string; model: SimulationModel; agent?: AgentSelection; now: string }
   | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
@@ -173,7 +183,7 @@ export type TaskEvent =
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
   | { tag: "ModelBuilt"; model: SimulationModel; revision: number; agent?: AgentSelection; now: string }
-  | { tag: "ModelBuildStarted"; buildId: string; revision: number; now: string }
+  | { tag: "ModelBuildStarted"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
   | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
   | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
   | { tag: "ModelBuildCancelled"; buildId: string; now: string }
@@ -271,7 +281,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
     case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
-    case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
+    case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, ...(event.modelMode ? { modelMode: event.modelMode } : {}), stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
     case "ModelBuildProgressed": {
       if (state.activeBuild?.buildId !== event.buildId) return state;
       return { ...state, status: "building", activeBuild: { ...state.activeBuild, stage: event.stage, message: event.message, attempt: event.attempt, status: "running", updatedAt: event.now }, updatedAt: event.now };
@@ -403,7 +413,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "StartModelBuild":
         if (state.activeBuild?.status === "running") return rejected(state, "A model build is already running");
         if (command.revision !== state.revision) return rejected(state, "That build belongs to an older situation");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildStarted", buildId: command.buildId, revision: command.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildStarted", buildId: command.buildId, revision: command.revision, ...(command.modelMode ? { modelMode: command.modelMode } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
       case "UpdateModelBuild":
         if (state.activeBuild?.buildId !== command.buildId || state.activeBuild.status !== "running") return rejected(state, "That build is no longer active");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildProgressed", buildId: command.buildId, stage: command.stage.slice(0, 40), message: command.message.slice(0, 500), attempt: Math.max(1, command.attempt ?? state.activeBuild.attempt), now: command.now }), { tag: "Accepted", revision: state.revision });
