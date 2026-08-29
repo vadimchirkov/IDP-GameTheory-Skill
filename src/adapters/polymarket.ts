@@ -1,6 +1,6 @@
-import type { Rng } from "./rng.js";
-import { runSimulation, type SimulationAdapter, type SimulationSpec, type WorldSample } from "./simulation.js";
-import { assertTopologyPrior, type NumberRange, type Topology, type TopologyPrior } from "./topology.js";
+import type { Rng } from "../rng.js";
+import { runSimulation, type SimulationAdapter, type SimulationSpec, type WorldSample } from "../simulation.js";
+import { assertTopologyPrior, type NumberRange, type Topology, type TopologyPrior } from "../topology.js";
 
 export type PolymarketSide = "YES" | "NO" | "ABSTAIN" | "LP";
 
@@ -28,7 +28,7 @@ export interface PolymarketModel {
   markets: readonly PolymarketMarket[];
   /** Strategies/positions to compare paired-world. 2..5. */
   positions: readonly PolymarketPosition[];
-  /** Taker fee on cost, 0..0.1 */
+  /** Protocol taker fee rate. The dollar fee is size × rate × price × (1-price). */
   fee: NumberRange;
   /** Slippage as fraction of entry, 0..0.1 */
   slippage?: NumberRange;
@@ -82,6 +82,17 @@ const sample = (range: NumberRange | undefined, fallback: number, rng: Rng): num
 
 const clamp01 = (v: number): number => Math.max(0.01, Math.min(0.99, v));
 
+export function polymarketTakerFee(size: number, price: number, feeRate: number): number {
+  if (![size, price, feeRate].every(Number.isFinite) || size < 0 || price < 0 || price > 1 || feeRate < 0) throw new Error("invalid Polymarket fee inputs");
+  return size * feeRate * price * (1 - price);
+}
+
+export function polymarketPositionValue(side: "YES" | "NO" | "ABSTAIN", size: number, entry: number, feeRate: number, slippage: number, outcome: "YES" | "NO"): number {
+  if (side === "ABSTAIN" || size === 0) return 0;
+  const cost = size * entry * (1 + slippage) + polymarketTakerFee(size, entry, feeRate);
+  return (side === outcome ? size : 0) - cost;
+}
+
 export const polymarketAdapter: SimulationAdapter<PolymarketModel, PolymarketWorld> = {
   id: "polymarket",
   validate: assertPolymarket,
@@ -122,18 +133,17 @@ export const polymarketAdapter: SimulationAdapter<PolymarketModel, PolymarketWor
       } else if (pos.side === "YES") {
         const entry = clamp01(sample(pos.entry, pm.marketPrice, rng));
         inputs[`${pos.id}.entry`] = entry;
-        cost = size * entry * (1 + fee + slippage);
-        feesPaid += size * entry * fee;
-        const payout = pm.outcome === "YES" ? size * 1 : 0;
-        // slippage already in cost; entry is what you paid per share
-        pnl = payout - cost;
+        const charged = polymarketTakerFee(size, entry, fee);
+        cost = size * entry * (1 + slippage) + charged;
+        feesPaid += charged;
+        pnl = polymarketPositionValue("YES", size, entry, fee, slippage, pm.outcome);
       } else if (pos.side === "NO") {
         const entryNo = clamp01(sample(pos.entry, 1 - pm.marketPrice, rng));
         inputs[`${pos.id}.entry`] = entryNo;
-        cost = size * entryNo * (1 + fee + slippage);
-        feesPaid += size * entryNo * fee;
-        const payout = pm.outcome === "NO" ? size * 1 : 0;
-        pnl = payout - cost;
+        const charged = polymarketTakerFee(size, entryNo, fee);
+        cost = size * entryNo * (1 + slippage) + charged;
+        feesPaid += charged;
+        pnl = polymarketPositionValue("NO", size, entryNo, fee, slippage, pm.outcome);
       } else if (pos.side === "LP") {
         // LP: earn fee on volume, lose on adverse selection ~ |edge| * size
         // Simplified: pnl = size*lpRebate - size*|edge|*0.5  with outcome variance

@@ -9,8 +9,8 @@ import {
   type AgentRunMeta,
   type AgentSelection,
 } from "./agent-contracts.js";
-import { analyzeScenario } from "./analysis.js";
-import { runDecision, type DecisionModel } from "./decision.js";
+import { analyzeScenario } from "./adapters/repeated-game.js";
+import { runDecision, type DecisionModel } from "./adapters/decision.js";
 import { assertScenario, type ScenarioModel } from "./domain.js";
 import { runStructured } from "./pi-agent.js";
 import type { Fact } from "./task.js";

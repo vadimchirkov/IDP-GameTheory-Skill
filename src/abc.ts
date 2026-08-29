@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
-import type { ScenarioResult, Trial } from "./analysis.js";
+import type { ScenarioResult, Trial } from "./adapters/repeated-game.js";
 import { conditionWorlds, weightedMean, weightedStandardDeviation } from "./monte-carlo.js";
 
 export interface Observation {
@@ -120,7 +120,7 @@ export function fitPosterior(result: ScenarioResult, obs: Observation | readonly
 
 // ── self-check: model-agnostic invariants (run with `tsx src/abc.ts`) ──────────────
 async function selfCheck(): Promise<void> {
-  const { analyzeScenario } = await import("./analysis.js");
+  const { analyzeScenario } = await import("./adapters/repeated-game.js");
 
   // Two players whose dispositions make the winner genuinely vary world to world.
   const model = {

@@ -1,4 +1,4 @@
-import type { DecisionModel, DecisionRun } from "./decision.js";
+import type { DecisionModel, DecisionRun } from "./adapters/decision.js";
 
 const escapeHtml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const format = (value: number) => Math.abs(value) >= 100 ? value.toFixed(0) : Math.abs(value) >= 10 ? value.toFixed(1) : value.toFixed(2);

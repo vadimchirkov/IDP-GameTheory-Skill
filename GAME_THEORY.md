@@ -17,7 +17,7 @@ Supported payoff orderings:
 The adapter includes memory strategies, fixed teams, behavioral drift, observation
 noise, voluntary exit, reputation, punishment, cheap talk, continuous environmental
 feedback, and discrete game-state transitions. These are domain code in
-`src/domain.ts`, `src/kernel.ts`, `src/reputation.ts`, and `src/analysis.ts`; none is
+`src/domain.ts`, `src/kernel.ts`, `src/reputation.ts`, and `src/adapters/repeated-game.ts`; none is
 required by `src/monte-carlo.ts` or `src/topology.ts`.
 
 `src/abc.ts` maps observed C/D outcomes to a likelihood and reuses the generic

@@ -1,6 +1,6 @@
-import type { Rng } from "./rng.js";
-import { runSimulation, type SimulationAdapter, type SimulationSpec, type WorldSample } from "./simulation.js";
-import { assertTopologyPrior, type NumberRange, type Topology, type TopologyPrior } from "./topology.js";
+import type { Rng } from "../rng.js";
+import { runSimulation, type SimulationAdapter, type SimulationSpec, type WorldSample } from "../simulation.js";
+import { assertTopologyPrior, type NumberRange, type Topology, type TopologyPrior } from "../topology.js";
 
 export interface ProcessNode {
   id: string;

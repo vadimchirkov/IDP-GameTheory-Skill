@@ -1,6 +1,6 @@
 import type { AgentSelection } from "../../src/agent-contracts";
 import type { ScenarioModel } from "../../src/domain";
-import type { DecisionModel } from "../../src/decision";
+import type { DecisionModel } from "../../src/adapters/decision";
 import type { SimulationModel } from "../../src/model";
 import type { AgentMode, Fact, FactKind, OpenQuestion, TaskMessage, TaskState } from "../../src/task";
 import type { TaskSummary } from "../../src/task-projections";

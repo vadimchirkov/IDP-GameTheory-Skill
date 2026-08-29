@@ -1,13 +1,13 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { analyzeScenario, scenarioReport } from "./analysis.js";
+import { analyzeScenario, scenarioReport } from "./adapters/repeated-game.js";
 import { KERNEL_VERSION } from "./kernel.js";
 import { generateWorldsVisual, visibleWorldLabelNodes } from "./worlds-report.js";
 import { generateSimulationReport } from "./generic-report.js";
 import { generateDecisionReport } from "./decision-report.js";
-import { runDecision } from "./decision.js";
+import { runDecision } from "./adapters/decision.js";
 import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
-import { runStochasticProcess } from "./stochastic-process.js";
-import { runPolymarket } from "./polymarket.js";
+import { runStochasticProcess } from "./adapters/stochastic-process.js";
+import { runPolymarket } from "./adapters/polymarket.js";
 
 interface Work { model: SimulationModel; trials: number; seed: number }
 

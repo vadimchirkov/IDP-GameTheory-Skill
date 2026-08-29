@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { assertScenario, isValidPayoff } from "./domain.js";
 import { playMatch, strategies, zdVector, ZD_BASELINE, type EcoState, type TransitionState } from "./kernel.js";
 import { Rng } from "./rng.js";
-import { analyzeScenario } from "./analysis.js";
+import { analyzeScenario } from "./adapters/repeated-game.js";
 
 const P={T:5,R:3,P:1,S:0};
 

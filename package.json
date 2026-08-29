@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && pnpm app:build",
-    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts",
+    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts && tsx src/forecast-selfcheck.ts",
     "scenario": "tsx src/cli.ts",
+    "forecast": "tsx src/forecast-cli.ts",
     "app": "pnpm app:build && tsx src/app-server.ts",
     "app:build": "tsc -p app/tsconfig.json --noEmit && vite build --config app/vite.config.ts",
     "app:dev": "vite --config app/vite.config.ts",

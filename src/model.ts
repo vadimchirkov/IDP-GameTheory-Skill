@@ -1,7 +1,7 @@
 import { assertScenario, type ScenarioModel } from "./domain.js";
-import { assertDecisionModel, type DecisionModel } from "./decision.js";
-import { assertStochasticProcess, type StochasticProcessSpec } from "./stochastic-process.js";
-import { assertPolymarket, type PolymarketSpec } from "./polymarket.js";
+import { assertDecisionModel, type DecisionModel } from "./adapters/decision.js";
+import { assertStochasticProcess, type StochasticProcessSpec } from "./adapters/stochastic-process.js";
+import { assertPolymarket, type PolymarketSpec } from "./adapters/polymarket.js";
 
 export type SimulationModel = DecisionModel | ScenarioModel | StochasticProcessSpec | PolymarketSpec;
 

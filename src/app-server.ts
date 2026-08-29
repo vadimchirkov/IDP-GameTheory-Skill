@@ -17,12 +17,12 @@ import {
   taskAggregate, taskCategory, taskEventCodec, taskStateCodec,
   type AgentMode, type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
 } from "./task.js";
-import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./analysis.js";
+import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./adapters/repeated-game.js";
 import type { SimulationArtifact } from "./simulation.js";
 import { generateSimulationReport } from "./generic-report.js";
 import { summarizeWorlds } from "./simulation.js";
 import { generateDecisionReport } from "./decision-report.js";
-import { restoreDecisionRun, type DecisionArtifact } from "./decision.js";
+import { restoreDecisionRun, type DecisionArtifact } from "./adapters/decision.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { researchPublicContext } from "./web-research.js";
 
