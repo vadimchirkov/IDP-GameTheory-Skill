@@ -36,7 +36,11 @@ world; the runner returns worlds, metric distributions, paths, and sensitivity.
 `src/adapters/stochastic-process.ts` is the first concrete adapter and a template for
 queues, markets, cascades, reliability models, or agent-based systems.
 
-## Compatibility model
+## Domain adapters
+
+`src/adapters/decision.ts` is the primary product adapter. It evaluates every option
+in the same sampled environment and reduces the resulting worlds into robustness,
+target probability, regret, reversal sensitivity, and paths for the Decision River.
 
 `src/adapters/repeated-game.ts` is not the universal engine. It is the existing repeated C/D
 scenario model implemented as one client of the core. It constructs a complete
@@ -54,8 +58,10 @@ world conditioning and weighted summaries to `src/monte-carlo.ts`.
 ## Application boundary
 
 The React application, Pi modelling agent, TEOB `Task` aggregate, SQLite journal,
-worker, and HTML river are product infrastructure. They orchestrate and present the
-compatibility model; they are not dependencies of the reusable core.
+worker, and HTML rivers are product infrastructure. They orchestrate and present
+Decision and C/D models; they are not dependencies of the reusable core. Imported
+stochastic-process and Polymarket models are CLI-level adapters for now and are not
+built by the web agent.
 
 Forecast evaluation is a separate boundary above adapters. `src/forecast.ts` knows
 only categorical outcomes, probabilities, optional baseline probabilities, and an
@@ -66,15 +72,14 @@ ledger and scorer therefore do not need branches for every future adapter.
 ```text
 application / CLI
        |
-       v
-C/D compatibility model ---- future simulation callbacks
-       |                              |
-       +--------------+---------------+
-                      v
-          Monte Carlo + topology core
-                      |
-                      v
-              deterministic RNG
+       +-- Decision adapter -----------+
+       +-- repeated C/D adapters ------+
+       +-- stochastic-process adapter -+--> Monte Carlo primitives
+       +-- Polymarket adapter ---------+           |
+                                                   +-- topology where needed
+                                                   |
+                                                   v
+                                           deterministic RNG
 ```
 
 ## Boundaries kept out

@@ -17,7 +17,7 @@ The script first tries the project paths `data/raw/*`, then falls back to `/tmp/
 | `DF2011.csv` 138 KB | `R::stratEst::DF2011` / https://openicpsr.org/project/112401 | Dal Bó & Fréchette 2011 AER | 7,358 rows → 4,754 pairs | `id,game,period,choice,other.choice` — indefinitely repeated PD `δ=1/2,3/4` |
 | `TIESv4.xls` 479 KB | https://sanctions.web.unc.edu/wp-content/uploads/sites/18834/2021/04/TIESv4-1.xls | Morgan et al 2014 TIES 4.0 | 1,412 cases → 482 dyads 4,922y | `sender1,targetstate,startyear,endyear` — full TIES 1945-2005 |
 
-## SHA256 (as of 2026-08-23)
+## SHA-256 prefixes (as of 2026-08-23)
 
 ```
 971209ff CESv1Sender_2025c.csv
@@ -34,20 +34,31 @@ fa00331f MIDA_5.0.csv
 
 **A. Strategy move-level (K=3) — `scripts/live-bench.mjs` (`pred = prev` = TFT `provocable`):**
 
-- **human**: `pred = other.decision1 (1->coop 0->defect NA->coop)`, `actual = my.decision`, filter `period>3`. Baseline `ALL-D 56.7%` → TFT 82.1%.
-- **MID**: dyad `(a,b)` -> `Set(year)` -> `seq[y]= D if y in disputes else C` over `min..max` -> `19,808y, ALL-C 81.3%, TFT 85.6%`.
-- **TIES**: `sender1-state2` -> `startyear..endyear` -> same `seq`, `358y, ALL-D 69.3% → TFT 91.1%`.
+- **dilemmaRL**: `pred = other.decision1 (1->coop 0->defect NA->coop)`,
+  `actual = my.decision`, filter `period>3`. Baseline `ALL-D 56.7%` → TFT 82.1%.
+- **DF2011**: 4,754 pairs. Best constant baseline `ALL-D 55.2%` → TFT 87.7%.
+- **MID**: dyad `(a,b)` -> `Set(year)` -> `seq[y] = D` if the year contains a
+  dispute, otherwise `C`; 19,808 dyad-years, `ALL-C 81.3%` → TFT 85.6%.
+- **China-TIES**: the same sequence construction for sanction years; 358
+  dyad-years, `ALL-C 30.7%` (`ALL-D 69.3%`) → TFT 91.1%.
 
 The script reports balanced accuracy, macro F1, and retention versus transition;
 otherwise `ALL-C 81%` / `ALL-D 69%` inflate accuracy.
 
 **B. Engine scenario-level (holdout, Brier/ECE/MAE) — `npx tsx src/bench-engine.ts`:**
 
-- **Synthetic 300 models (300 trials, 1 holdout):** `winPct/100` as `p` vs `hit∈{0,1}` → Brier `0.23` vs coin `0.25`, ECE `0.05`, coop MAE `0.24`.
-- **DF2011 6 treatments:** engine `cooperation.mean` vs observed rate per treatment → MAE naive `54.7pp` vs elicited wide-SET `31.9pp` vs hist-mean `25.9pp`. Wide-SET beats naive, but without `values/drift` it doesn't beat the baseline — an honest misfit.
-- **MID/TIES generic PD:** `88%` vs MID 81% err 6pp (ok), vs TIES 54% err 33pp > coin — generic isn't tuned.
+- **Synthetic, 300 models (300 trials, 1 holdout):** the predicted winner matches
+  the held-out winner 60.0% of the time versus a 50% coin baseline.
+- **DF2011, 6 treatments:** engine cooperation-rate MAE is 10.6 percentage points
+  (89.4% mean agreement), compared with 25.9 points for the historical-mean baseline.
+- **dilemmaRL, 5 non-zero-delta groups:** cooperation-rate MAE is 5.4 percentage
+  points (94.6% mean agreement), compared with 10.8 points for the historical mean.
+- **MID/TIES proxies:** cooperation-rate agreement is 92.3% for MID and 98.5% for
+  TIES. These are proxy fits, not independent forecasts of conflicts or sanctions.
 
-A — proves the IPD carries signal (TFT≈inertia). B — proves the engine's calibration and where honest elicitation is needed (SKILL wide ranges/SET).
+A checks that repeated behavior carries an inertia signal. B checks calibration and
+shows where explicit model elicitation is needed. Neither establishes causal or
+out-of-domain predictive validity.
 
 ## Licenses / citations
 
@@ -64,6 +75,6 @@ A — proves the IPD carries signal (TFT≈inertia). B — proves the engine's c
 ```bash
 node scripts/live-bench.mjs          # requires data/raw/* (fallback /tmp/*)
 npx tsx src/bench-predictive.ts     # synthetic + split retention/transition
-npx tsx src/verify-pack.ts          # 14 gates
+npx tsx src/verify-pack.ts          # deterministic verification pack
 npx tsx src/cross_validate.ts && python3 scripts/cross_validate.py
 ```

@@ -14,11 +14,18 @@ This document is the visual contract for Flumina. The product motto is **“Map 
 
 ## Layout and navigation
 
-- Desktop uses three layers: situations sidebar, run context sidebar, result canvas.
-- A visible sidebar owns its collapse button in the upper-left. A hidden sidebar exposes one restore button in the result toolbar. Never show both controls for the same action at once.
-- Mobile keeps `Situations` and `Scenario` in the result toolbar because both sidebars are off-canvas.
+- Desktop uses a situations sidebar and one staged workspace. The workspace switches
+  between `Context`, `Model`, and `Worlds`; these are steps in one flow, not competing
+  sidebars or duplicate views.
+- A visible situations sidebar owns its collapse button in the upper-left. When it is
+  hidden, the workspace toolbar exposes one restore button. Never show both controls
+  for the same action at once.
+- The assistant is an optional right-hand drawer. It changes role with the active
+  stage: context guide before a run and river analyst after a result exists.
+- Mobile keeps `Situations` in the workspace toolbar and opens the list off-canvas.
 - Global system settings live at the bottom of the situations sidebar.
-- Contextual settings live in the `…` menu of the relevant sidebar. Run model, seed and manual world model belong to run settings.
+- Run settings live in the workspace `…` menu. The Model stage owns model type,
+  model review, world count, and the decisive Run action.
 - Advanced or developer-only controls use native `<details>` progressive disclosure.
 
 ## Color tokens
@@ -63,7 +70,7 @@ Use color for state and priority, not decoration. Sidebars are slightly dimmer s
 ## Reusable implementation prompt
 
 ```text
-Design and implement a dark-only professional simulation workspace combining Codex-like native restraint with Linear's precision and density, without copying either brand. Preserve the three-part mental model: situations, run context, result canvas. Use layered near-black surfaces (#171717, #121212, #151515), high-contrast primary text (#ececec), muted metadata (#8b8b8b), and a light decisive action. Prefer spacing, alignment and quiet hover fills over borders or card containers. Use compact system sans typography, 4/8/12/16/24 spacing, 34–36px controls, 9–11px radii on interactive elements, and 16–18px radii only on floating dialogs and drawers. Keep structural panels square and navigation dimmer than the result. Use thin native-feeling line icons. Show a sidebar restore control only when that sidebar is hidden; put collapse at the upper-left inside an open sidebar. Put global settings at the bottom of the main sidebar and contextual settings behind the relevant overflow menu. Reveal developer controls progressively with native details. Keep scrollbars native, thin and unobtrusive. No gradients, glassmorphism, neon, decorative glows, dashboard-card mosaics, or extra dependencies. Keep keyboard focus, semantic labels, 32px hit targets, reduced-motion behavior, desktop and mobile states fully working.
+Design and implement a dark-only professional simulation workspace combining Codex-like native restraint with Linear's precision and density, without copying either brand. Preserve one clear flow: situations sidebar, then Context → Model → Worlds in a single workspace, with an optional assistant drawer. Use layered near-black surfaces (#171717, #121212, #151515), high-contrast primary text (#ececec), muted metadata (#8b8b8b), and a light decisive action. Prefer spacing, alignment and quiet hover fills over borders or card containers. Use compact system sans typography, 4/8/12/16/24 spacing, 34–36px controls, 9–11px radii on interactive elements, and 16–18px radii only on floating dialogs and drawers. Keep structural panels square and navigation dimmer than the result. Use thin native-feeling line icons. Show the situations restore control only when that sidebar is hidden; put collapse at the upper-left inside the open sidebar. Put global settings at the bottom of the situations sidebar, run settings in the workspace overflow, and model controls in the Model stage. Reveal developer controls progressively with native details. Keep scrollbars native, thin and unobtrusive. No gradients, glassmorphism, neon, decorative glows, dashboard-card mosaics, or extra dependencies. Keep keyboard focus, semantic labels, 32px hit targets, reduced-motion behavior, desktop and mobile states fully working.
 ```
 
 ## References

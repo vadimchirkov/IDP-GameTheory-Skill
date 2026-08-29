@@ -26,7 +26,7 @@ scenario model. A deterministic TypeScript engine then explores the uncertainty
 space at speed; the outcomes are calculated by the simulation, not invented by the
 AI.
 
-The three parts have distinct responsibilities:
+The main parts have distinct responsibilities:
 
 - **Paired-world Monte Carlo** samples each environment once and evaluates every
   option in it, so comparisons are not distorted by different random draws.
@@ -390,6 +390,7 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `data/` | SQLite app state plus benchmark manifest and raw datasets |
 | `reports/tasks/` | Generated run visualizations and replay artifacts |
 | `example_*.json` | Ready-to-run scenario models |
+
 ## Limits
 
 - P0 deliberately supports one primary objective and an inspectable linear response
