@@ -34,12 +34,12 @@ engine interface or inheriting from framework classes.
 `src/simulation.ts` composes the two primitives. A `SimulationSpec` supplies a
 domain model and topology prior; a `SimulationAdapter` simulates one sampled
 world; the runner returns worlds, metric distributions, paths, and sensitivity.
-`src/stochastic-process.ts` is the first concrete adapter and a template for
+`src/adapters/stochastic-process.ts` is the first concrete adapter and a template for
 queues, markets, cascades, reliability models, or agent-based systems.
 
 ## Compatibility model
 
-`src/analysis.ts` is not the universal engine. It is the existing repeated C/D
+`src/adapters/repeated-game.ts` is not the universal engine. It is the existing repeated C/D
 scenario model implemented as one client of the core. It constructs a complete
 pair topology, supplies the world callback, and reduces its domain-specific trials
 into winners, cooperation, sensitivity, replay data, and the river artifact.
@@ -52,6 +52,12 @@ world conditioning and weighted summaries to `src/monte-carlo.ts`.
 The React application, Pi modelling agent, TEOB `Task` aggregate, SQLite journal,
 worker, and HTML river are product infrastructure. They orchestrate and present the
 compatibility model; they are not dependencies of the reusable core.
+
+Forecast evaluation is a separate boundary above adapters. `src/forecast.ts` knows
+only categorical outcomes, probabilities, optional baseline probabilities, and an
+optional decision value for each outcome. Adapter-specific bridges translate live
+data into this contract; `src/adapters/polymarket-live.ts` is the first one. The append-only
+ledger and scorer therefore do not need branches for every future adapter.
 
 ```text
 application / CLI

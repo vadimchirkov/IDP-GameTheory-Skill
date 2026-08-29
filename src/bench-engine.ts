@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { analyzeScenario, oneTrial } from "./analysis.js";
+import { analyzeScenario, oneTrial } from "./adapters/repeated-game.js";
 import type { ScenarioModel } from "./domain.js";
 import { Rng } from "./rng.js";
 

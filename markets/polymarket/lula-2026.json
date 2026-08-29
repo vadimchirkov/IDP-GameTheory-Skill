@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "adapter": "polymarket",
+  "situation": "Will Luiz Inacio Lula da Silva win the 2026 Brazilian presidential election?",
+  "model": {
+    "markets": [{
+      "id": "601819",
+      "question": "Will Luiz Inacio Lula da Silva win the 2026 Brazilian presidential election?",
+      "marketPrice": [0.56, 0.57],
+      "trueProb": [0.60, 0.80]
+    }],
+    "positions": [
+      { "id": "long_yes", "label": "Long YES", "side": "YES", "size": [100, 100] },
+      { "id": "long_no", "label": "Long NO", "side": "NO", "size": [100, 100] },
+      { "id": "abstain", "label": "Abstain", "side": "ABSTAIN", "size": [0, 0] }
+    ],
+    "fee": [0, 0],
+    "slippage": [0, 0]
+  },
+  "topology": { "nodes": ["market"], "interactions": [] }
+}

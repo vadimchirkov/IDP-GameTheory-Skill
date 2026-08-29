@@ -3,7 +3,7 @@ import {
   type Aggregate, type Effect,
 } from "@lambda-house/teob-ts/core";
 import { assertSimulationModel, type SimulationModel } from "./model.js";
-import type { DecisionOptionSummary, DecisionRun } from "./decision.js";
+import type { DecisionOptionSummary, DecisionRun } from "./adapters/decision.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 import type { ResearchSource } from "./web-research.js";
 import type { MetricSummary } from "./simulation.js";

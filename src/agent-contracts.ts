@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import type { DecisionModel } from "./decision.js";
+import type { DecisionModel } from "./adapters/decision.js";
 import { feasiblePayoffRanges, strategyIds, type GameType, type PayoffRanges, type ScenarioModel } from "./domain.js";
 
 const closed = { additionalProperties: false } as const;

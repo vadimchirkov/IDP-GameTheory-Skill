@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "adapter": "polymarket",
+  "situation": "Will no Fed rate cuts happen in 2026?",
+  "model": {
+    "markets": [{
+      "id": "616902",
+      "question": "Will no Fed rate cuts happen in 2026?",
+      "marketPrice": [0.875, 0.876],
+      "trueProb": [0.88, 1.00]
+    }],
+    "positions": [
+      { "id": "long_yes", "label": "Long YES", "side": "YES", "size": [100, 100] },
+      { "id": "long_no", "label": "Long NO", "side": "NO", "size": [100, 100] },
+      { "id": "abstain", "label": "Abstain", "side": "ABSTAIN", "size": [0, 0] }
+    ],
+    "fee": [0.05, 0.05],
+    "slippage": [0, 0]
+  },
+  "topology": { "nodes": ["market"], "interactions": [] }
+}

@@ -134,6 +134,7 @@ Useful commands:
 | `pnpm app` | Builds and starts the local application |
 | `pnpm app:server` | Starts the API in watch mode |
 | `pnpm app:dev` | Starts the Vite frontend dev server |
+| `pnpm forecast` | Records and scores immutable adapter forecasts |
 | `pnpm bench:engine` | Runs scenario-level engine benchmarks |
 | `pnpm bench:live` | Runs move-level benchmarks against datasets in `data/raw/` |
 | `pnpm bench:all` | Runs both benchmark layers and cross-validation |
@@ -194,6 +195,46 @@ The Model step offers two AI-built modes: **Decision comparison** for actions un
 shared uncertainty, and **Strategic interaction** for repeated C/D reactions between
 parties. Imported stochastic-process models and the single-market Polymarket adapter
 run on the same Monte Carlo core but are not inferred by the web agent.
+
+### Forecast validation
+
+`src/forecast.ts` is a small adapter-neutral evaluation boundary. An adapter records
+an immutable categorical forecast before the outcome is known; a later resolution
+record supplies the observed outcome. The shared scorer reports Brier score, log
+loss, accuracy, calibration bins, an optional external baseline, and the settled
+value of the paper decision. A future adapter only needs to produce this record; it
+does not depend on Polymarket or its APIs.
+
+Polymarket is the first live bridge. It reads public market data from the official
+Gamma API, keeps the market price as the baseline, chooses a paper-only YES, NO, or
+ABSTAIN position from the model's probability, and uses the live bid/ask and
+price-dependent taker fee. LP is not selected for paper decisions because the
+current LP simulation is deliberately simplified.
+
+```bash
+# Record a forecast before the market resolves. Estimate trueProb independently;
+# copying the market price into it would make the comparison circular.
+pnpm forecast snapshot example_polymarket.json <market-id-or-slug>
+
+# Later, resolve finished Polymarket snapshots and print current scores.
+pnpm forecast sync
+
+# Score offline, or record a non-Polymarket outcome manually.
+pnpm forecast score
+pnpm forecast resolve <snapshot-id> YES
+
+# Snapshot every model in markets/polymarket (safe to repeat).
+pnpm forecast batch
+
+# Keep the collector running; repeat every 60 minutes by default.
+pnpm forecast watch --interval 60
+```
+
+The default append-only ledger is `data/forecasts.jsonl`; `--ledger PATH` selects
+another file. `sync` is intentionally a one-shot command so a scheduler can run it
+without keeping another daemon alive. `watch` is the self-running paper collector;
+leave it under launchd/systemd to start it automatically after login or reboot.
+Forecasts are paper records and never place orders or require wallet credentials.
 
 ### Game-theory compatibility adapter
 
@@ -331,6 +372,7 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | Path | Responsibility |
 |---|---|
 | `app/` | React workspace, API client, routing, and visual design contract |
+| `src/adapters/` | Concrete decision, repeated-game, stochastic-process, and Polymarket adapters |
 | `src/app-server.ts` | Local HTTP API, static files, SSE, jobs, and report lifecycle |
 | `src/task.ts` | Event-sourced task aggregate and revision rules |
 | `src/pi-agent.ts` | Headless Pi runtime, model discovery/auth, and typed agent runs |
@@ -339,8 +381,8 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `src/kernel.ts` | Repeated-game strategies and match mechanics |
 | `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
 | `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
-| `src/analysis.ts` | C/D compatibility model implemented on the generic core |
-| `src/decision.ts` | Paired-world decision model, validation, runner, and summaries |
+| `src/adapters/repeated-game.ts` | C/D compatibility model implemented on the generic core |
+| `src/adapters/decision.ts` | Paired-world decision model, validation, runner, and summaries |
 | `src/decision-report.ts` | Option comparison and interactive Decision River |
 | `src/worlds-report.ts` | Interactive river report generation |
 | `src/cli.ts` | Standalone command-line entry point |

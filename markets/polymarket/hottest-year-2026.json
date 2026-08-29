@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "adapter": "polymarket",
+  "situation": "Will 2026 be the hottest year on record?",
+  "model": {
+    "markets": [{
+      "id": "678686",
+      "question": "Will 2026 be the hottest year on record?",
+      "marketPrice": [0.74, 0.76],
+      "trueProb": [0.00, 0.12]
+    }],
+    "positions": [
+      { "id": "long_yes", "label": "Long YES", "side": "YES", "size": [100, 100] },
+      { "id": "long_no", "label": "Long NO", "side": "NO", "size": [100, 100] },
+      { "id": "abstain", "label": "Abstain", "side": "ABSTAIN", "size": [0, 0] }
+    ],
+    "fee": [0, 0],
+    "slippage": [0, 0]
+  },
+  "topology": { "nodes": ["market"], "interactions": [] }
+}

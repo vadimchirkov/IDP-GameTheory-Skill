@@ -1,12 +1,12 @@
 import {
   assertScenario, isValidPayoff, type GameType, type Move, type Payoff, type PayoffRanges,
   type ScenarioModel, type StrategyId,
-} from "./domain.js";
-import { memoryN, playMatch, strategies, type EcoState, type MatchDigest, type MatchRound, type TransitionState } from "./kernel.js";
-import { correlation, mean, monteCarloWorldSeed, runMonteCarlo, simulateMonteCarloWorld, standardDeviation } from "./monte-carlo.js";
-import { assess, gossipBlend, type Image, type NormId } from "./reputation.js";
-import { Rng } from "./rng.js";
-import { completeTopology } from "./topology.js";
+} from "../domain.js";
+import { memoryN, playMatch, strategies, type EcoState, type MatchDigest, type MatchRound, type TransitionState } from "../kernel.js";
+import { correlation, mean, monteCarloWorldSeed, runMonteCarlo, simulateMonteCarloWorld, standardDeviation } from "../monte-carlo.js";
+import { assess, gossipBlend, type Image, type NormId } from "../reputation.js";
+import { Rng } from "../rng.js";
+import { completeTopology } from "../topology.js";
 
 interface RepState { norm: NormId; quantitative: boolean; theta: number; gossipProb: number }
 
@@ -128,7 +128,7 @@ function normaliseScore(score: number, payoff: Payoff, rounds: number, opponents
 function teamOf(p: { name: string; team?: string }): string { return p.team ?? p.name; }
 
 /** A player's own rule, before any coalition wrapper: an explicit memory table beats the picked disposition. */
-function baseStrategy(player: import("./domain.js").ScenarioPlayer, pickedId: StrategyId): import("./kernel.js").Strategy {
+function baseStrategy(player: import("../domain.js").ScenarioPlayer, pickedId: StrategyId): import("../kernel.js").Strategy {
   const table = player.memory;
   if (table) return memoryN(table, Object.keys(table)[0]?.split("|").length ?? 1);
   return strategies[pickedId];
@@ -140,10 +140,10 @@ function baseStrategy(player: import("./domain.js").ScenarioPlayer, pickedId: St
  * custom `memory` table — passes through untouched.
  */
 function effectiveStrategy(
-  player: import("./domain.js").ScenarioPlayer,
+  player: import("../domain.js").ScenarioPlayer,
   pickedId: StrategyId,
   oppTeam: string,
-): import("./kernel.js").Strategy {
+): import("../kernel.js").Strategy {
   if (pickedId !== "colluder") return baseStrategy(player, pickedId);
   if (teamOf(player) !== oppTeam) return (_mine, theirs) => (theirs.length === 0 ? "C" : theirs[theirs.length - 1] ?? "C");
   const betrayalProb = player.betrayalProb;

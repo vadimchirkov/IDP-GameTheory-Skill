@@ -1,13 +1,13 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { analyzeScenario, scenarioReport } from "./analysis.js";
+import { analyzeScenario, scenarioReport } from "./adapters/repeated-game.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { generateDecisionReport } from "./decision-report.js";
-import { runDecision } from "./decision.js";
+import { runDecision } from "./adapters/decision.js";
 import type { ScenarioModel } from "./domain.js";
 import { generateSimulationReport } from "./generic-report.js";
 import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
-import { runPolymarket } from "./polymarket.js";
-import { runStochasticProcess } from "./stochastic-process.js";
+import { runPolymarket } from "./adapters/polymarket.js";
+import { runStochasticProcess } from "./adapters/stochastic-process.js";
 
 const args = process.argv.slice(2);
 const path = args[0];

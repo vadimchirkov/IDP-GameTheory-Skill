@@ -1,5 +1,5 @@
 import type { ScenarioModel } from "./domain.js";
-import { analyzeScenario, type ScenarioResult } from "./analysis.js";
+import { analyzeScenario, type ScenarioResult } from "./adapters/repeated-game.js";
 
 export interface WorldLabel { short: string; detail: string }
 export type WorldLabels = Record<string, WorldLabel>;

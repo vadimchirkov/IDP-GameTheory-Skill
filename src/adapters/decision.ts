@@ -1,6 +1,6 @@
-import { correlation, mean, runMonteCarlo, standardDeviation } from "./monte-carlo.js";
-import { deriveSeed, Rng } from "./rng.js";
-import type { NumberRange } from "./topology.js";
+import { correlation, mean, runMonteCarlo, standardDeviation } from "../monte-carlo.js";
+import { deriveSeed, Rng } from "../rng.js";
+import type { NumberRange } from "../topology.js";
 
 export interface DecisionFactor {
   id: string;
