@@ -1,7 +1,8 @@
 # Included C/D compatibility model
 
 The reusable engine is game-agnostic; see `PROJECT_ARCHITECTURE.md`. This document
-describes only the repeated C/D model that currently powers the application.
+describes only the repeated C/D model behind the application's **Strategic
+interaction** mode.
 
 Each world samples uncertain payoffs, continuation probability, noise, optional
 mechanism parameters, and one disposition per participant. Every pair then plays a
