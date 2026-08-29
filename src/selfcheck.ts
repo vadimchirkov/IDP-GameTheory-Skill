@@ -4,17 +4,20 @@ import { Value } from "typebox/value";
 import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
 import { analyzeScenario, replayScenarioWorld } from "./analysis.js";
 import { sequentialActionAdapter } from "./action-simulation.js";
+import { runDecision, type DecisionModel } from "./decision.js";
+import { generateDecisionReport } from "./decision-report.js";
 import type { ScenarioModel } from "./domain.js";
 import { playMatch, strategies } from "./kernel.js";
 import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
+import { runPolymarket, type PolymarketSpec } from "./polymarket.js";
 import { Rng } from "./rng.js";
 import { runStochasticProcess, type StochasticProcessSpec } from "./stochastic-process.js";
 import { runSimulation } from "./simulation.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
-import { contextReplyOutputSchema, normalizeScenarioCoreDraft, normalizeScenarioDraft, researchPlanOutputSchema, scenarioDraftOutputSchema, understandingOutputSchema } from "./agent-contracts.js";
-import { parseChatResponse, parseScenarioHints, parseStructuredJson } from "./pi-agent.js";
+import { contextReplyOutputSchema, normalizeStrategicDraft, strategicDraftSchema } from "./agent-contracts.js";
+import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 import { openPublicPage } from "./web-research.js";
 
@@ -22,6 +25,44 @@ const payoff = { T: 5, R: 3, P: 1, S: 0 };
 const match = playMatch(strategies.exploitative, strategies.trusting, payoff, payoff, 20, 0, new Rng(1));
 assert.equal(match.scoreA, 100);
 assert.equal(match.scoreB, 0);
+
+const reservoirDecision: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "Three farms share a reservoir", question: "How should withdrawals be managed?",
+  objective: { label: "Shortage days", unit: "days", direction: "minimize", target: 8 },
+  factors: [
+    { id: "rain", label: "rainfall", range: [0, 100], lowLabel: "Dry season", highLabel: "Wet season" },
+    { id: "demand", label: "water demand", range: [0, 100], lowLabel: "Low demand", highLabel: "High demand" },
+  ],
+  options: [
+    { id: "current", label: "Keep current withdrawals", baseline: [12, 16], effects: [{ factorId: "rain", impact: [-7, -5] }, { factorId: "demand", impact: [5, 8] }] },
+    { id: "limits", label: "Set withdrawal limits", baseline: [7, 10], effects: [{ factorId: "rain", impact: [-4, -3] }, { factorId: "demand", impact: [2, 4] }] },
+    { id: "coordinate", label: "Coordinate withdrawals", baseline: [5, 8], effects: [{ factorId: "rain", impact: [-3, -2] }, { factorId: "demand", impact: [1, 3] }] },
+  ],
+  assumptions: ["The same rainfall and demand worlds are used for every option."],
+};
+const decisionRun = runDecision(reservoirDecision, 300, 41);
+assert.deepEqual(decisionRun, runDecision(reservoirDecision, 300, 41), "decision runs replay exactly");
+assert.equal(decisionRun.worlds.length, 300, "a decision run evaluates every sampled world");
+assert.equal(decisionRun.recommendedOptionId, "coordinate", "paired worlds identify the robust reservoir option");
+assert.equal(decisionRun.recommendation.criterion, "targetProbability", "a stated target drives the recommendation");
+assert.ok(decisionRun.options.coordinate!.targetProbability! > decisionRun.options.current!.targetProbability!, "decision summaries compare target probability");
+assert.ok(decisionRun.worlds.every((world) => world.path.length === 4), "every decision world has one four-stage river path");
+assert.ok(decisionRun.stress.worldCount > 0 && decisionRun.stress.factorId, "decision runs identify a tested boundary cohort");
+const reversalRun = runDecision({
+  schemaVersion: 1, adapter: "decision", situation: "A choice changes with demand", question: "Which capacity plan?",
+  objective: { label: "Value", direction: "maximize" },
+  factors: [{ id: "demand", label: "Demand", range: [0, 100], lowLabel: "Low demand", highLabel: "High demand" }],
+  options: [
+    { id: "lean", label: "Lean plan", baseline: [10, 10], effects: [{ factorId: "demand", impact: [-20, -20] }] },
+    { id: "scale", label: "Scale plan", baseline: [5, 5], effects: [{ factorId: "demand", impact: [10, 10] }] },
+  ], assumptions: [],
+}, 300, 9);
+assert.equal(reversalRun.stress.reversed, true, "stress analysis finds a regime that reverses the overall choice");
+const decisionReport = generateDecisionReport(reservoirDecision, decisionRun);
+assert.ok(decisionReport.includes("Decision River") && decisionReport.includes("Highest target chance"), "decision report names the recommendation criterion and explains the river");
+assert.ok(decisionReport.includes('aria-label="Decision River zoom controls"') && decisionReport.includes("prefers-reduced-motion"), "decision report keeps controls accessible");
+assert.ok(decisionReport.includes("Ribbon width = worlds, not value"), "the river states its visual encoding instead of implying utility");
+assert.ok(decisionReport.includes('data-regime="all"') && decisionReport.includes('data-metric="best"'), "the report can recalculate option summaries for a stress cohort");
 
 // Action adapters reuse the same Monte Carlo/topology runner: actions affect state,
 // while topology changes the transition rule rather than the engine contract.
@@ -62,36 +103,11 @@ const scenario: ScenarioModel = {
   payoffs: { T: [5, 5], R: [3, 3], P: [1, 1], S: [0, 0] },
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [{ prompt: "How long will it last?", field: "structure.w" }] }), true, "the understanding contract accepts a closed result");
-assert.equal(Value.Check(understandingOutputSchema, { title: "Supply standoff", questions: [], extra: true }), false, "agent contracts reject extra fields");
-assert.deepEqual(parseStructuredJson('```json\n{"title":"Supply standoff","questions":[]}\n```', understandingOutputSchema), { title: "Supply standoff", questions: [] }, "JSON fallback accepts a fenced provider response");
-assert.throws(() => parseStructuredJson('{"title":"Supply standoff","questions":[],"extra":true}', understandingOutputSchema), /does not match/, "JSON fallback still enforces the canonical schema");
 assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
-assert.equal(Value.Check(researchPlanOutputSchema, { completionMessage: "Модель собрана; проверьте допущения.", queries: [], questions: [] }), true, "model builds carry a same-language completion message");
+const strategicDraft = { game: "prisoners_dilemma" as const, players: [{ name: "A", dispositions: ["provocable" as const], note: "" }, { name: "B", dispositions: ["exploitative" as const], note: "" }], continuation: { min: 0.7, max: 0.9 }, noise: { min: 0, max: 0.05 }, payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } }, assumptions: ["The same incentives repeat."], questions: [], completionMessage: "Strategic model ready." };
+assert.equal(Value.Check(strategicDraftSchema, strategicDraft), true, "the compact C/D builder contract is machine-validatable");
+assert.doesNotThrow(() => analyzeScenario(normalizeStrategicDraft(strategicDraft, "Repeated supplier negotiation"), 2, 1), "the compact C/D draft normalizes into a runnable model");
 await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
-const agentDraft = {
-  situation: "contract check",
-  game: "prisoners_dilemma" as const,
-  players: [
-    { name: "A", dispositions: ["provocable" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-    { name: "B", dispositions: ["exploitative" as const], team: null, values: null, betrayalProb: null, memory: null, note: "" },
-  ],
-  structure: { w: { min: 0.8, max: 0.9 }, noise: { min: 0, max: 0.05 }, drift: null, sigma: null, eco: null, transitions: null, reputation: null, punishment: null, cheapTalk: null },
-  rationale: [],
-  payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } },
-};
-assert.equal(Value.Check(scenarioDraftOutputSchema, agentDraft), true, "full Pi model contract is machine-validatable");
-assert.deepEqual(normalizeScenarioDraft(agentDraft).players.map((player) => player.name), ["A", "B"]);
-const repairedPayoffs = normalizeScenarioCoreDraft({
-  game: "prisoners_dilemma",
-  players: [{ name: "Symbioen", dispositions: ["provocable"], note: "" }, { name: "CPO", dispositions: ["exploitative"], note: "" }],
-  w: { min: 0.6, max: 0.8 }, noise: { min: 0.03, max: 0.12 }, rationale: [],
-  payoffs: [
-    { player: "Symbioen", payoffs: { T: { min: 1, max: 2 }, R: { min: 4, max: 5 }, P: { min: 2, max: 3 }, S: { min: 3, max: 4 } } },
-    { player: "CPO", payoffs: { T: { min: 4, max: 6 }, R: { min: 2, max: 3 }, P: { min: 0, max: 1 }, S: { min: -3, max: -0.5 } } },
-  ],
-}, "charging reliability");
-assert.doesNotThrow(() => analyzeScenario(repairedPayoffs, 2, 1), "invalid agent payoff ranges are normalized before simulation");
 assert.deepEqual(parseScenarioHints("1. Кто принимает решение?\n- Какой срок?\n• Что ограничивает выбор?"), ["Кто принимает решение?", "Какой срок?", "Что ограничивает выбор?"]);
 assert.deepEqual(parseChatResponse("Main answer.\n<followups>What should we verify next?\nWhich assumption matters most?\nHow could the outcome change?</followups>"), { text: "Main answer.", suggestions: ["What should we verify next?", "Which assumption matters most?", "How could the outcome change?"] });
 assert.equal(relativeTime("2026-08-24T10:00:00.000Z", Date.parse("2026-08-24T10:12:00.000Z")), "12m ago");
@@ -149,6 +165,19 @@ assert.deepEqual(processRun, runStochasticProcess(processSpec, 80, 123), "stocha
 assert.equal(processRun.worlds.length, 80, "the generic process produces one persisted world per trial");
 assert.ok(processRun.worlds.some((world) => world.topology.interactions.length === 0) && processRun.worlds.some((world) => world.topology.interactions.length === 1), "uncertain topology is sampled inside every world");
 assert.ok(processRun.metrics.health && processRun.sensitivity.health?.length, "generic metrics and sensitivity are summarized without game semantics");
+
+const marketSpec: PolymarketSpec = {
+  schemaVersion: 1, adapter: "polymarket", situation: "Compare one binary market position",
+  topology: { nodes: ["market"], interactions: [] },
+  model: {
+    markets: [{ id: "main", marketPrice: [0.6, 0.6], trueProb: [0.6, 0.6] }],
+    positions: [{ id: "no", side: "NO", size: [100, 100], entry: [0.35, 0.35] }, { id: "skip", side: "ABSTAIN", size: [0, 0] }],
+    fee: [0, 0],
+  },
+};
+const marketRun = runPolymarket(marketSpec, 20, 1);
+assert.equal(marketRun.worlds[0]!.inputs["no.entry"], 0.35, "an explicit NO entry is interpreted as the NO price");
+assert.throws(() => runPolymarket({ ...marketSpec, model: { ...marketSpec.model, markets: [...marketSpec.model.markets, { id: "second", marketPrice: [0.4, 0.4], trueProb: [0.5, 0.5] }] } }, 1, 1), /exactly one market/, "P0 rejects unsupported multi-market input");
 
 // A scenario is one list of facts. `situation` facts define the model and move `revision`;
 // `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
@@ -248,7 +277,8 @@ assert.equal((await taskState()).openQuestions.length, 2, "the agent can raise q
 assert.equal((await taskState()).questionsRevision, (await taskState()).revision, "questions are stamped with their context revision");
 await task.runtime.ask(tid, { tag: "DismissQuestion", questionId: "q-2", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).openQuestions.length, 1, "a question can be dismissed");
-await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, now: "2026-01-01T00:00:11Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, modelMode: "strategic", now: "2026-01-01T00:00:11Z" }, taskCategory);
+assert.equal((await taskState()).activeBuild?.modelMode, "strategic", "a strategic build keeps its mode across recovery");
 await task.runtime.ask(tid, { tag: "CancelModelBuild", buildId: "build-cancel", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).activeBuild, undefined, "a model build can be cancelled without leaving the task busy");
 

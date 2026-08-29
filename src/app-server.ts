@@ -7,10 +7,10 @@ import { CategoryId, EntityId, SequenceNr } from "@lambda-house/teob-ts/core";
 import { createInMemoryProjectionStore, runProjection } from "@lambda-house/teob-ts/projection";
 import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite";
 import type { ScenarioModel } from "./domain.js";
-import { isStochasticProcess, type SimulationModel } from "./model.js";
+import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildStochasticProcessModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
+import { buildDecisionModel, buildStrategicModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
@@ -21,6 +21,8 @@ import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Tria
 import type { SimulationArtifact } from "./simulation.js";
 import { generateSimulationReport } from "./generic-report.js";
 import { summarizeWorlds } from "./simulation.js";
+import { generateDecisionReport } from "./decision-report.js";
+import { restoreDecisionRun, type DecisionArtifact } from "./decision.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { researchPublicContext } from "./web-research.js";
 
@@ -30,6 +32,8 @@ const reportDirectory = resolve(root, "reports", "tasks");
 const appDirectory = resolve(root, "app", "dist");
 const port = Number(process.env.PORT ?? 4317);
 const analysisTimeoutMs = Math.max(1_000, Number(process.env.ANALYSIS_TIMEOUT_MS) || 300_000);
+type ModelMode = "decision" | "strategic";
+const modelMode = (value: unknown): ModelMode => value === "strategic" ? "strategic" : "decision";
 await mkdir(dirname(databasePath), { recursive: true });
 await mkdir(reportDirectory, { recursive: true });
 
@@ -241,7 +245,7 @@ const conversationOf = (state: TaskState, bucket: "context" | "river") => (state
   .slice(-12)
   .map(({ role, text }) => ({ role, text }));
 
-function analysisWorker(model: SimulationModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact | SimulationArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
+function analysisWorker(model: SimulationModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact | SimulationArtifact | DecisionArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
     const worker = new Worker(new URL("./analysis-worker.ts", import.meta.url), { workerData: { model, trials, seed } });
     let settled = false;
@@ -249,7 +253,7 @@ function analysisWorker(model: SimulationModel, trials: number, seed: number, si
     const abort = () => { void worker.terminate(); finish(() => reject(new Error("Analysis was cancelled"))); };
     const timer = setTimeout(() => { void worker.terminate(); finish(() => reject(new Error(`Analysis timed out after ${analysisTimeoutMs}ms`))); }, analysisTimeoutMs);
     signal.addEventListener("abort", abort, { once: true });
-    worker.once("message", (message: { ok: boolean; html?: string; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact | SimulationArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
+    worker.once("message", (message: { ok: boolean; html?: string; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact | SimulationArtifact | DecisionArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
       if (message.ok && message.html && message.labelNodes && message.artifact && message.summary) finish(() => resolvePromise({ html: message.html!, labelNodes: message.labelNodes!, artifact: message.artifact!, summary: message.summary! }));
       else finish(() => reject(new Error(message.error ?? "Analysis failed")));
     });
@@ -306,9 +310,14 @@ async function modelForRun(id: string, agent: AgentSelection | undefined, now: s
   if (state.model && stale && !agent && !state.agent) {
     throw new Error("Situation changed — rebuild the model before running (agent not configured)");
   }
-  const current = stale && state.model && isStochasticProcess(state.model) ? state.model : undefined;
+  if (state.model && stale && (isStochasticProcess(state.model) || isPolymarket(state.model))) {
+    throw new Error(`Situation changed — imported ${state.model.adapter} models must be updated explicitly before running`);
+  }
   const effectiveAgent = agent ?? state.agent;
-  const built = await buildStochasticProcessModel(state.situation, current, effectiveAgent);
+  const strategic = Boolean(state.model && !isDecisionModel(state.model));
+  const built = strategic
+    ? await buildStrategicModel(state.situation, stale ? state.model as ScenarioModel : undefined, effectiveAgent, state.researchSources ?? [])
+    : await buildDecisionModel(state.situation, stale && state.model && isDecisionModel(state.model) ? state.model : undefined, effectiveAgent, state.researchSources ?? []);
   const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
   if (stored.tag === "Rejected") throw new Error(stored.reason);
   return built.model;
@@ -335,12 +344,15 @@ async function runAnalysis(id: string, requested: { revision: number; trials: nu
     const recorded = await ask(id, { tag: "RecordAnalysis", analysis });
     if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     unrecordedAssets.length = 0;
-    if (isStochasticProcess(model)) {
+    if (isDecisionModel(model) || isStochasticProcess(model) || isPolymarket(model)) {
       await ask(id, { tag: "CompleteAnalysisLabels", analysisId, worldLabels: {}, now: new Date().toISOString() });
-      if (!signal.aborted) await addMessage(id, "agent", "river", `Simulation complete: ${analysis.trials} worlds. Metrics and topology are available in the report.`);
+      if (!signal.aborted) await addMessage(id, "agent", "river", isDecisionModel(model)
+        ? `Decision rehearsal complete: ${analysis.trials} paired worlds. The report compares every option under the same uncertainty.`
+        : isPolymarket(model) ? `Polymarket simulation complete: ${analysis.trials} worlds. PnL/ROI and best-position share in report.`
+        : `Simulation complete: ${analysis.trials} worlds. Metrics and topology are available in the report.`);
     } else {
-      await labelAnalysis(id, analysis, model, agent, signal, result.html, result.labelNodes);
-      if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model, analysis));
+      await labelAnalysis(id, analysis, model as ScenarioModel, agent, signal, result.html, result.labelNodes);
+      if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model as ScenarioModel, analysis));
     }
   } catch (error) {
     await Promise.all(unrecordedAssets.map(removeReport));
@@ -352,13 +364,13 @@ function startAnalysis(id: string, requested: NonNullable<TaskState["activeAnaly
   const controller = new AbortController();
   analysisJobs.set(id, controller);
   const state = detail(id);
-  const work = requested.analysisId && state?.model && !isStochasticProcess(state.model)
-    ? resumeAnalysisLabels(id, state.analyses.find((analysis) => analysis.id === requested.analysisId)!, state.model, requested.agent ?? state.agent, controller.signal)
+  const work = requested.analysisId && state?.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model) && !isPolymarket(state.model)
+    ? resumeAnalysisLabels(id, state.analyses.find((analysis) => analysis.id === requested.analysisId)!, state.model as ScenarioModel, requested.agent ?? state.agent, controller.signal)
     : runAnalysis(id, requested, controller.signal);
   void work.finally(() => { if (analysisJobs.get(id) === controller) analysisJobs.delete(id); });
 }
 
-async function runModelBuild(id: string, buildId: string, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
+async function runModelBuild(id: string, buildId: string, mode: ModelMode, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
   let progress = Promise.resolve();
   const persistProgress = (event: unknown) => {
     const value = event && typeof event === "object" ? event as Record<string, unknown> : {};
@@ -378,8 +390,9 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
   try {
     const state = detail(id);
     if (!state) throw new Error("Task not found");
-    const current = state.model && isStochasticProcess(state.model) ? state.model : undefined;
-    const built = await buildStochasticProcessModel(state.situation, current, agent, persistProgress, signal);
+    const built = mode === "strategic"
+      ? await buildStrategicModel(state.situation, state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model) && !isPolymarket(state.model) ? state.model as ScenarioModel : undefined, agent, state.researchSources ?? [], persistProgress, signal)
+      : await buildDecisionModel(state.situation, state.model && isDecisionModel(state.model) ? state.model : undefined, agent, state.researchSources ?? [], persistProgress, signal);
     if (signal.aborted) return;
     await progress;
     const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
@@ -396,7 +409,7 @@ async function runModelBuild(id: string, buildId: string, agent: AgentSelection 
   }
 }
 
-function startModelBuild(id: string, agent: AgentSelection | undefined, buildId: string = randomUUID()): string {
+function startModelBuild(id: string, agent: AgentSelection | undefined, mode: ModelMode = "decision", buildId: string = randomUUID()): string {
   if (modelBuildJobs.has(id)) return detail(id)?.activeBuild?.buildId ?? buildId;
   const state = detail(id);
   if (!state) throw new Error("Task not found");
@@ -406,10 +419,10 @@ function startModelBuild(id: string, agent: AgentSelection | undefined, buildId:
   const controller = new AbortController();
   const job = (async () => {
     if (!started) {
-      const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, now: new Date().toISOString() });
+      const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, modelMode: mode, now: new Date().toISOString() });
       if (answer.tag === "Rejected") throw new Error(answer.reason);
     }
-    await runModelBuild(id, buildId, agent, controller.signal);
+    await runModelBuild(id, buildId, mode, agent, controller.signal);
   })();
   modelBuildJobs.set(id, { promise: job, controller });
   void job.finally(() => { if (modelBuildJobs.get(id)?.promise === job) modelBuildJobs.delete(id); });
@@ -528,22 +541,27 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const controller = new AbortController();
     req.once("aborted", () => controller.abort());
     res.once("close", () => { if (!res.writableEnded) controller.abort(); });
-    try {
-      emit({ kind: "status", stage: "reading", message: "Reading the context…" });
-      let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }));
-      let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
+     try {
+       const pinned = Array.isArray(input.pinned) ? (input.pinned as Array<{ id: string; kind: string; label: string; detail?: string; meta?: Record<string, unknown> }>).slice(0, 12) : [];
+       emit({ kind: "status", stage: "reading", message: "Reading the context…" });
+       let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }), pinned);
+       let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
       if (guided.researchQueries.length) {
-        emit({ kind: "status", stage: "research", message: "Checking public sources…" });
-        researched = await researchPublicContext(guided.researchQueries, controller.signal);
-        if (researched.length) {
-          emit({ kind: "text", text: "" });
-          emit({ kind: "status", stage: "synthesis", message: "Connecting the evidence…" });
-          guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }));
+        // Don't re-research same queries again and again — cache per task
+        const seen = new Set((fresh.researchSources ?? []).map((s) => s.query.toLowerCase().trim()));
+        const newQueries = guided.researchQueries.filter((q) => !seen.has(q.query.toLowerCase().trim()));
+        if (!newQueries.length) {
+          console.log(`clarify skip research: all ${guided.researchQueries.length} queries already have sources`);
+        } else {
+          if (newQueries.length < guided.researchQueries.length) console.log(`clarify research deduped: ${guided.researchQueries.length} → ${newQueries.length} new`);
+          emit({ kind: "status", stage: "research", message: "Checking public sources…" });
+          researched = await researchPublicContext(newQueries, controller.signal);
+          if (researched.length) {
+            emit({ kind: "text", text: "" });
+             emit({ kind: "status", stage: "synthesis", message: "Connecting the evidence…" });
+             guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }), pinned);
+          }
         }
-      }
-      if (guided.kind === "context" && guided.contextNote && !fresh.situation.includes(guided.contextNote)) {
-        const updated = await ask(clarifyId, { tag: "SetSituation", text: `${fresh.situation}\n\n${guided.contextNote}`, now: new Date().toISOString() });
-        if (updated.tag === "Rejected") throw new Error(updated.reason);
       }
       if (researched.length) {
         const recorded = await ask(clarifyId, { tag: "RecordResearch", sources: researched, now: new Date().toISOString() });
@@ -553,12 +571,36 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
       await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
       await addMessage(clarifyId, "agent", "context", guided.message, guided.suggestions);
-      const result = { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId) };
+      // Pending is shown whenever agent distilled a standalone fact, even if kind was answer — classification misses otherwise.
+      const rawNote = (guided.contextNote || "").trim();
+      const normalizedNote = rawNote.replace(/\s+/g, " ").trim();
+      const isNullishNote = !normalizedNote || /^(null|undefined|none)$/i.test(normalizedNote) || normalizedNote.length < 8;
+      const alreadyHas = !isNullishNote && normalizedNote && fresh.situation.replace(/\s+/g, " ").includes(normalizedNote);
+      const pendingContext = !isNullishNote && normalizedNote && !alreadyHas
+        ? { note: normalizedNote, display: normalizedNote.slice(0, 220) }
+        : undefined;
+      if (!pendingContext && rawNote && !isNullishNote) console.warn(`clarify no pending: kind=${guided.kind} note="${rawNote.slice(0,80)}" alreadyHas=${alreadyHas}`);
+      const result = { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId), ...(pendingContext ? { pendingContext } : {}) };
       if (stream) { emit({ kind: "done", result }); stream.end(); } else send(res, 200, result);
     } catch (error) {
       if (!stream) throw error;
       const failure = httpError(error); emit({ kind: "error", error: failure.error }); stream.end();
     }
+    return;
+  }
+  const contextConfirmMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/context\/confirm$/);
+  if (req.method === "POST" && contextConfirmMatch) {
+    const cid = contextConfirmMatch[1]!;
+    const input = await body(req); const state = detail(cid);
+    if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
+    const note = String(input.note ?? input.text ?? "").trim();
+    if (!note) { send(res, 422, { error: "Context note is empty" }); return; }
+    if (note.length > 800) { send(res, 422, { error: "Context note too long" }); return; }
+    if (state.situation.includes(note)) { send(res, 200, detail(cid)); return; }
+    const updated = await ask(cid, { tag: "SetSituation", text: `${state.situation}\n\n${note}`, now: new Date().toISOString() });
+    if (updated.tag === "Rejected") { send(res, 409, updated); return; }
+    await addMessage(cid, "agent", "context", `Added to Model Context: “${note.slice(0,120)}”`);
+    send(res, 200, detail(cid));
     return;
   }
   // Streaming variant: POST /api/tasks/:id/understand/stream -> SSE with live agent events (outside generic match)
@@ -573,7 +615,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let disconnected = false;
     res.on("close", () => { disconnected = true; });
     try {
-      const buildId = startModelBuild(streamId, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      const mode = modelMode(input.mode ?? state.activeBuild?.modelMode);
+      const buildId = startModelBuild(streamId, agentFor(state, input.agent), mode, state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
       let sent = "";
       while (true) {
         if (disconnected) return;
@@ -640,7 +683,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
       if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
-      const buildId = startModelBuild(id, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      const mode = modelMode(input.mode ?? state.activeBuild?.modelMode);
+      const buildId = startModelBuild(id, agentFor(state, input.agent), mode, state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
       send(res, 200, await waitForModelBuild(id, buildId)); return;
     }
     // The single conversational entry point: a question is answered, a fact is filed by kind.
@@ -655,15 +699,16 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const focus = selection && typeof selection.label === "string" && Array.isArray(selection.worldIds)
         ? { label: selection.label.slice(0, 180), worldCount: selection.worldIds.length }
         : undefined;
-      const requestedAnalysisId = String(input.analysisId ?? "");
-      const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? state.analyses.at(-1);
-      await addMessage(id, "user", "river", message);
-      const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state, "river"), focus);
+       const requestedAnalysisId = String(input.analysisId ?? "");
+       const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? state.analyses.at(-1);
+       const pinned = Array.isArray(input.pinned) ? (input.pinned as Array<{ id: string; kind: string; label: string; detail?: string; meta?: Record<string, unknown> }>).slice(0, 12) : [];
+       await addMessage(id, "user", "river", message);
+       const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state, "river"), focus, undefined, pinned);
       await addMessage(id, "agent", "river", routed.message, routed.suggestions);
       if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, suggestions: routed.suggestions, task: detail(id) }); return; }
       // outcome: return preview without persisting; caller must POST /chat/confirm to file it
-      const previewObservation = analysis?.artifactUrl && state.model && !isStochasticProcess(state.model)
-        ? (() => { try { return observationFrom({ ...routed.observation }, state.model!); } catch { return undefined; } })()
+      const previewObservation = analysis?.artifactUrl && state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model)
+        ? (() => { try { return observationFrom({ ...routed.observation }, state.model! as ScenarioModel); } catch { return undefined; } })()
         : undefined;
       // Validate against model if we have one, but don't require artifact
       const display = routed.observation.winner || routed.observation.cooperation !== undefined || routed.observation.regime
@@ -720,8 +765,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         observation = observationFrom(rawObs, artifact.model);
       } catch (error) { send(res, 422, { error: error instanceof Error ? error.message : String(error) }); return; }
-    } else if (state.model && !isStochasticProcess(state.model)) {
-      try { observation = observationFrom(rawObs, state.model); } catch { observation = undefined; }
+    } else if (state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model)) {
+      try { observation = observationFrom(rawObs, state.model as ScenarioModel); } catch { observation = undefined; }
     }
     const now = new Date().toISOString();
     const added = await ask(confirmId, { tag: "AddFact", factId: randomUUID(), text: text.slice(0, 2000), kind: "outcome", source: "user", ...(observation ? { observation } : {}), now });
@@ -750,7 +795,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const visualUrl = `/reports/tasks/${reportMatch[1]}`;
       const analysis = summaries().flatMap((summary) => detail(summary.id)?.analyses ?? []).find((candidate) => candidate.visualUrl === visualUrl);
       let html: string | Buffer;
-      if (analysis?.artifactUrl && analysis.adapter) {
+      if (analysis?.artifactUrl && analysis.adapter === "decision") {
+        const fileName = analysis.artifactUrl.match(/^\/reports\/tasks\/([a-zA-Z0-9._-]+\.json)$/)?.[1];
+        if (!fileName) throw new Error("Invalid decision artifact path");
+        const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as DecisionArtifact;
+        if (artifact.schemaVersion !== 3 || !artifact.model || !Array.isArray(artifact.worlds)) throw new Error("Unsupported decision artifact");
+        html = generateDecisionReport(artifact.model, restoreDecisionRun(artifact.model, artifact.worlds));
+      } else if (analysis?.artifactUrl && analysis.adapter) {
         const fileName = analysis.artifactUrl.match(/^\/reports\/tasks\/([a-zA-Z0-9._-]+\.json)$/)?.[1];
         if (!fileName) throw new Error("Invalid simulation artifact path");
         const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as SimulationArtifact;
@@ -782,7 +833,7 @@ server.listen(port, "127.0.0.1", () => console.log(`Scenario workspace: http://1
 
 for (const summary of summaries()) {
   const state = detail(summary.id);
-  if (state?.activeBuild?.status === "running") startModelBuild(state.id, state.agent, state.activeBuild.buildId);
+  if (state?.activeBuild?.status === "running") startModelBuild(state.id, state.agent, modelMode(state.activeBuild.modelMode), state.activeBuild.buildId);
   if ((state?.status === "running" || state?.status === "labeling") && state.activeAnalysis) startAnalysis(state.id, state.activeAnalysis);
 }
 
