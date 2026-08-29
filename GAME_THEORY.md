@@ -20,6 +20,11 @@ feedback, and discrete game-state transitions. These are domain code in
 `src/domain.ts`, `src/kernel.ts`, `src/reputation.ts`, and `src/adapters/repeated-game.ts`; none is
 required by `src/monte-carlo.ts` or `src/topology.ts`.
 
+`src/adapters/repeated-game-dynamics.ts` provides the complementary population views:
+round-robin strategy ranking, replicator or Moran evolution, and spatial lattice
+updates. They use the same payoff and strategy kernel but remain optional adapter
+operations rather than universal-engine concepts.
+
 `src/abc.ts` maps observed C/D outcomes to a likelihood and reuses the generic
 conditioning primitive. New games should define their own world type, simulation
 callback, observation likelihood, and summaries instead of extending this schema.

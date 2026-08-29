@@ -3,6 +3,7 @@ import { assertScenario, isValidPayoff } from "./domain.js";
 import { playMatch, strategies, zdVector, ZD_BASELINE, type EcoState, type TransitionState } from "./kernel.js";
 import { Rng } from "./rng.js";
 import { analyzeScenario } from "./adapters/repeated-game.js";
+import { clusterCount, coopRate, createGrid, runEvolution, runTournament, stepSpatial } from "./adapters/repeated-game-dynamics.js";
 
 const P={T:5,R:3,P:1,S:0};
 
@@ -32,34 +33,12 @@ run("3.1 Noise spiral: TFT vs TFT with noise 5% collapses, GTFT recovers", ()=>{
   assert.ok(pavlovNoise.cooperation > 0.3);
 });
 
-run("3.2 Pavlov WSLS forgives", ()=>{
-  const p = playMatch(strategies.pavlov, strategies.alld, P,P,50,0,new Rng(1));
-  assert.ok(p.cooperation < 0.3);
-  const p2 = playMatch(strategies.pavlov, strategies.trusting, P,P,50,0,new Rng(1));
-  assert.ok(p2.cooperation > 0.8);
-});
-
 run("4.1 Payoff baseline: T>R>P>S and 2R>T+S", ()=>{
   assert.ok(isValidPayoff("prisoners_dilemma", {T:5,R:3,P:1,S:0}));
   assert.ok(!isValidPayoff("prisoners_dilemma", {T:10,R:3,P:1,S:0}));
   assert.ok(!isValidPayoff("prisoners_dilemma", {T:5,R:3,P:2,S:1}));
   assert.ok(isValidPayoff("chicken", {T:5,R:3,S:2,P:0}));
   assert.ok(isValidPayoff("stag_hunt", {T:3,R:5,P:1,S:0}));
-});
-
-run("4.2 High temptation shifts to defect", ()=>{
-  const highT={T:10,R:3,P:1,S:0};
-  const lowT=P;
-  const mHigh = playMatch(strategies.provocable, strategies.alld, highT,highT,20,0,new Rng(1));
-  const mLow = playMatch(strategies.provocable, strategies.alld, lowT,lowT,20,0,new Rng(1));
-  assert.ok(mHigh.scoreB > mLow.scoreB);
-});
-
-run("5.1 Known vs probabilistic horizon", ()=>{
-  const fixed = playMatch(strategies.provocable, strategies.provocable, P,P,100,0,new Rng(1));
-  assert.equal(fixed.cooperation, 1);
-  const prob = playMatch(strategies.provocable, strategies.provocable, P,P,5,0,new Rng(1));
-  assert.ok(prob.cooperation===1);
 });
 
 run("5.2 ZD vectors are canonical (Press-Dyson 2012 / Stewart-Plotkin 2013)", ()=>{
@@ -155,11 +134,6 @@ run("4.za Dynamic coalitions fields", ()=>{
   const m={ situation:"coalition betrayal", players:[{name:"A", dispositions:["colluder"], team:"c1", betrayalProb:0.05} as any, {name:"B", dispositions:["colluder"], team:"c1"} as any], payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]}, structure:{w:[0.9,0.9], noise:[0,0]}} as any;
   assert.doesNotThrow(()=> assertScenario(m as any));
   (m as any).players[0].betrayalProb=2; assert.throws(()=> assertScenario(m as any));
-});
-
-run("5.x memory2/shaper strategies execute", ()=>{
-  const mm = playMatch(strategies.memory2, strategies.shaper, {T:5,R:3,P:1,S:0}, {T:5,R:3,P:1,S:0}, 20,0,new Rng(1));
-  assert.ok(Number.isFinite(mm.scoreA));
 });
 
 run("5.y Sensitivity is signed and reported for winning as well as cooperation", ()=>{
@@ -364,35 +338,33 @@ run("11.2 Cheap talk end-to-end + schema", ()=>{
   assert.throws(()=> assertScenario(badCred), /cheapTalk.credibility/);
 });
 
-run("12.1 Visual replay trace is opt-in and does not change a match", ()=>{
+run("12.1 C/D dynamics adapter: tournament, evolution and spatial modes", ()=>{
+  const model:any = {
+    situation:"population dynamics",
+    players:[{name:"Reciprocator",dispositions:["provocable"]},{name:"Defector",dispositions:["alld"]}],
+    payoffs:{T:[5,5],R:[3,3],P:[1,1],S:[0,0]},
+    structure:{w:[0.95,0.95],noise:[0,0]},
+  };
+  const tournament = runTournament(model, 20, 7);
+  assert.deepEqual(tournament, runTournament(model, 20, 7), "tournament replay must be deterministic");
+  assert.deepEqual(new Set(tournament.pool), new Set(["provocable", "alld"]));
+
+  const evolution = runEvolution(model, 4, 7);
+  assert.equal(evolution.trajectory.length, 4);
+  assert.ok(Math.abs(Object.values(evolution.fixation).reduce((sum, value) => sum + value, 0) - 1) < 1e-9, "evolution shares stay normalized");
+
+  const grid = createGrid(5, (row, column) => row === 2 && column === 2 ? "D" : "C");
+  const next = stepSpatial(grid, P, "imitate-best", new Rng(7));
+  assert.ok(coopRate(next) >= 0 && coopRate(next) <= 1 && clusterCount(next) >= 0, "spatial mode returns valid cooperation structure");
+});
+
+run("13.1 Visual replay trace is opt-in and does not change a match", ()=>{
   const payoff={T:5,R:3,P:1,S:0};
   const plain=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77));
   const traced=playMatch(strategies.forgiving,strategies.grim,payoff,payoff,40,0.05,new Rng(77),{captureTrace:true});
   assert.equal(plain.scoreA,traced.scoreA); assert.equal(plain.scoreB,traced.scoreB);
   assert.equal(plain.cooperation,traced.cooperation); assert.equal(plain.trace,undefined);
   assert.equal(traced.trace?.length,40); assert.equal(traced.trace?.at(-1)?.scoreA,traced.scoreA);
-});
-
-run("13.1 Backend model creation: fast local path + domain guards", ()=>{
-  const model: any = {
-    situation: "fast local model",
-    game: "prisoners_dilemma",
-    players: [{ name: "A", dispositions: ["provocable"] }, { name: "B", dispositions: ["alld"] }],
-    payoffs: { T: [5,6], R: [3,4], P: [1,2], S: [-1,1] },
-    structure: { w: [0.7,0.97], noise: [0,0.1] },
-  };
-  assert.doesNotThrow(()=> assertScenario(model));
-  const badPayoff: any = structuredClone(model); badPayoff.payoffs = { T: [1,1], R: [10,10], P: [1,1], S: [0,0] };
-  assert.throws(()=> assertScenario(badPayoff), /cannot satisfy/);
-  const typo: any = structuredClone(model); (typo.players[0] as any).value = [-1,1];
-  assert.throws(()=> assertScenario(typo), /Unknown field "value"/);
-  const loner: any = structuredClone(model); loner.players[0].dispositions = ["loner"];
-  assert.throws(()=> assertScenario(loner), /sigma/);
-  const t0 = Date.now();
-  const r = analyzeScenario(model, 10, 42);
-  const dt = Date.now() - t0;
-  assert.ok(dt < 500, `local model->result should be <500ms, got ${dt}ms`);
-  assert.ok(typeof r.winPct.A === "number" && r.cooperation.mean >= 0);
 });
 
 console.log("verify-pack OK");

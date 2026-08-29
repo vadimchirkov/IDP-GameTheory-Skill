@@ -382,6 +382,7 @@ the closest file, change the situation and ranges, then run it with a fixed seed
 | `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
 | `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
 | `src/adapters/repeated-game.ts` | C/D compatibility model implemented on the generic core |
+| `src/adapters/repeated-game-dynamics.ts` | C/D tournaments, population evolution, and spatial dynamics |
 | `src/adapters/decision.ts` | Paired-world decision model, validation, runner, and summaries |
 | `src/decision-report.ts` | Option comparison and interactive Decision River |
 | `src/worlds-report.ts` | Interactive river report generation |
