@@ -157,6 +157,14 @@ export function parseStructuredJson<T extends TSchema>(text: string, schema: T):
   throw new Error(`JSON does not match the required schema: ${validation}`);
 }
 
+/**
+ * Some OpenAI-compatible providers reject otherwise valid JSON Schema keywords on tools.
+ * Keep the full schema for local validation and remove only the unsupported generation hint.
+ */
+export function toolCompatibleSchema<T extends TSchema>(schema: T): T {
+  return JSON.parse(JSON.stringify(schema, (key, value) => key === "maxItems" ? undefined : value)) as T;
+}
+
 async function resolveModel(selection?: AgentSelection, defaultThinkingLevel?: AgentSelection["thinkingLevel"]) {
   const runtime = await getRuntime();
   if (selection) {
@@ -192,7 +200,7 @@ export async function runStructured<T extends TSchema>(options: StructuredRunOpt
     description: options.toolDescription,
     promptSnippet: `Submit the final ${options.operation} result`,
     promptGuidelines: [`Call ${options.toolName} exactly once as your final action.`],
-    parameters: options.schema,
+    parameters: toolCompatibleSchema(options.schema),
     constrainedSampling: { type: "json_schema", strict: "prefer" },
     async execute(_toolCallId, params) {
       if (!Value.Check(options.schema, params)) throw new Error("Structured tool arguments do not match the required schema");

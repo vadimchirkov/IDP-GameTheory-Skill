@@ -4,6 +4,10 @@ import { feasiblePayoffRanges, strategyIds, type GameType, type PayoffRanges, ty
 
 const closed = { additionalProperties: false } as const;
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
+const optionalText = (value: string | null): string | undefined => {
+  const text = value?.trim();
+  return text && !/^(null|none|undefined)$/i.test(text) ? text : undefined;
+};
 const stringEnum = <const T extends readonly string[]>(values: T) =>
   Type.Unsafe<T[number]>({ type: "string", enum: [...values] });
 
@@ -31,15 +35,18 @@ export const decisionDraftSchema = Type.Object({
   }, closed), { minItems: 2, maxItems: 5 }),
   assumptions: Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 12 }),
   questions: Type.Array(Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 200 }), field: nullable(Type.String({ minLength: 1, maxLength: 80 })) }, closed), { maxItems: 4 }),
-  completionMessage: Type.String({ minLength: 1, maxLength: 320 }),
+  // Natural-language fields are trimmed at the application boundary. A wider tool contract avoids
+  // throwing away an otherwise valid model because a provider exceeded a presentation limit.
+  completionMessage: Type.String({ minLength: 1, maxLength: 1200 }),
 }, closed);
 export type DecisionDraft = Static<typeof decisionDraftSchema>;
 
 const id = (value: string, fallback: string): string => value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback;
 export function normalizeDecisionDraft(output: DecisionDraft, situation: string): DecisionModel {
   const factorIds = new Map(output.factors.map((factor, index) => [factor.id, id(factor.id, `factor-${index + 1}`)]));
+  const timeframe = optionalText(output.timeframe);
   return {
-    schemaVersion: 1, adapter: "decision", situation, ...(output.timeframe ? { timeframe: output.timeframe.trim() } : {}), question: output.question.trim(),
+    schemaVersion: 1, adapter: "decision", situation, ...(timeframe ? { timeframe } : {}), question: output.question.trim(),
     objective: { label: output.objective.label.trim(), direction: output.objective.direction, ...(output.objective.unit ? { unit: output.objective.unit.trim() } : {}), ...(output.objective.target !== null ? { target: output.objective.target } : {}) },
     factors: output.factors.map((factor, index) => ({ id: factorIds.get(factor.id) ?? `factor-${index + 1}`, label: factor.label.trim(), range: normalizeRange(factor.range), lowLabel: factor.lowLabel.trim(), highLabel: factor.highLabel.trim() })),
     options: output.options.map((option, index) => ({
@@ -52,12 +59,15 @@ export function normalizeDecisionDraft(output: DecisionDraft, situation: string)
 
 const gameSchema = stringEnum(["prisoners_dilemma", "chicken", "stag_hunt", "snowdrift"] as const);
 const payoffSchema = Type.Object({ T: rangeSchema, R: rangeSchema, P: rangeSchema, S: rangeSchema }, closed);
+// The web builder emits the compact C/D core only. These two strategies require optional structure
+// that is deliberately absent from this draft contract, so offering them can only create invalid models.
+export const compactStrategyIds = strategyIds.filter((value) => value !== "loner" && value !== "punisher");
 export const strategicDraftSchema = Type.Object({
   timeframe: nullable(Type.String({ minLength: 1, maxLength: 240 })),
   game: gameSchema,
   players: Type.Array(Type.Object({
     name: Type.String({ minLength: 1, maxLength: 120 }),
-    dispositions: Type.Array(stringEnum(strategyIds), { minItems: 1, maxItems: 2 }),
+    dispositions: Type.Array(stringEnum(compactStrategyIds), { minItems: 1, maxItems: 2 }),
     note: Type.String({ maxLength: 240 }),
   }, closed), { minItems: 2, maxItems: 4 }),
   continuation: rangeSchema,
@@ -65,7 +75,7 @@ export const strategicDraftSchema = Type.Object({
   payoffs: payoffSchema,
   assumptions: Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 8 }),
   questions: Type.Array(Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 200 }), field: nullable(Type.String({ minLength: 1, maxLength: 80 })) }, closed), { maxItems: 4 }),
-  completionMessage: Type.String({ minLength: 1, maxLength: 320 }),
+  completionMessage: Type.String({ minLength: 1, maxLength: 1200 }),
 }, closed);
 export type StrategicDraft = Static<typeof strategicDraftSchema>;
 
@@ -80,12 +90,18 @@ const canonicalPayoffs = (ranges: PayoffRanges, game: GameType): PayoffRanges =>
 
 export function normalizeStrategicDraft(output: StrategicDraft, situation: string): ScenarioModel {
   const proposed = normalizePayoffs(output.payoffs);
+  const payoffsAdjusted = !feasiblePayoffRanges(proposed, output.game);
+  const assumptions = output.assumptions.map((assumption) => assumption.trim()).filter(Boolean);
+  const timeframe = optionalText(output.timeframe);
   return {
-    situation, ...(output.timeframe ? { timeframe: output.timeframe.trim() } : {}), game: output.game,
+    situation, ...(timeframe ? { timeframe } : {}), game: output.game,
     players: output.players.map((player) => ({ name: player.name.trim(), dispositions: player.dispositions, ...(player.note.trim() ? { note: player.note.trim() } : {}) })),
     structure: { w: normalizeRange(output.continuation), noise: normalizeRange(output.noise) },
-    payoffs: feasiblePayoffRanges(proposed, output.game) ? proposed : canonicalPayoffs(proposed, output.game),
-    ...(output.assumptions.length ? { rationale: Object.fromEntries(output.assumptions.map((assumption, index) => [`Assumption ${index + 1}`, assumption.trim()])) } : {}),
+    payoffs: payoffsAdjusted ? canonicalPayoffs(proposed, output.game) : proposed,
+    ...(assumptions.length || payoffsAdjusted ? { rationale: {
+      ...Object.fromEntries(assumptions.map((assumption, index) => [`Assumption ${index + 1}`, assumption])),
+      ...(payoffsAdjusted ? { "Payoff normalization": `The proposed payoff ranges did not satisfy ${output.game.replaceAll("_", " ")} ordering and were normalized to a canonical ordering on the same scale.` } : {}),
+    } } : {}),
   };
 }
 export const agentThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

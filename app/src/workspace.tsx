@@ -9,7 +9,7 @@ import { RiverActivity } from "./river-activity";
 import { relativeTime } from "./relative-time";
 
 const statusName = { ready: "Ready", running: "Running", labeling: "Labeling", completed: "Complete", failed: "Failed", building: "Building", new: "New" } as const;
-type PromptState = { mode: "create" };
+type PromptState = { mode: "create"; taskId: string };
 type ModelOption = AgentModelStatus;
 type BuildActivityItem = { id: string; stage: string; message: string; status: "active" | "done" | "failed" };
 type PendingDelete =
@@ -222,7 +222,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [centerTab, setCenterTab] = useState<"context" | "model" | "river">("context");
   const [pendingOutcome, setPendingOutcome] = useState<{ message: string; observation: Record<string, unknown>; display: string } | null>(null);
   const [prompt, setPrompt] = useState<PromptState>();
-  const [draftText, setDraftText] = useState("");
+  const [draftText, setDraftText] = useState(() => sessionStorage.getItem("flumina-situation-draft") ?? "");
   const [promptError, setPromptError] = useState("");
   const [runError, setRunError] = useState("");
   const [rebuildDone, setRebuildDone] = useState(false);
@@ -243,6 +243,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   });
   const [relabelPending, setRelabelPending] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [initialGuidePending, setInitialGuidePending] = useState(false);
+  const initialGuideAbort = useRef<AbortController | undefined>(undefined);
   const [chatFollowUps, setChatFollowUps] = useState<string[]>([]);
   const [riverSelection, setRiverSelection] = useState<RiverSelection>();
   const [worldReplay, setWorldReplay] = useState<WorldReplay>();
@@ -330,7 +332,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     if (!prompt && dialog?.open) dialog.close();
   }, [prompt]);
 
-  useEffect(() => { setDraftText(""); setPromptError(""); }, [prompt]);
+  useEffect(() => { setPromptError(""); }, [prompt]);
 
   const models = agent.data?.models ?? [];
   const agentAvailable = Boolean(agent.data?.available && models.length > 0);
@@ -347,7 +349,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     return first ? parseSelection(selectionValue({ provider: first.provider, model: first.model, thinkingLevel: "medium" }), models) : undefined;
   }, [agent.data?.defaultSelection, agentKey, current?.agent, models]);
 
-  const createMutation = useMutation({ mutationFn: createTask });
+  const createMutation = useMutation({ mutationFn: ({ text, id }: { text: string; id: string }) => createTask(text, id) });
   const commandMutation = useMutation({ mutationFn: ({ id, value }: { id: string; value: FactCommand }) => sendCommand(id, value) });
   const agentMutation = useMutation({ mutationFn: ({ id, mode }: { id: string; mode: ModelMode }) => understandTask(id, selectedAgent, mode) });
   // keep agentMutation for fallback non-stream calls; streaming uses understandTaskStream directly
@@ -391,9 +393,10 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const buildActive = current?.activeBuild?.status === "running" || current?.status === "building";
   const buildFailed = buildActivity.some((item) => item.status === "failed");
   const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming || buildActive;
-  const promptBusy = busy;
+  const promptBusy = createMutation.isPending;
   const elapsed = useElapsed(busy);
-  const chatElapsed = useElapsed(chatMutation.isPending);
+  const assistantPending = chatMutation.isPending || agentMutation.isPending || initialGuidePending;
+  const chatElapsed = useElapsed(assistantPending);
 
   const cacheTask = (value: TaskState) => {
     queryClient.setQueryData(["task", value.id], value);
@@ -492,14 +495,28 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     try {
       const text = draftText.trim();
       if (!text) throw new Error("Describe the situation first");
-      const created = await createMutation.mutateAsync(text);
+      if (text.length > 4_000) throw new Error("The situation is too long (maximum 4000 characters)");
+      const created = await createMutation.mutateAsync({ text, id: prompt.taskId });
       cacheTask(created);
+      sessionStorage.removeItem("flumina-situation-draft");
+      setDraftText("");
       setPrompt(undefined);
-      await navigate({ to: "/tasks/$taskId", params: { taskId: created.id } });
+      void navigate({ to: "/tasks/$taskId", params: { taskId: created.id } });
       setAgentPanel(true);
       if (agentAvailable) {
-        const guided = await clarifyTask(created.id, { agent: selectedAgent });
-        cacheTask(guided.task);
+        const controller = new AbortController();
+        initialGuideAbort.current = controller;
+        setInitialGuidePending(true);
+        setChatError("");
+        try {
+          const guided = await clarifyTask(created.id, { agent: selectedAgent }, controller.signal);
+          cacheTask(guided.task);
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "AbortError")) setChatError(`The situation was saved, but the context guide failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          if (initialGuideAbort.current === controller) initialGuideAbort.current = undefined;
+          setInitialGuidePending(false);
+        }
       }
     } catch (error) { setPromptError(error instanceof Error ? error.message : String(error)); }
   };
@@ -852,7 +869,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
 
   return <div className={appClass}>
     <aside className="pane situations" aria-label="Situations">
-      <header className="pane-head"><button className="icon quiet" onClick={toggleSituations} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create" })} aria-label="New situation"><Icon name="plus" /></button></header>
+      <header className="pane-head"><button className="icon quiet" onClick={toggleSituations} aria-label="Collapse situations panel"><Icon name="collapse" /></button><div className="brand"><span>Situations</span></div><button className="icon primary" onClick={() => setPrompt({ mode: "create", taskId: crypto.randomUUID() })} aria-label="New situation"><Icon name="plus" /></button></header>
       <nav className="tasks">
         {tasks.isPending && <div className="empty-runs">Loading situations…</div>}
         {tasks.isError && <ErrorState error={tasks.error} retry={() => void tasks.refetch()} />}
@@ -904,7 +921,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
           {streamError && <div className="error model-run-error" role="status">{streamError}</div>}
         </div>}
       </div> : <>
-        {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : current ? <><h1>{current.model ? "The model is ready" : "Build the model first"}</h1><p>{current.model ? "Review it if needed, then press Run to create the river." : "Answer any useful questions, then build a model from the context."}</p><button className="primary" onClick={() => setCenterTab("model")}>{current.model ? "Go to Model" : "Build model"}</button></> : <><h1>Worlds begin with a situation</h1><p>Describe it in your own words to begin.</p><button className="primary" onClick={() => setPrompt({ mode: "create" })}>New situation</button></>}</div></div>}
+        {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : current ? <><h1>{current.model ? "The model is ready" : "Build the model first"}</h1><p>{current.model ? "Review it if needed, then press Run to create the river." : "Answer any useful questions, then build a model from the context."}</p><button className="primary" onClick={() => setCenterTab("model")}>{current.model ? "Go to Model" : "Build model"}</button></> : <><h1>Worlds begin with a situation</h1><p>Describe it in your own words to begin.</p><button className="primary" onClick={() => setPrompt({ mode: "create", taskId: crypto.randomUUID() })}>New situation</button></>}</div></div>}
         <div className="river-below">
           {selectedAnalysis && !selectedAnalysis.adapter && (worldReplay || riverSelection || outcomeFacts.length > 0 || replayError) && <div className="river-detail">
             {riverSelection && selectedAnalysis.artifactUrl ? <div className="river-tools"><div style={{display:"flex",gap:6,alignItems:"center"}}><button type="button" className="primary" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending}>{replayMutation.isPending ? "Replaying…" : `Replay world #${(riverSelection.worldIds[0] ?? 0) + 1}`}</button>{(() => {
@@ -938,7 +955,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             ) : (
               <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>
             );
-          })}</div>}</div>}{(chatMutation.isPending || agentMutation.isPending) && !streaming && <div className="chat-entry agent pending"><div className="chat-pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Checking the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : `May check public sources · ${shortTime(chatElapsed)}`} />{assistantMode !== "river" && <button type="button" onClick={() => chatAbort.current?.abort()}>Cancel</button>}</div></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
+          })}</div>}</div>}{assistantPending && !streaming && <div className="chat-entry agent pending"><div className="chat-pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Checking the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : `May check public sources · ${shortTime(chatElapsed)}`} />{assistantMode !== "river" && <button type="button" onClick={() => { chatAbort.current?.abort(); initialGuideAbort.current?.abort(); }}>Cancel</button>}</div></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
       <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.slice(0, 4).map((suggestion) => {
             const qid = openQuestionIds.get(suggestion);
             return qid ? (
@@ -959,7 +976,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     <dialog ref={promptDialog} onClose={() => setPrompt(undefined)}>
       <form className="dialog-form" onSubmit={(event) => void submitPrompt(event)}>
         <h2>{promptTitle}</h2>
-        <div><p>{promptHint}</p><textarea name="message" aria-label="Situation description" value={draftText} onChange={(event) => setDraftText(event.target.value)} autoFocus /></div>
+        <div><p>{promptHint}</p><textarea name="message" aria-label="Situation description" value={draftText} maxLength={4000} onChange={(event) => { setDraftText(event.target.value); sessionStorage.setItem("flumina-situation-draft", event.target.value); }} autoFocus /><small>{draftText.length} / 4000</small></div>
         {busy && <RiverActivity compact label={workingLabel} detail={`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")} · you can leave this window open`} />}
         {promptError && <div className="error" role="alert">{promptError}</div>}
         <div className="dialog-actions"><button type="button" onClick={() => setPrompt(undefined)} disabled={promptBusy}>Cancel</button><button className="primary" disabled={promptBusy}>{busy ? "Working…" : "Continue"}</button></div>
@@ -1037,6 +1054,7 @@ function StrategicModelReview({ model }: { model: ScenarioModel }) {
     : undefined;
   return <section className="decision-model strategic-model" aria-label="Strategic interaction model review">
     <header><div><span className="eyebrow">Strategic interaction{model.timeframe ? ` · ${model.timeframe}` : ""}</span><h2>{model.situation}</h2></div><div className="decision-objective"><small>Repeated game</small><b>{(model.game ?? "prisoners_dilemma").replaceAll("_", " ")}</b><span>continuation {range(model.structure.w)}</span></div></header>
+    <p className="model-caveat">Payoffs and behavior ranges are inspectable scenario assumptions, not measured probabilities. Check the material assumptions before running.</p>
     <div className="decision-model-grid"><section><h3>Parties and dispositions</h3><ol>{model.players.map((player) => <li key={player.name}><b>{player.name}</b><span>{player.dispositions.join(" · ")}</span>{player.note && <small>{player.note}</small>}</li>)}</ol></section><section><h3>Interaction</h3><ul><li><b>Continuation</b><span>{range(model.structure.w)}</span><small>chance of another round</small></li><li><b>Action noise</b><span>{range(model.structure.noise)}</span><small>chance an intended action flips</small></li>{sharedPayoffs && <li><b>Shared payoffs</b><span>T {range(sharedPayoffs.T)} · R {range(sharedPayoffs.R)} · P {range(sharedPayoffs.P)} · S {range(sharedPayoffs.S)}</span></li>}</ul></section></div>
     {model.rationale && <details><summary>Material assumptions · {Object.keys(model.rationale).length}</summary><ul>{Object.entries(model.rationale).map(([label, value]) => <li key={label}><b>{label}</b><span>{value}</span></li>)}</ul></details>}
   </section>;
@@ -1047,6 +1065,7 @@ function DecisionModelReview({ model, onPin }: { model: DecisionModel; onPin?: (
   const effect = (value: readonly [number, number] | undefined) => !value ? "—" : `${value[0] > 0 ? "+" : ""}${range(value)}`;
   return <section className="decision-model" aria-label="Decision model review">
     <header><div><span className="eyebrow">Decision model{model.timeframe ? ` · ${model.timeframe}` : ""}</span><h2>{model.question}</h2></div><div className="decision-objective"><small>{model.objective.direction === "minimize" ? "Minimize" : "Maximize"}</small><b>{model.objective.label}</b>{model.objective.target !== undefined && <span>target {model.objective.target}{model.objective.unit ? ` ${model.objective.unit}` : ""}</span>}</div></header>
+    <p className="model-caveat">Ranges and effects are inspectable scenario assumptions, not measured forecasts. Public sources support only the claims they explicitly state.</p>
     <div className="decision-model-grid"><section><h3>Options</h3><ol>{model.options.map((option) => <li key={option.id}><b>{option.label}</b><span>{option.description}</span><small>midpoint outcome {range(option.baseline)}{model.objective.unit ? ` ${model.objective.unit}` : ""}</small>{onPin && <button className="link-button" onClick={() => onPin({id:`option-${option.id}`,kind:"option",label:option.label,detail:option.description})}>Pin to chat</button>}</li>)}</ol></section><section><h3>Shared uncertainties</h3><ul>{model.factors.map((factor) => <li key={factor.id}><b>{factor.label}</b><span>{range(factor.range)}</span><small>{factor.lowLabel} ↔ {factor.highLabel}</small>{onPin && <button className="link-button" onClick={() => onPin({id:`factor-${factor.id}`,kind:"factor",label:factor.label,detail:`${range(factor.range)} · ${factor.lowLabel} ↔ ${factor.highLabel}`})}>Pin to chat</button>}</li>)}</ul></section></div>
     <details className="decision-effects"><summary>How options respond</summary><p>Objective change at each factor’s high end; the low end applies the opposite change.</p><div><table><thead><tr><th>Option</th>{model.factors.map((factor) => <th key={factor.id}>{factor.highLabel || factor.label}</th>)}</tr></thead><tbody>{model.options.map((option) => <tr key={option.id}><th>{option.label}</th>{model.factors.map((factor) => <td key={factor.id}>{effect(option.effects.find((item) => item.factorId === factor.id)?.impact)}{model.objective.unit ? ` ${model.objective.unit}` : ""}</td>)}</tr>)}</tbody></table></div></details>
     {!!model.assumptions.length && <details><summary>Material assumptions · {model.assumptions.length}</summary><ul>{model.assumptions.map((assumption, index) => <li key={index}><span>{assumption}</span>{onPin && <button className="link-button" onClick={() => onPin({id:`assump-${index}`,kind:"assumption",label:assumption.slice(0,40),detail:assumption})}>Pin</button>}</li>)}</ul></details>}

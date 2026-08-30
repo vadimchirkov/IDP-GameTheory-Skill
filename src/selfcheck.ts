@@ -15,8 +15,8 @@ import { runSimulation } from "./simulation.js";
 import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
-import { contextReplyOutputSchema, normalizeStrategicDraft, strategicDraftSchema } from "./agent-contracts.js";
-import { parseChatResponse, parseScenarioHints } from "./pi-agent.js";
+import { compactStrategyIds, contextReplyOutputSchema, decisionDraftSchema, normalizeStrategicDraft, strategicDraftSchema } from "./agent-contracts.js";
+import { parseChatResponse, parseScenarioHints, toolCompatibleSchema } from "./pi-agent.js";
 import { relativeTime } from "../app/src/relative-time.js";
 import { openPublicPage } from "./web-research.js";
 
@@ -138,9 +138,18 @@ const scenario: ScenarioModel = {
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
 assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
+const providerDecisionSchema = toolCompatibleSchema(decisionDraftSchema) as unknown as Record<string, unknown>;
+assert.equal(JSON.stringify(providerDecisionSchema).includes("maxItems"), false, "provider tool schemas omit unsupported maxItems hints");
+assert.equal(JSON.stringify(decisionDraftSchema).includes("maxItems"), true, "local structured-output validation keeps array bounds");
 const strategicDraft = { timeframe: "the next 12 quarterly negotiations", game: "prisoners_dilemma" as const, players: [{ name: "A", dispositions: ["provocable" as const], note: "" }, { name: "B", dispositions: ["exploitative" as const], note: "" }], continuation: { min: 0.7, max: 0.9 }, noise: { min: 0, max: 0.05 }, payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } }, assumptions: ["The same incentives repeat."], questions: [], completionMessage: "Strategic model ready." };
 assert.equal(Value.Check(strategicDraftSchema, strategicDraft), true, "the compact C/D builder contract is machine-validatable");
+assert.ok(!compactStrategyIds.includes("punisher" as never) && !compactStrategyIds.includes("loner" as never), "compact strategic drafts exclude dispositions that require absent optional structure");
+assert.equal(Value.Check(strategicDraftSchema, { ...strategicDraft, players: [{ ...strategicDraft.players[0], dispositions: ["punisher"] }, strategicDraft.players[1]] }), false, "the provider cannot submit punisher without beta/gamma fields");
 assert.doesNotThrow(() => analyzeScenario(normalizeStrategicDraft(strategicDraft, "Repeated supplier negotiation"), 2, 1), "the compact C/D draft normalizes into a runnable model");
+const adjustedStrategic = normalizeStrategicDraft({ ...strategicDraft, timeframe: "null", payoffs: { ...strategicDraft.payoffs, T: { min: 0, max: 0 } }, completionMessage: "x".repeat(500) }, "Repeated supplier negotiation");
+assert.match(adjustedStrategic.rationale?.["Payoff normalization"] ?? "", /normalized/, "automatic payoff correction is disclosed in the model");
+assert.equal(adjustedStrategic.timeframe, undefined, "stringified null values do not leak into optional model fields");
+assert.equal(Value.Check(strategicDraftSchema, { ...strategicDraft, completionMessage: "x".repeat(500) }), true, "a long presentation message does not invalidate an otherwise usable model");
 await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
 assert.deepEqual(parseScenarioHints("1. Кто принимает решение?\n- Какой срок?\n• Что ограничивает выбор?"), ["Кто принимает решение?", "Какой срок?", "Что ограничивает выбор?"]);
 assert.deepEqual(parseChatResponse("Main answer.\n<followups>What should we verify next?\nWhich assumption matters most?\nHow could the outcome change?</followups>"), { text: "Main answer.", suggestions: ["What should we verify next?", "Which assumption matters most?", "How could the outcome change?"] });
@@ -243,7 +252,7 @@ const taskState = async (): Promise<TaskState> => {
   assert.ok(reply.ok && reply.value.reply?.tag === "State", "the task returns its state");
   return reply.ok && reply.value.reply?.tag === "State" ? reply.value.reply.state : (undefined as never);
 };
-await task.runtime.ask(tid, { tag: "CreateTask", taskId: "task-check", text: "Two suppliers meet every quarter", factId: "fact-1", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "CreateTask", taskId: "task-check", text: "Two suppliers meet every quarter", now: "2026-01-01T00:00:00Z" }, taskCategory);
 const created = await taskState();
 assert.equal(created.revision, 1, "the situation seed sets the initial fingerprint");
 assert.equal(created.situation, "Two suppliers meet every quarter", "the opening description is the situation seed");
@@ -258,7 +267,7 @@ assert.equal(researched.revision, researchRevision, "recording sources alone doe
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const sitId = EntityId("situation-edit");
-await sit.runtime.ask(sitId, { tag: "CreateTask", taskId: "situation-edit", text: "Two suppliers meet every quarter", factId: "s0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await sit.runtime.ask(sitId, { tag: "CreateTask", taskId: "situation-edit", text: "Two suppliers meet every quarter", now: "2026-01-01T00:00:00Z" }, taskCategory);
 await sit.runtime.ask(sitId, { tag: "SetSituation", text: "Two suppliers meet every month", now: "2026-01-01T00:00:01Z" }, taskCategory);
 const sitReply = await sit.runtime.ask(sitId, { tag: "GetTask" }, taskCategory);
 assert.ok(sitReply.ok && sitReply.value.reply?.tag === "State");
@@ -267,6 +276,20 @@ if (sitReply.ok && sitReply.value.reply?.tag === "State") {
   assert.equal(sitReply.value.reply.state.revision, 2, "editing the situation moves the fingerprint");
 }
 await sit.runtime.shutdown();
+
+const staleBuild = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
+const staleBuildId = EntityId("stale-build");
+await staleBuild.runtime.ask(staleBuildId, { tag: "CreateTask", taskId: "stale-build", text: "Original situation", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await staleBuild.runtime.ask(staleBuildId, { tag: "StartModelBuild", buildId: "build-1", revision: 1, modelMode: "strategic", now: "2026-01-01T00:00:01Z" }, taskCategory);
+await staleBuild.runtime.ask(staleBuildId, { tag: "SetSituation", text: "Changed situation", now: "2026-01-01T00:00:02Z" }, taskCategory);
+const staleCompletion = await staleBuild.runtime.ask(staleBuildId, { tag: "CompleteModelBuild", buildId: "build-1", model: scenario, now: "2026-01-01T00:00:03Z" }, taskCategory);
+assert.ok(staleCompletion.ok && staleCompletion.value.reply?.tag === "Rejected", "a model built from an older situation cannot overwrite current context");
+await staleBuild.runtime.shutdown();
+
+const oversized = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
+const oversizedReply = await oversized.runtime.ask(EntityId("oversized"), { tag: "CreateTask", taskId: "oversized", text: "x".repeat(4001), now: "2026-01-01T00:00:00Z" }, taskCategory);
+assert.ok(oversizedReply.ok && oversizedReply.value.reply?.tag === "Rejected", "initial and edited situations share the same 4000-character boundary");
+await oversized.runtime.shutdown();
 
 // The model is the source of truth: setting it stores the model, its build provenance and bumps the fingerprint.
 const buildMeta = { runId: "build-1", operation: "build-model", provider: "test", model: "builder", thinkingLevel: "low", promptVersion: "decision-v2", structuredOutput: "tool", attempts: 1, durationMs: 10, usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0 } } as const;
@@ -281,7 +304,7 @@ assert.equal((await taskState()).revision, 2, "re-persisting an identical model 
 // Editing the model on a fresh task bumps the fingerprint so runs go stale.
 const edit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const editId = EntityId("model-edit");
-await edit.runtime.ask(editId, { tag: "CreateTask", taskId: "model-edit", text: "seed", factId: "e0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await edit.runtime.ask(editId, { tag: "CreateTask", taskId: "model-edit", text: "seed", now: "2026-01-01T00:00:00Z" }, taskCategory);
 await edit.runtime.ask(editId, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:01Z" }, taskCategory);
 await edit.runtime.ask(editId, { tag: "SetModel", model: { ...scenario, structure: { ...scenario.structure, noise: [0, 0.1] as const } }, now: "2026-01-01T00:00:02Z" }, taskCategory);
 const editReply = await edit.runtime.ask(editId, { tag: "GetTask" }, taskCategory);
@@ -349,7 +372,7 @@ await task.runtime.shutdown();
 // A run needs a model; a fresh task has none until one is built.
 const nm = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const nmId = EntityId("needs-model");
-await nm.runtime.ask(nmId, { tag: "CreateTask", taskId: "needs-model", text: "seed", factId: "n0", now: "2026-01-01T00:00:00Z" }, taskCategory);
+await nm.runtime.ask(nmId, { tag: "CreateTask", taskId: "needs-model", text: "seed", now: "2026-01-01T00:00:00Z" }, taskCategory);
 const noModel = await nm.runtime.ask(nmId, { tag: "RequestAnalysis", trials: 10, seed: 1, now: "2026-01-01T00:00:01Z" }, taskCategory);
 assert.ok(noModel.ok && noModel.value.reply?.tag === "Rejected", "a run needs a model");
 await nm.runtime.shutdown();

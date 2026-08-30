@@ -331,16 +331,17 @@ async function runAnalysis(id: string, requested: { revision: number; trials: nu
     const agent = requested.agent ?? state.agent;
     const model = await modelForRun(id, agent, new Date().toISOString());
     if (signal.aborted) return;
+    const analysisRevision = detail(id)?.activeAnalysis?.revision ?? requested.revision;
     const result = await analysisWorker(model, requested.trials, requested.seed, signal);
     if (signal.aborted) return;
     const analysisId = randomUUID();
-    const fileName = `${id}-r${requested.revision}-${requested.trials}w-${requested.seed}-${analysisId}.html`;
+    const fileName = `${id}-r${analysisRevision}-${requested.trials}w-${requested.seed}-${analysisId}.html`;
     const artifactName = fileName.replace(/\.html$/, ".json");
     await writeFile(join(reportDirectory, fileName), result.html, "utf8");
     unrecordedAssets.push(`/reports/tasks/${fileName}`);
     await writeFile(join(reportDirectory, artifactName), JSON.stringify(result.artifact), "utf8");
     unrecordedAssets.push(`/reports/tasks/${artifactName}`);
-    const analysis: TaskAnalysis = { ...result.summary, id: analysisId, revision: requested.revision, visualUrl: `/reports/tasks/${fileName}`, artifactUrl: `/reports/tasks/${artifactName}`, completedAt: new Date().toISOString() };
+    const analysis: TaskAnalysis = { ...result.summary, id: analysisId, revision: analysisRevision, visualUrl: `/reports/tasks/${fileName}`, artifactUrl: `/reports/tasks/${artifactName}`, completedAt: new Date().toISOString() };
     const recorded = await ask(id, { tag: "RecordAnalysis", analysis });
     if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     unrecordedAssets.length = 0;
@@ -433,6 +434,7 @@ async function waitForModelBuild(id: string, buildId: string): Promise<TaskState
   while (true) {
     const state = detail(id);
     if (!state || state.deleted) throw new Error("Task not found");
+    if (state.activeBuild?.buildId !== buildId && modelBuildJobs.has(id)) { await new Promise((resolve) => setTimeout(resolve, 100)); continue; }
     if (state.activeBuild?.buildId !== buildId) return state;
     if (state.activeBuild.status === "failed") throw new Error(state.activeBuild.error ?? "Model build failed");
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -461,8 +463,16 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
   if (req.method === "GET" && url.pathname === "/api/tasks") { send(res, 200, summaries()); return; }
   if (req.method === "POST" && url.pathname === "/api/tasks") {
-    const input = await body(req); const id = randomUUID();
-    const answer = await ask(id, { tag: "CreateTask", taskId: id, text: String(input.text ?? ""), factId: randomUUID(), now: new Date().toISOString() });
+    const input = await body(req);
+    const requestedId = String(input.id ?? "");
+    const id = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(requestedId) ? requestedId : randomUUID();
+    const text = String(input.text ?? "").trim();
+    if (text.length > 4_000) { send(res, 422, { error: "The situation is too long (maximum 4000 characters)" }); return; }
+    const existing = detail(id);
+    if (existing && !existing.deleted) {
+      send(res, existing.situation === text ? 200 : 409, existing.situation === text ? existing : { error: "That draft ID is already in use" }); return;
+    }
+    const answer = await ask(id, { tag: "CreateTask", taskId: id, text, now: new Date().toISOString() });
     send(res, answer.tag === "Rejected" ? 422 : 201, answer.tag === "Rejected" ? answer : detail(id)); return;
   }
   const replayMatch = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)\/analyses\/([a-f0-9-]+)\/worlds\/(\d+)\/replay$/);

@@ -126,7 +126,7 @@ const post = <T>(path: string, value: unknown) => api<T>(path, { method: "POST",
 
 export const getTasks = () => api<TaskSummary[]>("/api/tasks");
 export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
-export const createTask = (text: string) => post<TaskState>("/api/tasks", { text });
+export const createTask = (text: string, id: string) => post<TaskState>("/api/tasks", { text, id });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
 export const understandTask = (id: string, agent: AgentSelection | undefined, mode: ModelMode) => post<TaskState>(`/api/tasks/${id}/understand`, { agent, mode });
 export const clarifyTask = (id: string, value: { message?: string; agent?: AgentSelection; pinned?: PinnedContext[] }, signal?: AbortSignal) => api<ChatResult & { task: TaskState; pendingContext?: { note: string; display: string } }>(`/api/tasks/${id}/clarify`, { method: "POST", body: JSON.stringify(value), signal });

@@ -144,7 +144,7 @@ export interface TaskState {
 }
 
 export type TaskCommand =
-  | { tag: "CreateTask"; taskId: string; text: string; factId: string; now: string }
+  | { tag: "CreateTask"; taskId: string; text: string; now: string }
   | { tag: "AddFact"; factId: string; text: string; kind: FactKind; source: FactSource; observation?: FactObservation; now: string }
   | { tag: "EditFact"; factId: string; text: string; now: string }
   | { tag: "RemoveFact"; factId: string; now: string }
@@ -175,7 +175,7 @@ export type TaskCommand =
  * replay into the facts model without rewriting history.
  */
 export type TaskEvent =
-  | { tag: "TaskCreated"; taskId: string; title: string; brief?: string; fact?: Fact; now: string }
+  | { tag: "TaskCreated"; taskId: string; title: string; situation?: string; brief?: string; fact?: Fact; now: string }
   | { tag: "FactAdded"; fact: Fact; revision: number; now: string }
   | { tag: "FactEdited"; factId: string; text: string; revision: number; now: string }
   | { tag: "FactRemoved"; factId: string; revision: number; now: string }
@@ -270,7 +270,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
   switch (event.tag) {
     case "TaskCreated": {
       const base = { ...initialTask(event.taskId), title: event.title, createdAt: event.now, updatedAt: event.now };
-      const seed = event.fact?.text ?? event.brief ?? "";
+      const seed = event.situation ?? event.fact?.text ?? event.brief ?? "";
       return seed ? { ...base, situation: seed, revision: 1, status: "ready" } : base;
     }
     case "FactAdded": return { ...state, facts: [...state.facts, event.fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
@@ -284,7 +284,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild", "modelMeta"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), ...(event.agentMeta ? { modelMeta: event.agentMeta } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild", "modelMeta"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(state.activeAnalysis ? { activeAnalysis: { ...state.activeAnalysis, revision: event.revision } } : {}), ...(event.agent ? { agent: event.agent } : {}), ...(event.agentMeta ? { modelMeta: event.agentMeta } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, ...(event.modelMode ? { modelMode: event.modelMode } : {}), stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
     case "ModelBuildProgressed": {
       if (state.activeBuild?.buildId !== event.buildId) return state;
@@ -358,8 +358,8 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       if (state.status !== "new") return rejected(state, "Task already exists");
       const text = command.text.trim();
       if (!text) return rejected(state, "Describe the situation first");
-      const fact: Fact = { id: command.factId, text, kind: "situation", source: "user", createdAt: command.now };
-      return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskCreated", taskId: command.taskId, title: titleFrom(text), fact, now: command.now }), { tag: "Accepted", revision: 1 });
+      if (text.length > 4_000) return rejected(state, "The situation is too long (maximum 4000 characters)");
+      return andReply(persist<TaskEvent, TaskReply>({ tag: "TaskCreated", taskId: command.taskId, title: titleFrom(text), situation: text, now: command.now }), { tag: "Accepted", revision: 1 });
     }
     if (state.status === "new") return rejected(state, "Task does not exist");
     if (state.deleted) return rejected(state, "Task is deleted");
@@ -425,6 +425,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildProgressed", buildId: command.buildId, stage: command.stage.slice(0, 40), message: command.message.slice(0, 500), attempt: Math.max(1, command.attempt ?? state.activeBuild.attempt), now: command.now }), { tag: "Accepted", revision: state.revision });
       case "CompleteModelBuild": {
         if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
+        if (state.activeBuild.revision !== state.revision) return rejected(state, "The situation changed while the model was being built; rebuild from the latest context");
         try { assertSimulationModel(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         const revision = JSON.stringify(state.model) !== JSON.stringify(command.model) ? state.revision + 1 : state.revision;
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), ...(command.agentMeta ? { agentMeta: command.agentMeta } : {}), now: command.now }), { tag: "Accepted", revision });
@@ -438,8 +439,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "SetSituation": {
         const text = command.text.trim();
         if (!text) return rejected(state, "Describe the situation first");
+        if (text.length > 4_000) return rejected(state, "The situation is too long (maximum 4000 characters)");
         const revision = state.revision + 1;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "SituationSet", text: text.slice(0, 4000), revision, now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "SituationSet", text, revision, now: command.now }), { tag: "Accepted", revision });
       }
       case "RemoveAnalysis":
         if (!state.analyses.some((analysis) => (analysis.id ?? analysis.visualUrl) === command.analysisId)) return rejected(state, "That run no longer exists");
