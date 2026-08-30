@@ -155,7 +155,7 @@ export interface AgentUsage {
 
 export interface AgentRunMeta {
   runId: string;
-  operation: "understand" | "context" | "build-model" | "labels" | "route-fact";
+  operation: "understand" | "context" | "build-model" | "forecast" | "labels" | "route-fact";
   provider: string;
   model: string;
   thinkingLevel: AgentSelection["thinkingLevel"];

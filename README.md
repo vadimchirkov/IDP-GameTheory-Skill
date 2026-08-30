@@ -194,6 +194,13 @@ Stochastic-process and Polymarket models are CLI adapters. The Polymarket bridge
 record paper forecasts in an append-only ledger and later score them against market
 resolution; it never places orders.
 
+For a quick retrospective signal, `pnpm forecast:fast --limit 20` runs a blind
+backcast on recently closed YES/NO markets. It gives Pi only the question, a fixed
+historical cutoff, and the real Polymarket price at that cutoff, then reports paired
+Brier/log-loss scores. Use `--dry-run` to inspect the sealed cases without calling
+Pi. Backcasts remain vulnerable to model memory; only the prospective ledger proves
+out-of-sample forecasting ability.
+
 See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for the engine and adapter
 boundaries.
 
