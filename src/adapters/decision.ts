@@ -161,16 +161,57 @@ const reachedTarget = (model: DecisionModel, value: number): boolean | undefined
   ? undefined
   : model.objective.direction === "maximize" ? value >= model.objective.target : value <= model.objective.target;
 
+/**
+ * Smallest score difference worth acting on. Regret gaps are compared against the objective spread
+ * the options actually cover, because scaling them by a regret that approaches zero makes every
+ * rounding difference look decisive.
+ */
+const materialGap = (criterion: DecisionRun["recommendation"]["criterion"], objectiveScale: number): number =>
+  criterion === "targetProbability" ? 0.05 : Math.max(Number.EPSILON, objectiveScale * 0.02);
+
+/** P(X <= successes) for X ~ Binomial(trials, probability). */
+const binomialCdf = (successes: number, trials: number, probability: number): number => {
+  if (successes >= trials) return 1;
+  if (successes < 0 || probability >= 1) return 0;
+  if (probability <= 0) return 1;
+  let logTerm = trials * Math.log1p(-probability), total = 0;
+  for (let index = 0; index <= successes; index += 1) {
+    total += Math.exp(logTerm);
+    logTerm += Math.log((trials - index) / (index + 1)) + Math.log(probability) - Math.log1p(-probability);
+  }
+  return Math.min(1, total);
+};
+
 type FailureRule = DecisionFailureBox["rules"][number];
 const matchesRule = (world: DecisionWorld, rule: FailureRule) => rule.side === "low"
   ? world.factors[rule.factorId]! <= rule.threshold
   : world.factors[rule.factorId]! >= rule.threshold;
+
+/**
+ * Quasi p-value (Bryant & Lempert 2010): relax one rule and test whether the worlds it was excluding
+ * are meaningfully less likely to fail. A rule that survives relaxation is decoration — it narrows the
+ * stated condition without carrying information, which reads as a discovered interaction.
+ */
+const ruleIsInformative = (
+  worlds: readonly DecisionWorld[],
+  rules: readonly [FailureRule, FailureRule],
+  tested: FailureRule,
+  fails: (world: DecisionWorld) => boolean,
+): boolean => {
+  const kept = rules.find((rule) => rule !== tested)!;
+  const inside = worlds.filter((world) => rules.every((rule) => matchesRule(world, rule)));
+  const added = worlds.filter((world) => matchesRule(world, kept) && !matchesRule(world, tested));
+  if (!inside.length || !added.length) return false;
+  const density = inside.filter(fails).length / inside.length;
+  return binomialCdf(added.filter(fails).length, added.length, density) < 0.05;
+};
 
 function findFailureBox(
   model: DecisionModel,
   worlds: readonly DecisionWorld[],
   recommendedOptionId: string,
   criterion: DecisionRun["recommendation"]["criterion"],
+  objectiveScale: number,
 ): DecisionFailureBox | undefined {
   if (model.factors.length < 2 || worlds.length < 100) return undefined;
   const train = worlds.filter((world) => world.index % 2 === 0);
@@ -222,6 +263,7 @@ function findFailureBox(
   const coverage = failureCount / totalFailures;
   const lift = baseline ? density / baseline : 0;
   if (cohort.length < 50 || failureCount < 30 || coverage < 0.2 || lift < 1.5 || density <= baseline) return undefined;
+  if (!selected.rules.every((rule) => ruleIsInformative(holdout, selected!.rules, rule, fails))) return undefined;
 
   const scores = new Map(model.options.map((option) => [option.id, criterion === "targetProbability"
     ? cohort.filter((world) => reachedTarget(model, world.results[option.id]!)).length / cohort.length
@@ -231,7 +273,7 @@ function findFailureBox(
   const bestScore = scores.get(bestOptionId)!;
   const recommendedScore = scores.get(recommendedOptionId)!;
   const gap = criterion === "targetProbability" ? bestScore - recommendedScore : recommendedScore - bestScore;
-  if (gap < (criterion === "targetProbability" ? 0.05 : Math.max(1e-9, Math.abs(bestScore) * 0.05))) return undefined;
+  if (gap < materialGap(criterion, objectiveScale)) return undefined;
 
   return { rules: selected.rules, alternativeOptionId: selected.alternativeOptionId, baseline, density, coverage, lift, support: cohort.length, failureCount };
 }
@@ -262,9 +304,8 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
   const margin = criterion === "targetProbability"
     ? winner.targetProbability! - runnerUp.targetProbability!
     : runnerUp.meanRegret - winner.meanRegret;
-  const close = criterion === "targetProbability"
-    ? margin < 0.05
-    : margin <= Math.max(1e-9, Math.abs(winner.meanRegret) * 0.05);
+  const objectiveScale = Math.max(...model.options.map((option) => options[option.id]!.p95)) - Math.min(...model.options.map((option) => options[option.id]!.p05));
+  const close = margin < materialGap(criterion, objectiveScale);
   const advantage = worlds.map((world) => {
     const chosen = oriented(model, world.results[recommendedOptionId]!);
     const alternative = Math.max(...model.options.filter((option) => option.id !== recommendedOptionId).map((option) => oriented(model, world.results[option.id]!)));
@@ -287,7 +328,7 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
       threshold: factor.range[0] + span * (regime === "low" ? 1 / 3 : 2 / 3),
       criterion, bestOptionId,
       bestScore, recommendedScore,
-      reversed: bestOptionId !== recommendedOptionId && reversalGap >= (criterion === "targetProbability" ? 0.05 : Math.max(1e-9, Math.abs(bestScore) * 0.05)),
+      reversed: bestOptionId !== recommendedOptionId && reversalGap >= materialGap(criterion, objectiveScale),
       worldCount: cohort.length,
     };
   }));
@@ -301,7 +342,7 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
     reversed: false, worldCount: worlds.length,
   };
   const driver = drivers.find((candidate) => candidate.factorId === stress.factorId)!;
-  const failureBox = findFailureBox(model, worlds, recommendedOptionId, criterion);
+  const failureBox = findFailureBox(model, worlds, recommendedOptionId, criterion, objectiveScale);
   const factor = model.factors.find((candidate) => candidate.id === driver.factorId)!;
   const optionLabels = new Map(model.options.map((option) => [option.id, option.label]));
   const paths: Record<string, number> = {};

@@ -265,7 +265,14 @@ to port `4317`.
 
 - Decision models use one objective and an inspectable linear response surface.
 - Failure boxes are limited to two factors and hidden unless holdout support,
-  coverage, lift, and decision-margin gates all pass.
+  coverage, lift, and decision-margin gates all pass, and unless each of the two
+  conditions survives being relaxed on the holdout. A one-factor vulnerability is
+  therefore reported by the stress lens rather than dressed up as an interaction.
+- Regret comparisons are called meaningful against the objective spread the options
+  span, so two options separated by a rounding error read as a close call.
+- Factors are sampled independently, so tail values and target probability assume
+  no coupling between them. Tightly linked factors change the spread by a factor of
+  several; the recommendation itself is unaffected.
 - Decision outcomes cannot yet reweight an existing run. C/D observations can.
 - The web agent builds Decision and compact C/D models; other adapters start from
   JSON.

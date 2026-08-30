@@ -71,6 +71,27 @@ assert.equal(interactionRun.stress.reversed, false, "one-factor stress misses a 
 assert.ok(interactionRun.failureBox && interactionRun.failureBox.rules.length === 2 && interactionRun.failureBox.support >= 50 && interactionRun.failureBox.lift >= 1.5, "a two-factor failure region must pass the holdout quality gate");
 assert.ok(interactionRuns.every((run) => run.failureBox?.rules.every((rule) => rule.side === "high") && run.failureBox.coverage >= 0.8), "failure-box direction and coverage remain stable across seeds");
 assert.ok(generateDecisionReport(interactionModel, interactionRun).includes("Where the recommendation changes"), "the report explains a validated failure box without adding another result view");
+const paddedModel: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "One driver, padded with an irrelevant factor", question: "Which plan?",
+  objective: { label: "Value", direction: "maximize" },
+  factors: [{ id: "demand", label: "Demand", range: [0, 100] }, { id: "unrelated", label: "Unrelated", range: [0, 100] }],
+  options: [
+    { id: "robust", label: "Robust plan", baseline: [10, 10], effects: [] },
+    { id: "growth", label: "Growth plan", baseline: [9.4, 9.4], effects: [{ factorId: "demand", impact: [1, 1] }] },
+  ], assumptions: [],
+};
+assert.ok([11, 37, 73].every((seed) => runDecision(paddedModel, 2000, seed).failureBox === undefined), "a one-factor vulnerability never borrows an uninformative second condition to look like an interaction");
+const tiedModel: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "Two options that differ by a rounding error", question: "Which plan?",
+  objective: { label: "Margin", unit: "EUR", direction: "maximize" },
+  factors: [{ id: "demand", label: "Demand", range: [0, 100] }, { id: "cost", label: "Cost", range: [0, 100] }],
+  options: [
+    { id: "a", label: "Plan A", baseline: [200000, 200000], effects: [{ factorId: "demand", impact: [20000, 20000] }] },
+    { id: "b", label: "Plan B", baseline: [199990, 199990], effects: [{ factorId: "demand", impact: [20000, 20000] }, { factorId: "cost", impact: [30, 30] }] },
+  ], assumptions: [],
+};
+const tiedRuns = [11, 37, 73].map((seed) => runDecision(tiedModel, 2000, seed));
+assert.ok(tiedRuns.every((run) => run.recommendation.close && !run.stress.reversed && !run.failureBox), "a lead far below the objective spread reads as a close call, not as a reversal or a failure region");
 const decisionReport = generateDecisionReport(reservoirDecision, decisionRun);
 assert.ok(decisionReport.includes("Decision River") && decisionReport.includes("Highest target chance"), "decision report names the recommendation criterion and explains the river");
 assert.ok(decisionReport.includes('aria-label="Decision River zoom controls"') && decisionReport.includes("prefers-reduced-motion"), "decision report keeps controls accessible");
