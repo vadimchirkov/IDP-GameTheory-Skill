@@ -192,9 +192,8 @@ Stochastic-process and Polymarket models are CLI adapters. The Polymarket bridge
 record paper forecasts in an append-only ledger and later score them against market
 resolution; it never places orders.
 
-See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for the boundaries and
-[SCENARIO_PLANNING_PROPOSALS.md](SCENARIO_PLANNING_PROPOSALS.md) for the validated
-P1/P2 product roadmap.
+See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for the engine and adapter
+boundaries.
 
 ## Why the AI and engine are separate
 
