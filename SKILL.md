@@ -88,12 +88,19 @@ Lead with four things:
 
 When a target exists, explain target probability. Otherwise explain mean regret.
 Use best-world share as a stability clue, not as a real-world forecast probability.
+The tails and target probability assume factors move independently. When the
+situation suggests they move together, say the reported spread is optimistic or
+pessimistic accordingly rather than quoting the tail as settled.
 If `stress.reversed` is false, say the one-factor stress test did not find a reversal;
 do not claim the recommendation can never change.
 If `failureBox` exists, state its two conditions, alternative, support, coverage, and
-lift. Call it a holdout-checked pattern inside the model, not a real-world law. If it
-is absent, do not infer that no joint failure region exists; the quality gate may
-have hidden weak or undersampled candidates.
+lift. Both conditions have been tested for relevance, so report them as a pair rather
+than leading with one. Call it a holdout-checked pattern inside the model, not a
+real-world law. If it is absent, do not infer that no joint failure region exists; the
+quality gate may have hidden weak, undersampled, or one-factor candidates — a
+one-factor vulnerability belongs to the stress lens instead.
+Failure regions are only reliable from roughly 1000 trials; at the default 600 the
+holdout is too small to confirm one, so a missing box says little at that setting.
 
 End with the next information to verify or the decision condition to monitor. Keep
 the model metrics in a short appendix when the user only wants a recommendation.
