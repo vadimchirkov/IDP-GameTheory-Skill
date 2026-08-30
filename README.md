@@ -1,78 +1,78 @@
 # Flumina
 
-> **Map the currents. Choose your course.**
+> Map the currents. Choose your course.
 
-![Flumina — a scenario river for "Competition in the AI Model Market in 2026", showing branching outcomes and the AI assistant panel](screenshot.png)
+Flumina is a local decision-rehearsal workspace for choices whose outcome depends
+on uncertain conditions. Describe the situation in ordinary language, compare the
+actions available to you, and inspect where the recommendation holds or changes.
 
-Flumina is a local decision-rehearsal tool. It turns an ordinary description of a
-difficult choice into explicit options, an objective, shared uncertainties, and
-hundreds or thousands of reproducible paired worlds.
+The AI turns prose and public evidence into an explicit model. A deterministic
+TypeScript engine then evaluates every option in the same sampled worlds. You can
+inspect the assumptions, rerun the calculation with the same seed, and see which
+uncertainty deserves more attention before acting. The AI never supplies the
+simulated outcome.
 
-Instead of producing one confident prediction, the application shows which outcomes
-remain plausible, which strategies perform well across them, and which assumption
-changes the conclusion. It helps answer three practical questions:
+## The product
 
-- which option is most robust across the same uncertain worlds;
-- what downside and target probability each option carries;
-- which uncertainty can reverse the recommendation and is worth checking first.
+The primary workflow is deliberately short:
 
-The river metaphor is functional: assumptions create currents, actions split them
-into branches, and repeated simulations reveal the courses that remain viable.
-Flumina maps those possible futures so that a decision-maker can choose a strategy
-without mistaking one plausible outcome for a prediction.
+1. **Context** — describe the decision, options, goal, constraints, and unknowns.
+   The assistant can research public facts and raises only questions that may change
+   the model.
+2. **Model** — review the objective, 2–5 options, 1–8 shared uncertain factors,
+   option effects, assumptions, and sources. Change the context and rebuild if the
+   framing is wrong.
+3. **Worlds** — run hundreds or thousands of reproducible paired worlds. Every
+   option sees the same environment, so the comparison isolates the choice rather
+   than the random draw.
+4. **Decision River** — follow worlds from the main uncertainty boundary to the
+   option that wins there and the resulting outcome. Use the stress lens to see
+   when another option becomes preferable.
 
-An AI model translates the situation into explicit assumptions and a validated
-scenario model. A deterministic TypeScript engine then explores the uncertainty
-space at speed; the outcomes are calculated by the simulation, not invented by the
-AI.
+Each run reports:
 
-The main parts have distinct responsibilities:
+- the recommended option and whether the lead is close;
+- target probability when the model has a meaningful target;
+- median and tail outcomes;
+- how often each option is best in the same worlds;
+- expected regret from choosing it when another option would have worked better;
+- the factor and regime most capable of changing the recommendation.
 
-- **Paired-world Monte Carlo** samples each environment once and evaluates every
-  option in it, so comparisons are not distorted by different random draws.
-- **[Game theory](https://en.wikipedia.org/wiki/Game_theory)** is one compatibility
-  adapter, supplying repeated-game strategies, payoffs, reputation and other
-  interaction mechanisms.
-- **[TEOB](https://github.com/lambda-house/teob-ts)** supplies the experiment lifecycle: commands, immutable events, revision
-  checks, durable history, recovery after restart, and projections for current
-  views. It makes runs traceable and resumable rather than making the math loop fast.
-- **[Pi](https://github.com/earendil-works/pi)** supplies the modeling agent: it turns prose into explicit assumptions,
-  builds a typed model, optionally researches missing facts, and labels the resulting
-  branches in human terms.
+Treat the sampled share of worlds as conditional evidence for the decision, never
+as the true probability of the future.
 
-New to repeated games? Veritasium's
-[This game theory problem will change the way you see the world](https://www.youtube.com/watch?v=mScpHTIi-kM)
-is an accessible introduction to the Prisoner's Dilemma, repeated interaction, and
-why successful strategies often combine cooperation, retaliation, and forgiveness.
+## Two model modes
 
-## What the application does
+### Decision comparison
 
-A scenario is **one context**, **one built model**, and **one Run button**.
+Use this for a decision maker choosing among mutually exclusive actions: launch or
+wait, build or buy, choose a supplier, enter a market, allocate a scarce resource,
+or select a policy. It is the default product mode.
 
-1. **Describe a decision.** State the situation, available actions, what success
-   means, and what is uncertain. The agent can infer missing structure conservatively.
-2. **Let the agent fill in the rest.** It researches materially useful public facts,
-   shows the sources it used, keeps uncertain values broad, and raises only what cannot
-   be verified publicly as optional questions. Questions never block anything: answer
-   one to replace the assumption or ignore it to keep the default.
-3. **Review the model.** Check the decision question, options, objective, uncertain
-   factors, option effects, assumptions, and sources. To change it, change the context
-   and rebuild.
-4. **Press Run.** One action validates the current model against the engine's domain
-   rules and explores 1–5000 worlds (default 600). Editing context or outcome evidence
-   never triggers a run by itself.
-5. **Explore the result.** Comparable option cards lead with robustness, target
-   probability, downside, median, and regret. The Decision River then explains how
-   worlds flow through the strongest decision boundary to the winning option and outcome.
-   Its stress lens recalculates the comparison for low, typical, or high boundary
-   regimes without inventing new worlds or rerunning the model.
-6. **Compare runs.** Every run keeps the facts fingerprint it was computed from, its
-   seed, metrics, visual report, and replay artifact. New situation facts mark older
-   runs stale without erasing them.
+A Decision model is a small response surface:
 
-The application also includes provider/model selection, reasoning-level controls, a
-read-only view of the model built from your facts, cancellable background analysis,
-live updates, and undoable deletion.
+- one objective to maximize or minimize;
+- shared external factors sampled once per world;
+- a baseline outcome for each option;
+- explicit effects describing how each factor changes each option.
+
+This structure stays understandable enough to challenge. It does not infer
+causality or hide an optimizer behind the recommendation.
+
+### Strategic interaction
+
+Use this when the result is driven by repeated mutual reactions: negotiations,
+alliances, deterrence, standards, price wars, or management of a shared resource.
+The C/D adapter models cooperation and defection over time with uncertain payoffs,
+continuation, behavior, and noise.
+
+The adapter preserves the project's deeper repeated-game capabilities, including
+teams, reputation, punishment, exit, cheap talk, environmental feedback,
+tournaments, population evolution, and spatial dynamics. These mechanics stay
+inside the adapter; the shared engine has no game-theory concepts.
+
+See [GAME_THEORY.md](GAME_THEORY.md) for the model boundary and supported
+mechanisms.
 
 ## Quick start
 
@@ -83,322 +83,182 @@ pnpm install
 pnpm app
 ```
 
-Open <http://127.0.0.1:4317>. The server only listens on the local loopback
-interface.
+Open <http://127.0.0.1:4317>. Flumina listens only on the local loopback interface.
+The first launch creates `data/app.db`; completed runs create HTML and JSON artifacts
+under `reports/tasks/`.
 
-`pnpm app` type-checks and builds the React application before starting the API.
-The first launch creates `data/app.db`; completed runs create HTML and JSON
-artifacts under `reports/tasks/`.
-
-### Configure an AI provider
-
-Open **Settings → Model and access** in the application, add a provider API key,
-and choose the default provider, model, and reasoning level. Existing Pi
-authentication is also discovered automatically (normally from
-`~/.pi/agent/auth.json`), as are provider credentials supplied through their
-standard environment variables.
-
-These optional variables control the defaults and local server:
+Open **Settings → Model and access** to add a provider API key and select a model.
+Existing Pi authentication from `~/.pi/agent/auth.json` and provider environment
+variables are discovered automatically.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `PI_PROVIDER` | Default Pi provider ID | first authenticated provider |
-| `PI_MODEL` | Default model ID | first available fallback/model |
-| `PI_THINKING_LEVEL` | Default reasoning level | model-dependent |
-| `PORT` | HTTP port | `4317` |
-| `APP_DB_PATH` | SQLite journal path | `data/app.db` |
-| `ANALYSIS_TIMEOUT_MS` | Simulation-worker timeout | `300000` |
+| `PI_PROVIDER` | Pi provider ID | first authenticated provider |
+| `PI_MODEL` | model ID | first available model |
+| `PI_THINKING_LEVEL` | reasoning level | model-dependent |
+| `PORT` | local HTTP port | `4317` |
+| `APP_DB_PATH` | SQLite journal | `data/app.db` |
+| `ANALYSIS_TIMEOUT_MS` | worker timeout | `300000` |
 
-The web workflow needs an authenticated AI model to understand a situation, build
-the model, and label the river. The simulation engine and CLI do not need an API
-key once a JSON model exists.
+The web workflow needs an authenticated model to build and label a model. The
+simulation engine and CLI need no API key once model JSON exists.
+
+## Run a model from the CLI
+
+```bash
+pnpm scenario model.json 600 --seed 42
+pnpm scenario model.json 600 --seed 42 --visual
+```
+
+The first command prints the model-specific summary. The second writes an
+interactive report to `reports/visual.html`. Trials default to `600`; the default
+seed is `42`.
+
+A minimal Decision model looks like this:
+
+```json
+{
+  "schemaVersion": 1,
+  "adapter": "decision",
+  "situation": "We must choose how to launch a new service.",
+  "question": "Which launch plan gives us the best first-year contribution margin?",
+  "objective": {
+    "label": "First-year contribution margin",
+    "unit": "EUR",
+    "direction": "maximize",
+    "target": 250000
+  },
+  "factors": [
+    {
+      "id": "demand",
+      "label": "First-year demand",
+      "range": [8000, 18000],
+      "lowLabel": "Weak demand",
+      "highLabel": "Strong demand"
+    }
+  ],
+  "options": [
+    {
+      "id": "focused",
+      "label": "Focused launch",
+      "baseline": [180000, 240000],
+      "effects": [{ "factorId": "demand", "impact": [90000, 150000] }]
+    },
+    {
+      "id": "broad",
+      "label": "Broad launch",
+      "baseline": [130000, 260000],
+      "effects": [{ "factorId": "demand", "impact": [150000, 260000] }]
+    }
+  ],
+  "assumptions": [
+    "The response surface excludes second-year retention and financing effects."
+  ]
+}
+```
+
+The factor value is shared by both options in each world. An effect is the change
+from the factor midpoint to its high end; movement to the low end applies the
+opposite sign.
+
+Agents working from the repository can follow [SKILL.md](SKILL.md) to frame, run,
+and interpret Decision and Strategic models consistently.
+
+## Engine and adapters
+
+```text
+web application / CLI
+          |
+          +-- Decision adapter
+          +-- repeated C/D adapters
+          +-- stochastic-process adapter
+          +-- Polymarket adapter
+                       |
+                       v
+          paired-world Monte Carlo
+          + optional topology sampling
+                       |
+                       v
+              deterministic RNG
+```
+
+`src/monte-carlo.ts` owns deterministic world generation, summaries, and
+conditioning. `src/topology.ts` owns optional nodes and uncertain interactions.
+`src/simulation.ts` composes them for adapters that need both. Domain rules and
+reporting remain in `src/adapters/` and their report modules.
+
+The web product currently builds Decision and Strategic interaction models.
+Stochastic-process and Polymarket models are CLI adapters. The Polymarket bridge can
+record paper forecasts in an append-only ledger and later score them against market
+resolution; it never places orders.
+
+See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for the boundaries and
+[SCENARIO_PLANNING_PROPOSALS.md](SCENARIO_PLANNING_PROPOSALS.md) for the validated
+P1/P2 product roadmap.
+
+## Why the AI and engine are separate
+
+The Pi agent handles language work: framing the situation, collecting public
+evidence, producing typed model output, and naming report branches. It cannot access
+the filesystem, shell, or an unrestricted browser through the embedded workflow.
+
+The engine validates and calculates the model without an LLM. A model, trial count,
+and seed reproduce the same worlds. Runs execute in a worker thread; TEOB commands,
+events, and SQLite persistence keep the workflow traceable and resumable.
+
+## Validation
+
+```bash
+pnpm test
+pnpm build
+pnpm bench:engine
+pnpm bench:live
+pnpm cross:validate
+```
+
+The verification pack checks deterministic replay, model validation, decision
+comparison, C/D mechanics, conditioning, and forecast scoring. Benchmark datasets
+and reproduction notes are in [data/README.md](data/README.md).
+
+The repeated-game benchmarks recover known behavioral signals and expose model-fit
+limits. They do not validate a general ability to predict unseen conflicts,
+sanctions, negotiations, or business decisions. New adapters need their own
+holdouts and baselines.
 
 ## Development
 
-Run the API and Vite development server in separate terminals:
+Run the API and Vite in separate terminals:
 
 ```bash
 pnpm app:server
 pnpm app:dev
 ```
 
-Open the Vite URL, normally <http://127.0.0.1:5173>. Vite proxies `/api` and
-`/reports` to the API at port `4317`.
-
-Useful commands:
-
-| Command | What it does |
-|---|---|
-| `pnpm build` | Type-checks the engine and frontend, then builds the app |
-| `pnpm test` | Runs the self-check and model/engine verification pack |
-| `pnpm app` | Builds and starts the local application |
-| `pnpm app:server` | Starts the API in watch mode |
-| `pnpm app:dev` | Starts the Vite frontend dev server |
-| `pnpm forecast` | Records and scores immutable adapter forecasts |
-| `pnpm bench:engine` | Runs scenario-level engine benchmarks |
-| `pnpm bench:live` | Runs move-level benchmarks against datasets in `data/raw/` |
-| `pnpm bench:all` | Runs both benchmark layers and cross-validation |
-
-## How it is built
-
-```text
-React + TanStack Router/Query
-              │ HTTP + SSE
-              ▼
-Node HTTP server ── Task aggregate ── SQLite event journal
-       │                    │
-       │                    └── projections rebuild task lists and detail views
-       │
-       ├── Pi model runtime ── typed output contracts ── domain validation
-       │
-       └── worker thread ── deterministic Monte Carlo engine
-                              ├── summary metrics
-                              ├── interactive HTML river
-                              └── JSON replay artifact
-```
-
-### Frontend
-
-`app/` is a React 19 single-page application built with Vite. TanStack Router keeps
-the selected task and run addressable in the URL; TanStack Query owns server state.
-Server-sent events refresh an active task while analysis or AI labeling is running.
-The result river is an embedded, self-contained HTML report that communicates the
-selected worlds back to the workspace.
-
-### Backend and persistence
-
-`src/app-server.ts` serves the built frontend, the JSON API, reports, and SSE. Task
-state is modeled as a TEOB aggregate: commands decide immutable events, SQLite is
-the source of truth, and in-memory projections provide the read side. Optimistic
-revision checks prevent an old browser state from overwriting newer edits.
-
-Simulation runs execute in a worker thread so the HTTP server stays responsive.
-The same seed and model reproduce the same worlds. Interrupted `running` or
-`labeling` tasks are resumed when the server starts again.
-
-The embedded Pi agent does not spawn Claude CLI. Its structured operations expose
-only one terminating TypeBox output tool and disable built-in filesystem, shell,
-editing, extensions, skills, prompt templates, and project-context tools. User text
-and research excerpts are treated as untrusted data. Public research uses a bounded
-search plan, validates every public HTTP target, limits response sizes and redirects,
-and supplies only cleaned excerpts to the modelling prompt. The agent never receives
-filesystem, shell, or unrestricted browser access.
-
-## Simulation models
-
-The primary model is a small typed decision specification: one question, two to
-five options, one objective, shared uncertain factors, and explicit effects. Every
-world samples the factors once, evaluates every option, and aggregates quantiles,
-target probability, best-world share, regret, and reversal sensitivity.
-
-The Model step offers two AI-built modes: **Decision comparison** for actions under
-shared uncertainty, and **Strategic interaction** for repeated C/D reactions between
-parties. Imported stochastic-process models and the single-market Polymarket adapter
-run on the same Monte Carlo core but are not inferred by the web agent.
-
-### Forecast validation
-
-`src/forecast.ts` is a small adapter-neutral evaluation boundary. An adapter records
-an immutable categorical forecast before the outcome is known; a later resolution
-record supplies the observed outcome. The shared scorer reports Brier score, log
-loss, accuracy, calibration bins, an optional external baseline, and the settled
-value of the paper decision. A future adapter only needs to produce this record; it
-does not depend on Polymarket or its APIs.
-
-Polymarket is the first live bridge. It reads public market data from the official
-Gamma API, keeps the market price as the baseline, chooses a paper-only YES, NO, or
-ABSTAIN position from the model's probability, and uses the live bid/ask and
-price-dependent taker fee. LP is not selected for paper decisions because the
-current LP simulation is deliberately simplified.
-
-```bash
-# Record a forecast before the market resolves. Estimate trueProb independently;
-# copying the market price into it would make the comparison circular.
-pnpm forecast snapshot example_polymarket.json <market-id-or-slug>
-
-# Later, resolve finished Polymarket snapshots and print current scores.
-pnpm forecast sync
-
-# Score offline, or record a non-Polymarket outcome manually.
-pnpm forecast score
-pnpm forecast resolve <snapshot-id> YES
-
-# Snapshot every model in markets/polymarket (safe to repeat).
-pnpm forecast batch
-
-# Keep the collector running; repeat every 60 minutes by default.
-pnpm forecast watch --interval 60
-```
-
-The default append-only ledger is `data/forecasts.jsonl`; `--ledger PATH` selects
-another file. `sync` is intentionally a one-shot command so a scheduler can run it
-without keeping another daemon alive. `watch` is the self-running paper collector;
-leave it under launchd/systemd to start it automatically after login or reboot.
-Forecasts are paper records and never place orders or require wallet credentials.
-
-### Game-theory compatibility adapter
-
-Each pair repeatedly chooses **C** (cooperate) or **D** (defect). Per-round payoffs
-use the conventional values:
-
-- `R`: both cooperate;
-- `T`: one defects while the other cooperates;
-- `P`: both defect;
-- `S`: one cooperates while the other defects.
-
-The ordering defines the game:
-
-| Game | Ordering | Typical interpretation |
-|---|---|---|
-| Prisoner's Dilemma | `T > R > P > S`, with `2R > T + S` | cooperation is valuable but unilateral defection tempts |
-| Chicken / Snowdrift | `T > R > S > P` | mutual escalation is the worst outcome |
-| Stag Hunt | `R > T > P > S` | coordination and confidence are the main problem |
-
-Every scenario uses ranges rather than one supposedly exact estimate. A world
-samples fresh values, plays all pairs round-robin, normalizes asymmetric payoff
-scales, and records winners, cooperation, inputs, scores, and a behavioral digest.
-The geometric horizon is controlled by `w` and capped at 10,000 rounds per match.
-
-### Supported mechanisms
-
-- 2–10 participants and 24 built-in dispositions;
-- shared or player-specific payoff ranges;
-- fixed teams, collusion, and optional intra-team betrayal;
-- player lean (`values`), behavioral drift, and observation noise;
-- custom memory-n cooperation tables;
-- voluntary exit with an outside payoff (`sigma` + `loner`);
-- indirect reciprocity with Leading Eight reputation norms, gossip, or a numeric
-  reputation ledger (3+ participants);
-- peer or pool punishment with explicit cost and penalty;
-- pre-play cheap talk with credibility and lying cost;
-- continuous eco-feedback or discrete outcome-driven game transitions;
-- deterministic seeds, winner/cooperation sensitivity, posterior reweighting, and
-  exact replay of any sampled world.
-
-For the included compatibility model, see [GAME_THEORY.md](GAME_THEORY.md).
-For the event-sourced design, see
-[PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md). Benchmark datasets, provenance,
-and reproduction notes are in [data/README.md](data/README.md).
-
-## Validation and benchmarks
-
-Benchmarks belong in the project because a strategy simulator should demonstrate
-that it can recover known signals and reveal where its model does not fit. Frozen
-scores do not belong in the main README: they become stale as the engine and data
-change. The repository therefore keeps the benchmark method and reproduction path
-here, while every run prints its current results.
-
-The suite covers synthetic holdouts, repeated-game laboratory data (DF2011 and
-dilemmaRL), and historical conflict/sanctions proxies (MID and TIES). It compares
-the engine with simple zero, historical-mean, and coin baselines; the move-level
-suite separately checks predictive behavior under strategy and noise.
-
-```bash
-pnpm bench:engine   # scenario-level calibration and baseline comparison
-pnpm bench:live     # move-level datasets
-pnpm bench:all      # both layers plus cross-validation
-```
-
-These checks validate implementation and calibration; they do not prove that an
-unobserved real-world situation will follow the model. Dataset sources, hashes, and
-known gaps are documented in [data/README.md](data/README.md).
-
-### What the benchmarks say about prediction
-
-Flumina is a conditional scenario forecaster. Its output is a distribution over
-possible worlds, together with the assumptions that move that distribution. The
-benchmarks support a modest standalone signal and a stronger case for updating a
-broad prior when partial observations are available.
-
-The current benchmark runs show:
-
-| Test | Result | Interpretation |
-|---|---:|---|
-| Synthetic winner holdout | 60.0% vs 50% coin | A modest signal in a one-trial-per-model test |
-| DF2011 cooperation rate | mean agreement 89.4% | MAE 10.6 percentage points across six treatments |
-| dilemmaRL cooperation rate | mean agreement 94.6% | MAE 5.4 percentage points across five non-zero-delta groups |
-| ABC partial observation | MAE 0.054 vs prior 0.293 | Conditioning selects worlds close to 40 observed rounds |
-| Hidden-strategy recovery | 20% top-1 vs 13% chance | Partial player-level outcomes contain information about latent dispositions |
-
-The treatment-level figures are agreement scores, calculated as
-`100 − absolute error in the observed cooperation rate`. They are not binary
-classification accuracy. The DF2011 and dilemmaRL mappings use treatment variables
-to set behavioral ranges, so these results measure calibration and model fit. They
-are not independent forecasts of previously unseen treatments.
-
-The move-level results require the same caution. Predicting the previous move again
-with a Tit-for-Tat-style rule reaches 82–91% on several datasets, but this mostly
-measures behavioral persistence. It is a useful baseline and implementation check,
-not the predictive accuracy of the full scenario engine. Class-imbalance metrics
-such as balanced accuracy, macro-F1, and transition accuracy are needed alongside
-raw accuracy.
-
-The ABC experiment gives the clearest picture of the product's intended use. A broad
-prior over repeated-game worlds has cooperation-rate MAE 0.293. Reweighting those
-worlds after observing 40 rounds reduces MAE to 0.054, while copying the short
-sample directly gives 0.046. The current result therefore supports posterior
-narrowing and hidden-state inference; it does not show that the model beats a raw
-sample estimate for the same quantity. The target rate includes the observed rounds,
-so this test should be read as partial-observation validation rather than a fully
-independent holdout.
-
-MID and TIES use simplified repeated-game proxies. Their results indicate how far a
-generic model can reproduce aggregate cooperation rates under those proxies. They
-do not validate forecasts of real conflicts or sanctions. The forecast remains
-conditional on the facts, payoff ranges, behavioral assumptions, and game class
-provided by the user.
-
-## Command-line use
-
-Run an existing model without the web application:
-
-```bash
-pnpm scenario example_model.json 600 --seed 42
-```
-
-The second positional argument is the number of worlds; it defaults to `600`.
-The default seed is `42`.
-
-```bash
-pnpm scenario example_model.json 600 --visual      # reports/visual.html
-```
-
-Example models cover Prisoner's Dilemma, Chicken, Stag Hunt, teams, drift,
-eco-feedback, state transitions, voluntary exit, punishment, and cheap talk. Copy
-the closest file, change the situation and ranges, then run it with a fixed seed.
-
-## Repository map
+The Vite URL is normally <http://127.0.0.1:5173>; `/api` and `/reports` are proxied
+to port `4317`.
 
 | Path | Responsibility |
 |---|---|
-| `app/` | React workspace, API client, routing, and visual design contract |
-| `src/adapters/` | Concrete decision, repeated-game, stochastic-process, and Polymarket adapters |
-| `src/app-server.ts` | Local HTTP API, static files, SSE, jobs, and report lifecycle |
-| `src/task.ts` | Event-sourced task aggregate and revision rules |
-| `src/pi-agent.ts` | Headless Pi runtime, model discovery/auth, and typed agent runs |
-| `src/scenario-agent.ts` | Situation understanding, model construction, and river labels |
-| `src/domain.ts` | Scenario types and domain validation |
-| `src/kernel.ts` | Repeated-game strategies and match mechanics |
-| `src/monte-carlo.ts` | Game-agnostic deterministic worlds, summaries, and conditioning |
-| `src/topology.ts` | Game-agnostic nodes, interactions, and uncertain topology sampling |
-| `src/adapters/repeated-game.ts` | C/D compatibility model implemented on the generic core |
-| `src/adapters/repeated-game-dynamics.ts` | C/D tournaments, population evolution, and spatial dynamics |
-| `src/adapters/decision.ts` | Paired-world decision model, validation, runner, and summaries |
-| `src/decision-report.ts` | Option comparison and interactive Decision River |
-| `src/worlds-report.ts` | Interactive river report generation |
-| `src/cli.ts` | Standalone command-line entry point |
-| `data/` | SQLite app state plus benchmark manifest and raw datasets |
-| `reports/tasks/` | Generated run visualizations and replay artifacts |
-| `example_*.json` | Ready-to-run scenario models |
+| `app/` | React workspace and UI contract |
+| `src/adapters/decision.ts` | paired-world decision model and summaries |
+| `src/adapters/repeated-game.ts` | repeated C/D model on the shared runner |
+| `src/adapters/repeated-game-dynamics.ts` | C/D tournament, evolution, and spatial views |
+| `src/monte-carlo.ts` | deterministic worlds, summaries, and conditioning |
+| `src/topology.ts` | optional interaction topology |
+| `src/scenario-agent.ts` | context, typed model construction, and labels |
+| `src/task.ts` | event-sourced task lifecycle |
+| `src/app-server.ts` | local API, SSE, workers, and reports |
+| `src/decision-report.ts` | Decision River report |
+| `src/worlds-report.ts` | Strategic interaction river report |
+| `src/forecast.ts` | adapter-neutral forecast ledger and scoring contract |
 
-## Limits
+## Current limits
 
-- P0 deliberately supports one primary objective and an inspectable linear response
-  surface. It does not infer causality, optimize a portfolio, or route between adapters.
-- The Polymarket adapter deliberately supports exactly one binary market; multi-market
-  portfolios need an explicit market-to-position contract before they are safe to add.
-- Teams are fixed during a run; there is no endogenous coalition formation.
-- AI helps formulate and label the model, but simulated participants follow explicit
-  strategies; they are not autonomous LLM agents.
-- Results are conditional on the supplied ranges and assumptions. They are scenario
-  analysis, not a factual forecast or a substitute for domain evidence.
+- Decision models use one objective and an inspectable linear response surface.
+- The stress lens tests one factor at a time; validated two-factor failure regions
+  remain planned work.
+- Decision outcomes cannot yet reweight an existing run. C/D observations can.
+- The web agent builds Decision and compact C/D models; other adapters start from
+  JSON.
+- Results remain conditional on supplied ranges, effects, and structural
+  assumptions. Domain evidence still decides whether the model deserves trust.
