@@ -90,6 +90,10 @@ When a target exists, explain target probability. Otherwise explain mean regret.
 Use best-world share as a stability clue, not as a real-world forecast probability.
 If `stress.reversed` is false, say the one-factor stress test did not find a reversal;
 do not claim the recommendation can never change.
+If `failureBox` exists, state its two conditions, alternative, support, coverage, and
+lift. Call it a holdout-checked pattern inside the model, not a real-world law. If it
+is absent, do not infer that no joint failure region exists; the quality gate may
+have hidden weak or undersampled candidates.
 
 End with the next information to verify or the decision condition to monitor. Keep
 the model metrics in a short appendix when the user only wants a recommendation.

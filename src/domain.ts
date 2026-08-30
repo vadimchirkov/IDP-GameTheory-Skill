@@ -36,7 +36,7 @@ export interface ScenarioPlayer {
 }
 
 const PLAYER_KEYS = new Set(["name", "dispositions", "team", "values", "betrayalProb", "memory", "note"]);
-const MODEL_KEYS = new Set(["situation", "game", "players", "payoffs", "structure", "rationale"]);
+const MODEL_KEYS = new Set(["situation", "timeframe", "game", "players", "payoffs", "structure", "rationale"]);
 const STRUCTURE_KEYS = new Set(["w", "noise", "drift", "eco", "transitions", "sigma", "reputation", "punishment", "cheapTalk"]);
 const ECO_KEYS = new Set(["A1", "game1", "theta", "epsilon", "n0"]);
 const TRANSITION_KEYS = new Set(["states", "start", "next"]);
@@ -144,6 +144,8 @@ export interface CheapTalkConfig {
 
 export interface ScenarioModel {
   situation: string;
+  /** Human-readable interaction horizon; descriptive only, never interpreted by the kernel. */
+  timeframe?: string;
   game?: GameType;
   players: readonly ScenarioPlayer[];
   payoffs: PayoffRanges | Record<string, PayoffRanges>;
@@ -276,6 +278,7 @@ export function assertScenario(model: ScenarioModel): void {
     if (!MODEL_KEYS.has(key)) throw new Error(`Unknown scenario field "${key}" — expected one of ${[...MODEL_KEYS].join(", ")}`);
   }
   if (typeof model.situation !== "string" || !model.situation.trim()) throw new Error("Scenario situation is required");
+  if (model.timeframe !== undefined && (typeof model.timeframe !== "string" || !model.timeframe.trim() || model.timeframe.length > 240)) throw new Error("Scenario timeframe must be a non-empty string within 240 characters");
   if (!Array.isArray(model.players) || model.players.length < 2 || model.players.length > 10) throw new Error("A scenario needs 2..10 players");
   const names = new Set<string>();
   for (const player of model.players as readonly ScenarioPlayer[]) {

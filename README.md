@@ -19,15 +19,16 @@ The primary workflow is deliberately short:
 1. **Context** — describe the decision, options, goal, constraints, and unknowns.
    The assistant can research public facts and raises only questions that may change
    the model.
-2. **Model** — review the objective, 2–5 options, 1–8 shared uncertain factors,
-   option effects, assumptions, and sources. Change the context and rebuild if the
-   framing is wrong.
+2. **Model** — review the objective, optional timeframe, 2–5 options, 1–8 shared
+   uncertain factors, option effects, assumptions, and sources. Change the context
+   and rebuild if the framing is wrong.
 3. **Worlds** — run hundreds or thousands of reproducible paired worlds. Every
    option sees the same environment, so the comparison isolates the choice rather
    than the random draw.
 4. **Decision River** — follow worlds from the main uncertainty boundary to the
    option that wins there and the resulting outcome. Use the stress lens to see
-   when another option becomes preferable.
+   when another option becomes preferable. When a two-factor failure region survives
+   a train/holdout check, the report shows it as a conditional recommendation.
 
 Each run reports:
 
@@ -36,7 +37,8 @@ Each run reports:
 - median and tail outcomes;
 - how often each option is best in the same worlds;
 - expected regret from choosing it when another option would have worked better;
-- the factor and regime most capable of changing the recommendation.
+- the factor and regime most capable of changing the recommendation;
+- a two-factor failure region only when it passes the holdout quality gate.
 
 Treat the sampled share of worlds as conditional evidence for the decision, never
 as the true probability of the future.
@@ -210,6 +212,7 @@ events, and SQLite persistence keep the workflow traceable and resumable.
 ```bash
 pnpm test
 pnpm build
+pnpm journal:verify
 pnpm bench:engine
 pnpm bench:live
 pnpm cross:validate
@@ -254,8 +257,8 @@ to port `4317`.
 ## Current limits
 
 - Decision models use one objective and an inspectable linear response surface.
-- The stress lens tests one factor at a time; validated two-factor failure regions
-  remain planned work.
+- Failure boxes are limited to two factors and hidden unless holdout support,
+  coverage, lift, and decision-margin gates all pass.
 - Decision outcomes cannot yet reweight an existing run. C/D observations can.
 - The web agent builds Decision and compact C/D models; other adapters start from
   JSON.

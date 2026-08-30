@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { EntityId } from "@lambda-house/teob-ts/core";
+import { EntityId, replayAndVerify } from "@lambda-house/teob-ts/core";
 import { Value } from "typebox/value";
 import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
 import { analyzeScenario, replayScenarioWorld } from "./adapters/repeated-game.js";
@@ -21,7 +21,7 @@ import { relativeTime } from "../app/src/relative-time.js";
 import { openPublicPage } from "./web-research.js";
 
 const reservoirDecision: DecisionModel = {
-  schemaVersion: 1, adapter: "decision", situation: "Three farms share a reservoir", question: "How should withdrawals be managed?",
+  schemaVersion: 1, adapter: "decision", situation: "Three farms share a reservoir", timeframe: "next dry season", question: "How should withdrawals be managed?",
   objective: { label: "Shortage days", unit: "days", direction: "minimize", target: 8 },
   factors: [
     { id: "rain", label: "rainfall", range: [0, 100], lowLabel: "Dry season", highLabel: "Wet season" },
@@ -52,6 +52,25 @@ const reversalRun = runDecision({
   ], assumptions: [],
 }, 300, 9);
 assert.equal(reversalRun.stress.reversed, true, "stress analysis finds a regime that reverses the overall choice");
+assert.equal(reversalRun.failureBox, undefined, "one-factor reversals stay in the stress lens instead of duplicating a failure box");
+const interactionModel: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "A capacity choice fails only under two pressures", question: "Which plan?",
+  objective: { label: "Value", direction: "maximize" },
+  factors: [
+    { id: "demand", label: "Demand", range: [0, 100] },
+    { id: "cost", label: "Input cost", range: [0, 100] },
+  ],
+  options: [
+    { id: "robust", label: "Robust plan", baseline: [10, 10], effects: [] },
+    { id: "growth", label: "Growth plan", baseline: [9, 9], effects: [{ factorId: "demand", impact: [1, 1] }, { factorId: "cost", impact: [1, 1] }] },
+  ], assumptions: [],
+};
+const interactionRuns = [11, 37, 73].map((seed) => runDecision(interactionModel, 2000, seed));
+const interactionRun = interactionRuns.at(-1)!;
+assert.equal(interactionRun.stress.reversed, false, "one-factor stress misses a joint corner failure");
+assert.ok(interactionRun.failureBox && interactionRun.failureBox.rules.length === 2 && interactionRun.failureBox.support >= 50 && interactionRun.failureBox.lift >= 1.5, "a two-factor failure region must pass the holdout quality gate");
+assert.ok(interactionRuns.every((run) => run.failureBox?.rules.every((rule) => rule.side === "high") && run.failureBox.coverage >= 0.8), "failure-box direction and coverage remain stable across seeds");
+assert.ok(generateDecisionReport(interactionModel, interactionRun).includes("Where the recommendation changes"), "the report explains a validated failure box without adding another result view");
 const decisionReport = generateDecisionReport(reservoirDecision, decisionRun);
 assert.ok(decisionReport.includes("Decision River") && decisionReport.includes("Highest target chance"), "decision report names the recommendation criterion and explains the river");
 assert.ok(decisionReport.includes('aria-label="Decision River zoom controls"') && decisionReport.includes("prefers-reduced-motion"), "decision report keeps controls accessible");
@@ -98,7 +117,7 @@ const scenario: ScenarioModel = {
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
 assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
-const strategicDraft = { game: "prisoners_dilemma" as const, players: [{ name: "A", dispositions: ["provocable" as const], note: "" }, { name: "B", dispositions: ["exploitative" as const], note: "" }], continuation: { min: 0.7, max: 0.9 }, noise: { min: 0, max: 0.05 }, payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } }, assumptions: ["The same incentives repeat."], questions: [], completionMessage: "Strategic model ready." };
+const strategicDraft = { timeframe: "the next 12 quarterly negotiations", game: "prisoners_dilemma" as const, players: [{ name: "A", dispositions: ["provocable" as const], note: "" }, { name: "B", dispositions: ["exploitative" as const], note: "" }], continuation: { min: 0.7, max: 0.9 }, noise: { min: 0, max: 0.05 }, payoffs: { T: { min: 5, max: 6 }, R: { min: 3, max: 4 }, P: { min: 1, max: 2 }, S: { min: 0, max: 1 } }, assumptions: ["The same incentives repeat."], questions: [], completionMessage: "Strategic model ready." };
 assert.equal(Value.Check(strategicDraftSchema, strategicDraft), true, "the compact C/D builder contract is machine-validatable");
 assert.doesNotThrow(() => analyzeScenario(normalizeStrategicDraft(strategicDraft, "Repeated supplier negotiation"), 2, 1), "the compact C/D draft normalizes into a runnable model");
 await assert.rejects(() => openPublicPage("http://127.0.0.1/private"), /Private hosts/, "public research cannot reach loopback services");
@@ -177,6 +196,7 @@ const legacyJournal: TaskEvent[] = [
   { tag: "ObservationRecorded", analysisId: "run-1", observation: { fact: "cooperation collapsed", observation: { cooperation: 0.1 }, now: "2025-01-01T00:00:03Z" }, now: "2025-01-01T00:00:03Z" },
 ];
 const legacyReplay = legacyJournal.reduce(applyTaskEvent, state0);
+assert.equal(replayAndVerify(taskAggregate, EntityId("legacy"), legacyJournal).violations.length, 0, "legacy journals satisfy the current aggregate invariants");
 assert.equal(legacyReplay.facts.length, 2, "an old context/observation journal replays into facts");
 assert.equal(legacyReplay.situation, "A legacy brief", "the old brief becomes the situation seed");
 assert.equal(legacyReplay.facts.filter((fact) => fact.kind === "outcome").length, 1, "an old observation replays as an outcome fact");
@@ -227,10 +247,12 @@ if (sitReply.ok && sitReply.value.reply?.tag === "State") {
 }
 await sit.runtime.shutdown();
 
-// The model is the source of truth: setting it stores the model and bumps the fingerprint.
-await task.runtime.ask(tid, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:01Z" }, taskCategory);
+// The model is the source of truth: setting it stores the model, its build provenance and bumps the fingerprint.
+const buildMeta = { runId: "build-1", operation: "build-model", provider: "test", model: "builder", thinkingLevel: "low", promptVersion: "decision-v2", structuredOutput: "tool", attempts: 1, durationMs: 10, usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0 } } as const;
+await task.runtime.ask(tid, { tag: "SetModel", model: scenario, agentMeta: buildMeta, now: "2026-01-01T00:00:01Z" }, taskCategory);
 const withModel = await taskState();
 assert.ok(withModel.model, "SetModel stores the model");
+assert.deepEqual(withModel.modelMeta, buildMeta, "the task preserves the exact AI run that built its model");
 assert.equal(withModel.revision, 2, "setting the first model moves the fingerprint");
 await task.runtime.ask(tid, { tag: "SetModel", model: scenario, now: "2026-01-01T00:00:02Z" }, taskCategory);
 assert.equal((await taskState()).revision, 2, "re-persisting an identical model does not move the fingerprint");

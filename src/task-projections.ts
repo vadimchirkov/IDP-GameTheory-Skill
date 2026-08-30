@@ -40,7 +40,7 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
       case "ObservationRecorded": return { ...at(event.now), factCount: view.factCount + 1 };
       case "FactRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
       case "ContextRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
-      case "FactEdited": case "BriefEdited": case "ContextEdited":
+      case "FactEdited": case "BriefEdited": case "ContextEdited": case "FactKindChanged":
         return { ...at(event.now), revision: event.revision };
       case "ModelBuilt": case "ModelReplaced": case "AgentProposalAccepted":
         return { ...at(event.now), revision: event.revision };

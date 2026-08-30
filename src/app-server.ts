@@ -318,7 +318,7 @@ async function modelForRun(id: string, agent: AgentSelection | undefined, now: s
   const built = strategic
     ? await buildStrategicModel(state.situation, stale ? state.model as ScenarioModel : undefined, effectiveAgent, state.researchSources ?? [])
     : await buildDecisionModel(state.situation, stale && state.model && isDecisionModel(state.model) ? state.model : undefined, effectiveAgent, state.researchSources ?? []);
-  const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, now });
+  const stored = await ask(id, { tag: "SetModel", model: built.model, agent: built.agent, agentMeta: built.meta, now });
   if (stored.tag === "Rejected") throw new Error(stored.reason);
   return built.model;
 }
@@ -395,7 +395,7 @@ async function runModelBuild(id: string, buildId: string, mode: ModelMode, agent
       : await buildDecisionModel(state.situation, state.model && isDecisionModel(state.model) ? state.model : undefined, agent, state.researchSources ?? [], persistProgress, signal);
     if (signal.aborted) return;
     await progress;
-    const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, now: new Date().toISOString() });
+    const completed = await ask(id, { tag: "CompleteModelBuild", buildId, model: built.model, agent: built.agent, agentMeta: built.meta, now: new Date().toISOString() });
     if (completed.tag === "Rejected") throw new Error(completed.reason);
     await ask(id, { tag: "RecordResearch", sources: built.sources, now: new Date().toISOString() });
     await ask(id, { tag: "SuggestQuestions", questions: built.questions.map((question) => ({ id: randomUUID(), ...question })), now: new Date().toISOString() });

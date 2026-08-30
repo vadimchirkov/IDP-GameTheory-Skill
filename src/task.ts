@@ -94,6 +94,7 @@ export interface TaskAnalysis {
     recommendation: DecisionRun["recommendation"];
     driver: { factorId: string; correlation: number };
     stress: DecisionRun["stress"];
+    failureBox?: DecisionRun["failureBox"];
   };
   report: string;
   winPct: Record<string, number>;
@@ -131,6 +132,8 @@ export interface TaskState {
   status: TaskStatus;
   model?: SimulationModel;
   agent?: AgentSelection;
+  /** Exact AI run that produced the current model; absent for manual and older models. */
+  modelMeta?: AgentRunMeta;
   analyses: readonly TaskAnalysis[];
   activeAnalysis?: { revision: number; trials: number; seed: number; agent?: AgentSelection; analysisId?: string };
   activeBuild?: ActiveModelBuild;
@@ -151,10 +154,10 @@ export type TaskCommand =
   | { tag: "AddMessage"; message: TaskMessage }
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
-  | { tag: "SetModel"; model: SimulationModel; agent?: AgentSelection; now: string }
+  | { tag: "SetModel"; model: SimulationModel; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
   | { tag: "StartModelBuild"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
   | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
-  | { tag: "CompleteModelBuild"; buildId: string; model: SimulationModel; agent?: AgentSelection; now: string }
+  | { tag: "CompleteModelBuild"; buildId: string; model: SimulationModel; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
   | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
   | { tag: "CancelModelBuild"; buildId: string; now: string }
   | { tag: "RemoveAnalysis"; analysisId: string; now: string }
@@ -182,7 +185,7 @@ export type TaskEvent =
   | { tag: "MessageAdded"; message: TaskMessage }
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
-  | { tag: "ModelBuilt"; model: SimulationModel; revision: number; agent?: AgentSelection; now: string }
+  | { tag: "ModelBuilt"; model: SimulationModel; revision: number; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
   | { tag: "ModelBuildStarted"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
   | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
   | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
@@ -201,6 +204,7 @@ export type TaskEvent =
   | { tag: "ContextAdded"; text: string; revision: number; invalidatesModel?: boolean; now: string }
   | { tag: "ContextEdited"; index: number; text: string; revision: number; now: string }
   | { tag: "ContextRemoved"; index: number; revision: number; now: string }
+  | { tag: "FactKindChanged"; factId: string; kind: FactKind; revision: number; now: string }
   | { tag: "ModelReplaced"; model: SimulationModel; revision: number; now: string }
   | { tag: "AgentProposalRecorded"; proposal: { title?: string }; now: string }
   | { tag: "AgentProposalAccepted"; model: SimulationModel; agent?: AgentSelection; revision: number; now: string }
@@ -280,7 +284,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "TitleSet": return { ...state, title: event.title, updatedAt: event.now };
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
-    case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
+    case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild", "modelMeta"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(event.agent ? { agent: event.agent } : {}), ...(event.agentMeta ? { modelMeta: event.agentMeta } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
     case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, ...(event.modelMode ? { modelMode: event.modelMode } : {}), stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
     case "ModelBuildProgressed": {
       if (state.activeBuild?.buildId !== event.buildId) return state;
@@ -330,6 +334,8 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
       const target = state.facts[event.index + 1];
       return { ...state, facts: target ? state.facts.filter((fact) => fact.id !== target.id) : state.facts, revision: event.revision, updatedAt: event.now };
     }
+    case "FactKindChanged":
+      return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, kind: event.kind } : fact), revision: event.revision, updatedAt: event.now };
     case "ModelReplaced":
     case "AgentProposalAccepted":
       return { ...omit(state, "lastError"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
@@ -408,7 +414,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         try { assertSimulationModel(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         const changed = JSON.stringify(state.model) !== JSON.stringify(command.model);
         const revision = changed ? state.revision + 1 : state.revision;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), ...(command.agentMeta ? { agentMeta: command.agentMeta } : {}), now: command.now }), { tag: "Accepted", revision });
       }
       case "StartModelBuild":
         if (state.activeBuild?.status === "running") return rejected(state, "A model build is already running");
@@ -421,7 +427,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
         try { assertSimulationModel(command.model); } catch (error) { return rejected(state, error instanceof Error ? error.message : "Invalid model"); }
         const revision = JSON.stringify(state.model) !== JSON.stringify(command.model) ? state.revision + 1 : state.revision;
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), now: command.now }), { tag: "Accepted", revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuilt", model: command.model, revision, ...(command.agent ? { agent: command.agent } : {}), ...(command.agentMeta ? { agentMeta: command.agentMeta } : {}), now: command.now }), { tag: "Accepted", revision });
       }
       case "FailModelBuild":
         if (state.activeBuild?.buildId !== command.buildId) return rejected(state, "That build is no longer active");
@@ -466,6 +472,13 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
     }
   },
   apply: applyTaskEvent,
+  invariants: [
+    { name: "revision is a non-negative integer", check: (state) => Number.isInteger(state.revision) && state.revision >= 0 },
+    { name: "running state has an active analysis", check: (state) => state.status !== "running" || !!state.activeAnalysis },
+    { name: "labeling state points to a saved analysis", check: (state) => state.status !== "labeling" || !!state.activeAnalysis?.analysisId && state.analyses.some((analysis) => analysis.id === state.activeAnalysis?.analysisId) },
+    { name: "building state has a running build", check: (state) => state.status !== "building" || state.activeBuild?.status === "running" },
+    { name: "analysis ids point to saved analyses", check: (state) => !state.activeAnalysis?.analysisId || state.analyses.some((analysis) => analysis.id === state.activeAnalysis?.analysisId) },
+  ],
   snapshotEvery: 20,
 };
 
@@ -475,7 +488,7 @@ export const taskEventCodec = tagCodec<TaskEvent>(
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
   // legacy tags kept readable so old journals still replay
-  "BriefEdited", "ContextAdded", "ContextEdited", "ContextRemoved", "ModelReplaced",
+  "BriefEdited", "ContextAdded", "ContextEdited", "ContextRemoved", "FactKindChanged", "ModelReplaced",
   "AgentProposalRecorded", "AgentProposalAccepted", "AgentProposalRejected",
   "ObservationRecorded", "ObservationsCleared",
 );

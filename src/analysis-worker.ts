@@ -29,7 +29,7 @@ try {
         trials, seed, kernelVersion: "decision-v1", adapter: model.adapter,
         report: `${recommendedLabel} ${result.recommendation.close ? "leads a close result" : "leads"} by ${recommendationReason}.`,
         paths: result.paths,
-        decision: { recommendedOptionId: result.recommendedOptionId, recommendedOptionLabel: recommendedLabel, options: result.options, recommendation: result.recommendation, driver: result.driver, stress: result.stress },
+        decision: { recommendedOptionId: result.recommendedOptionId, recommendedOptionLabel: recommendedLabel, options: result.options, recommendation: result.recommendation, driver: result.driver, stress: result.stress, ...(result.failureBox ? { failureBox: result.failureBox } : {}) },
         winPct: Object.fromEntries(model.options.map((option) => [option.label, result.options[option.id]!.bestProbability * 100])),
         winPctTeam: {}, winPctPerCapita: {}, cooperation: { mean: recommended.p50, std: recommended.std },
         sensitivity: [{ input: result.driver.factorId, correlation: result.driver.correlation }], sensitivityWin: [], sensitivityWinTarget: result.recommendedOptionId,

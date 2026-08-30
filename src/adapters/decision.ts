@@ -29,6 +29,8 @@ export interface DecisionModel {
   schemaVersion: 1;
   adapter: "decision";
   situation: string;
+  /** Human-readable decision horizon; descriptive only, never interpreted by the kernel. */
+  timeframe?: string;
   question: string;
   objective: {
     label: string;
@@ -63,6 +65,17 @@ export interface DecisionOptionSummary {
   targetProbability?: number;
 }
 
+export interface DecisionFailureBox {
+  rules: readonly { factorId: string; side: "low" | "high"; threshold: number }[];
+  alternativeOptionId: string;
+  baseline: number;
+  density: number;
+  coverage: number;
+  lift: number;
+  support: number;
+  failureCount: number;
+}
+
 export interface DecisionRun {
   worlds: readonly DecisionWorld[];
   options: Record<string, DecisionOptionSummary>;
@@ -84,6 +97,8 @@ export interface DecisionRun {
     reversed: boolean;
     worldCount: number;
   };
+  /** Holdout-validated two-factor region where another option meaningfully leads. */
+  failureBox?: DecisionFailureBox;
   paths: Record<string, number>;
 }
 
@@ -103,6 +118,7 @@ const assertRange = (value: NumberRange, label: string): void => {
 export function assertDecisionModel(model: DecisionModel): void {
   if (model.schemaVersion !== 1 || model.adapter !== "decision") throw new Error("unsupported decision model");
   if (!model.situation.trim() || !model.question.trim()) throw new Error("decision situation and question are required");
+  if (model.timeframe !== undefined && (!model.timeframe.trim() || model.timeframe.length > 240)) throw new Error("decision timeframe must be a non-empty string within 240 characters");
   if (!model.objective.label.trim()) throw new Error("decision objective is required");
   if (model.objective.target !== undefined && !Number.isFinite(model.objective.target)) throw new Error("objective target must be finite");
   if (model.options.length < 2 || model.options.length > 5) throw new Error("a decision needs 2..5 options");
@@ -144,6 +160,81 @@ const quantile = (sorted: readonly number[], fraction: number): number => {
 const reachedTarget = (model: DecisionModel, value: number): boolean | undefined => model.objective.target === undefined
   ? undefined
   : model.objective.direction === "maximize" ? value >= model.objective.target : value <= model.objective.target;
+
+type FailureRule = DecisionFailureBox["rules"][number];
+const matchesRule = (world: DecisionWorld, rule: FailureRule) => rule.side === "low"
+  ? world.factors[rule.factorId]! <= rule.threshold
+  : world.factors[rule.factorId]! >= rule.threshold;
+
+function findFailureBox(
+  model: DecisionModel,
+  worlds: readonly DecisionWorld[],
+  recommendedOptionId: string,
+  criterion: DecisionRun["recommendation"]["criterion"],
+): DecisionFailureBox | undefined {
+  if (model.factors.length < 2 || worlds.length < 100) return undefined;
+  const train = worlds.filter((world) => world.index % 2 === 0);
+  const holdout = worlds.filter((world) => world.index % 2 === 1);
+  const rules = new Map(model.factors.map((factor) => {
+    const values = train.map((world) => world.factors[factor.id]!).sort((a, b) => a - b);
+    const candidates = ([0.2, 0.4, 0.6, 0.8] as const).flatMap((fraction) => {
+      const threshold = quantile(values, fraction);
+      return (["low", "high"] as const).map((side) => ({ factorId: factor.id, side, threshold }));
+    });
+    return [factor.id, candidates] as const;
+  }));
+  const minimumTrainSupport = Math.max(25, Math.floor(train.length * 0.05));
+  let selected: { rules: [FailureRule, FailureRule]; alternativeOptionId: string; quality: number; lift: number; support: number } | undefined;
+
+  for (const alternative of model.options) {
+    if (alternative.id === recommendedOptionId) continue;
+    const fails = (world: DecisionWorld) => oriented(model, world.results[alternative.id]!) > oriented(model, world.results[recommendedOptionId]!);
+    const trainFailures = train.filter(fails).length;
+    if (!trainFailures) continue;
+    const baseline = trainFailures / train.length;
+    for (let left = 0; left < model.factors.length - 1; left += 1) {
+      for (let right = left + 1; right < model.factors.length; right += 1) {
+        for (const a of rules.get(model.factors[left]!.id)!) for (const b of rules.get(model.factors[right]!.id)!) {
+          const cohort = train.filter((world) => matchesRule(world, a) && matchesRule(world, b));
+          if (cohort.length < minimumTrainSupport) continue;
+          const failures = cohort.filter(fails).length;
+          if (failures < 15) continue;
+          const density = failures / cohort.length;
+          const coverage = failures / trainFailures;
+          const lift = density / baseline;
+          const quality = density * coverage * coverage;
+          if (!selected || quality > selected.quality || quality === selected.quality && (lift > selected.lift || lift === selected.lift && cohort.length > selected.support)) {
+            selected = { rules: [a, b], alternativeOptionId: alternative.id, quality, lift, support: cohort.length };
+          }
+        }
+      }
+    }
+  }
+  if (!selected) return undefined;
+
+  const fails = (world: DecisionWorld) => oriented(model, world.results[selected!.alternativeOptionId]!) > oriented(model, world.results[recommendedOptionId]!);
+  const totalFailures = holdout.filter(fails).length;
+  if (!totalFailures) return undefined;
+  const cohort = holdout.filter((world) => selected!.rules.every((rule) => matchesRule(world, rule)));
+  const failureCount = cohort.filter(fails).length;
+  const baseline = totalFailures / holdout.length;
+  const density = cohort.length ? failureCount / cohort.length : 0;
+  const coverage = failureCount / totalFailures;
+  const lift = baseline ? density / baseline : 0;
+  if (cohort.length < 50 || failureCount < 30 || coverage < 0.2 || lift < 1.5 || density <= baseline) return undefined;
+
+  const scores = new Map(model.options.map((option) => [option.id, criterion === "targetProbability"
+    ? cohort.filter((world) => reachedTarget(model, world.results[option.id]!)).length / cohort.length
+    : mean(cohort.map((world) => world.regrets[option.id]!))]));
+  const bestOptionId = [...model.options].sort((a, b) => criterion === "targetProbability" ? scores.get(b.id)! - scores.get(a.id)! : scores.get(a.id)! - scores.get(b.id)!)[0]!.id;
+  if (bestOptionId !== selected.alternativeOptionId) return undefined;
+  const bestScore = scores.get(bestOptionId)!;
+  const recommendedScore = scores.get(recommendedOptionId)!;
+  const gap = criterion === "targetProbability" ? bestScore - recommendedScore : recommendedScore - bestScore;
+  if (gap < (criterion === "targetProbability" ? 0.05 : Math.max(1e-9, Math.abs(bestScore) * 0.05))) return undefined;
+
+  return { rules: selected.rules, alternativeOptionId: selected.alternativeOptionId, baseline, density, coverage, lift, support: cohort.length, failureCount };
+}
 
 function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[]): Omit<DecisionRun, "worlds"> {
   const options: Record<string, DecisionOptionSummary> = {};
@@ -210,6 +301,7 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
     reversed: false, worldCount: worlds.length,
   };
   const driver = drivers.find((candidate) => candidate.factorId === stress.factorId)!;
+  const failureBox = findFailureBox(model, worlds, recommendedOptionId, criterion);
   const factor = model.factors.find((candidate) => candidate.id === driver.factorId)!;
   const optionLabels = new Map(model.options.map((option) => [option.id, option.label]));
   const paths: Record<string, number> = {};
@@ -223,7 +315,7 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
     const key = world.path.join(" → ");
     paths[key] = (paths[key] ?? 0) + 1;
   }
-  return { options, recommendedOptionId, recommendation: { criterion, margin, close }, driver, stress, paths };
+  return { options, recommendedOptionId, recommendation: { criterion, margin, close }, driver, stress, ...(failureBox ? { failureBox } : {}), paths };
 }
 
 export function runDecision(model: DecisionModel, trials: number, seed: number): DecisionRun {

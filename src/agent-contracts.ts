@@ -12,6 +12,7 @@ const normalizeRange = (range: { min: number; max: number }): [number, number] =
 
 const decisionEffectSchema = Type.Object({ factorId: Type.String({ minLength: 1, maxLength: 80 }), impact: rangeSchema }, closed);
 export const decisionDraftSchema = Type.Object({
+  timeframe: nullable(Type.String({ minLength: 1, maxLength: 240 })),
   question: Type.String({ minLength: 1, maxLength: 320 }),
   objective: Type.Object({
     label: Type.String({ minLength: 1, maxLength: 120 }),
@@ -38,7 +39,7 @@ const id = (value: string, fallback: string): string => value.trim().toLowerCase
 export function normalizeDecisionDraft(output: DecisionDraft, situation: string): DecisionModel {
   const factorIds = new Map(output.factors.map((factor, index) => [factor.id, id(factor.id, `factor-${index + 1}`)]));
   return {
-    schemaVersion: 1, adapter: "decision", situation, question: output.question.trim(),
+    schemaVersion: 1, adapter: "decision", situation, ...(output.timeframe ? { timeframe: output.timeframe.trim() } : {}), question: output.question.trim(),
     objective: { label: output.objective.label.trim(), direction: output.objective.direction, ...(output.objective.unit ? { unit: output.objective.unit.trim() } : {}), ...(output.objective.target !== null ? { target: output.objective.target } : {}) },
     factors: output.factors.map((factor, index) => ({ id: factorIds.get(factor.id) ?? `factor-${index + 1}`, label: factor.label.trim(), range: normalizeRange(factor.range), lowLabel: factor.lowLabel.trim(), highLabel: factor.highLabel.trim() })),
     options: output.options.map((option, index) => ({
@@ -52,6 +53,7 @@ export function normalizeDecisionDraft(output: DecisionDraft, situation: string)
 const gameSchema = stringEnum(["prisoners_dilemma", "chicken", "stag_hunt", "snowdrift"] as const);
 const payoffSchema = Type.Object({ T: rangeSchema, R: rangeSchema, P: rangeSchema, S: rangeSchema }, closed);
 export const strategicDraftSchema = Type.Object({
+  timeframe: nullable(Type.String({ minLength: 1, maxLength: 240 })),
   game: gameSchema,
   players: Type.Array(Type.Object({
     name: Type.String({ minLength: 1, maxLength: 120 }),
@@ -79,7 +81,7 @@ const canonicalPayoffs = (ranges: PayoffRanges, game: GameType): PayoffRanges =>
 export function normalizeStrategicDraft(output: StrategicDraft, situation: string): ScenarioModel {
   const proposed = normalizePayoffs(output.payoffs);
   return {
-    situation, game: output.game,
+    situation, ...(output.timeframe ? { timeframe: output.timeframe.trim() } : {}), game: output.game,
     players: output.players.map((player) => ({ name: player.name.trim(), dispositions: player.dispositions, ...(player.note.trim() ? { note: player.note.trim() } : {}) })),
     structure: { w: normalizeRange(output.continuation), noise: normalizeRange(output.noise) },
     payoffs: feasiblePayoffRanges(proposed, output.game) ? proposed : canonicalPayoffs(proposed, output.game),
