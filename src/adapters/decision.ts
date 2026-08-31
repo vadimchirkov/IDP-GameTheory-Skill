@@ -1,4 +1,4 @@
-import { correlation, mean, runMonteCarlo, standardDeviation } from "../monte-carlo.js";
+import { conditionWorlds, correlation, mean, runMonteCarlo, standardDeviation, weightedMean, weightedStandardDeviation } from "../monte-carlo.js";
 import { hash, Rng } from "../rng.js";
 import type { NumberRange } from "../topology.js";
 
@@ -389,9 +389,14 @@ function worldWithResults(model: DecisionModel, world: Omit<DecisionWorld, "resu
   };
 }
 
-function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[]): Omit<DecisionRun, "worlds"> {
-  const options = summarizeOptions(model, worlds);
-  const criterion = model.objective.target === undefined ? "meanRegret" as const : "targetProbability" as const;
+const decisionCriterion = (model: DecisionModel) => model.objective.target === undefined ? "meanRegret" as const : "targetProbability" as const;
+
+/**
+ * Who leads and by how much. `close` is the guard against reading noise as a decision: a lead smaller
+ * than the material gap means the run does not separate the options, however it happened to sort.
+ */
+function recommendFrom(model: DecisionModel, options: Record<string, DecisionOptionSummary>): { recommendedOptionId: string; recommendation: DecisionRun["recommendation"] } {
+  const criterion = decisionCriterion(model);
   const ranked = rankOptions(model, options, criterion);
   const recommendedOptionId = ranked[0]!.id;
   const runnerUp = options[ranked[1]!.id]!;
@@ -400,7 +405,15 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
     ? winner.targetProbability! - runnerUp.targetProbability!
     : runnerUp.meanRegret - winner.meanRegret;
   const objectiveScale = Math.max(...model.options.map((option) => options[option.id]!.p95)) - Math.min(...model.options.map((option) => options[option.id]!.p05));
-  const close = margin < materialGap(criterion, objectiveScale);
+  return { recommendedOptionId, recommendation: { criterion, margin, close: margin < materialGap(criterion, objectiveScale) } };
+}
+
+function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[]): Omit<DecisionRun, "worlds"> {
+  const options = summarizeOptions(model, worlds);
+  const criterion = decisionCriterion(model);
+  const { recommendedOptionId, recommendation } = recommendFrom(model, options);
+  const { margin, close } = recommendation;
+  const objectiveScale = Math.max(...model.options.map((option) => options[option.id]!.p95)) - Math.min(...model.options.map((option) => options[option.id]!.p05));
   const advantage = worlds.map((world) => {
     const chosen = oriented(model, world.results[recommendedOptionId]!);
     const alternative = Math.max(...model.options.filter((option) => option.id !== recommendedOptionId).map((option) => oriented(model, world.results[option.id]!)));
@@ -526,4 +539,102 @@ export function restoreDecisionRun(model: DecisionModel, worlds: readonly Decisi
   assertDecisionModel(model);
   if (!worlds.length) throw new Error("decision artifact has no worlds");
   return { worlds, ...summarizeDecision(model, worlds) };
+}
+
+/**
+ * What actually happened, stated against the run's own model: either a shared factor came in at a
+ * value, or one option was taken and produced an objective value. Exactly one of the two ids is set.
+ */
+export interface DecisionObservation {
+  factorId?: string;
+  optionId?: string;
+  /** The observed number, in the factor's own units or in the objective's units. */
+  value: number;
+  /** Kernel width as a share of that quantity's own spread; smaller constrains harder. Default 0.15. */
+  tolerance?: number;
+}
+
+export interface DecisionPosterior {
+  effectiveSampleSize: number;
+  /** Mean raw agreement across worlds — how well the evidence fits the model at all. */
+  fit: number;
+  options: Record<string, DecisionOptionSummary>;
+  recommendedOptionId: string;
+  /** Same margin rule as an unweighted run: `close` means the evidence does not separate the options. */
+  recommendation: DecisionRun["recommendation"];
+}
+
+const DEFAULT_DECISION_TOLERANCE = 0.15;
+
+export function assertDecisionObservation(model: DecisionModel, observation: DecisionObservation): void {
+  const named = [observation.factorId, observation.optionId].filter((value) => value !== undefined);
+  if (named.length !== 1) throw new Error("a decision observation names exactly one factor or one option");
+  if (observation.factorId !== undefined && !model.factors.some((factor) => factor.id === observation.factorId)) throw new Error(`unknown factor ${observation.factorId}`);
+  if (observation.optionId !== undefined && !model.options.some((option) => option.id === observation.optionId)) throw new Error(`unknown option ${observation.optionId}`);
+  if (!Number.isFinite(observation.value)) throw new Error("a decision observation needs a finite value");
+  if (observation.tolerance !== undefined && !(observation.tolerance > 0 && observation.tolerance <= 1)) throw new Error("tolerance must be within (0, 1]");
+}
+
+/** Weighted quantile over value/weight pairs sorted ascending; weights sum to 1. */
+const weightedQuantile = (pairs: readonly { value: number; weight: number }[], fraction: number): number => {
+  let cumulative = 0;
+  for (const pair of pairs) {
+    cumulative += pair.weight;
+    if (cumulative >= fraction) return pair.value;
+  }
+  return pairs[pairs.length - 1]!.value;
+};
+
+function weightedOptionSummaries(model: DecisionModel, worlds: readonly DecisionWorld[], weights: readonly number[]): Record<string, DecisionOptionSummary> {
+  const options: Record<string, DecisionOptionSummary> = {};
+  for (const option of model.options) {
+    const values = worlds.map((world) => world.results[option.id]!);
+    const pairs = values.map((value, index) => ({ value, weight: weights[index]! })).sort((a, b) => a.value - b.value);
+    const share = (predicate: (world: DecisionWorld) => boolean) => worlds.reduce((sum, world, index) => predicate(world) ? sum + weights[index]! : sum, 0);
+    options[option.id] = {
+      mean: weightedMean(values, weights),
+      std: weightedStandardDeviation(values, weights),
+      p05: weightedQuantile(pairs, 0.05), p50: weightedQuantile(pairs, 0.5), p95: weightedQuantile(pairs, 0.95),
+      bestProbability: share((world) => world.bestOptionId === option.id),
+      meanRegret: weightedMean(worlds.map((world) => world.regrets[option.id]!), weights),
+      ...(model.objective.target === undefined ? {} : { targetProbability: share((world) => reachedTarget(model, world.results[option.id]!) === true) }),
+    };
+  }
+  return options;
+}
+
+/**
+ * Reweight a finished decision run to the worlds consistent with what happened, without re-simulating.
+ * The forward model is the likelihood: each world's weight is its agreement with every observation, so
+ * facts accumulate. Agreement is a Gaussian kernel scaled by the quantity's own spread, so evidence
+ * never empties the posterior and `effectiveSampleSize` reports how much it actually narrowed things.
+ */
+export function fitDecisionPosterior(
+  model: DecisionModel,
+  worlds: readonly DecisionWorld[],
+  observations: readonly DecisionObservation[],
+): DecisionPosterior {
+  assertDecisionModel(model);
+  if (!worlds.length) throw new Error("no decision worlds to condition on");
+  for (const observation of observations) assertDecisionObservation(model, observation);
+
+  // Each quantity is compared on its own scale: a factor against its stated range, an option's outcome
+  // against the spread the run actually produced. Degenerate spreads fall back to the observed size.
+  const scaleFor = (observation: DecisionObservation): number => {
+    const spread = observation.factorId !== undefined
+      ? (() => { const range = model.factors.find((factor) => factor.id === observation.factorId)!.range; return range[1] - range[0]; })()
+      : standardDeviation(worlds.map((world) => world.results[observation.optionId!]!));
+    return spread > 0 ? spread : Math.max(Math.abs(observation.value), 1);
+  };
+  const scales = new Map(observations.map((observation) => [observation, scaleFor(observation)] as const));
+
+  const { weights, effectiveSampleSize, fit } = conditionWorlds(worlds, observations, (world, observation) => {
+    const seen = observation.factorId !== undefined ? world.factors[observation.factorId]! : world.results[observation.optionId!]!;
+    const width = (observation.tolerance ?? DEFAULT_DECISION_TOLERANCE) * scales.get(observation)!;
+    const distance = (seen - observation.value) / width;
+    return Math.exp(-0.5 * distance * distance);
+  });
+
+  const options = weightedOptionSummaries(model, worlds, weights);
+  return { effectiveSampleSize, fit, options, ...recommendFrom(model, options) };
 }

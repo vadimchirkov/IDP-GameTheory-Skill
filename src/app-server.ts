@@ -7,10 +7,10 @@ import { CategoryId, EntityId, SequenceNr } from "@lambda-house/teob-ts/core";
 import { createInMemoryProjectionStore, runProjection } from "@lambda-house/teob-ts/projection";
 import { createSqliteRuntime, registration } from "@lambda-house/teob-ts/sqlite";
 import type { ScenarioModel } from "./domain.js";
-import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
+import { isDecisionModel, type SimulationModel } from "./model.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildDecisionModel, buildStrategicModel, continueContext, labelWorlds } from "./scenario-agent.js";
+import { buildDecisionModel, buildStrategicModel, classifyModelMode, continueContext, labelWorlds, type ModelMode } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
@@ -18,11 +18,8 @@ import {
   type AgentMode, type Fact, type FactKind, type TaskAnalysis, type TaskCommand, type TaskReply, type TaskState,
 } from "./task.js";
 import { replayScenarioWorld, type RiverArtifact, type ScenarioResult, type Trial } from "./adapters/repeated-game.js";
-import type { SimulationArtifact } from "./simulation.js";
-import { generateSimulationReport } from "./generic-report.js";
-import { summarizeWorlds } from "./simulation.js";
 import { generateDecisionReport } from "./decision-report.js";
-import { restoreDecisionRun, type DecisionArtifact } from "./adapters/decision.js";
+import { assertDecisionObservation, fitDecisionPosterior, restoreDecisionRun, type DecisionArtifact, type DecisionModel, type DecisionObservation, type DecisionPosterior } from "./adapters/decision.js";
 import { fitPosterior, type Observation } from "./abc.js";
 import { researchPublicContext } from "./web-research.js";
 
@@ -32,8 +29,6 @@ const reportDirectory = resolve(root, "reports", "tasks");
 const appDirectory = resolve(root, "app", "dist");
 const port = Number(process.env.PORT ?? 4317);
 const analysisTimeoutMs = Math.max(1_000, Number(process.env.ANALYSIS_TIMEOUT_MS) || 300_000);
-type ModelMode = "decision" | "strategic";
-const modelMode = (value: unknown): ModelMode => value === "strategic" ? "strategic" : "decision";
 await mkdir(dirname(databasePath), { recursive: true });
 await mkdir(reportDirectory, { recursive: true });
 
@@ -114,6 +109,56 @@ function observationFrom(input: Record<string, unknown>, model: RiverArtifact["m
     if (Object.keys(pc).length) obs.playerCooperation = pc;
   }
   return obs;
+}
+
+/** Plain-language rendering of a proposed outcome reading, for the confirmation prompt. */
+function describeObservation(observation: Record<string, unknown>, model?: SimulationModel): string {
+  if (model && isDecisionModel(model)) {
+    const factor = model.factors.find((candidate) => candidate.id === observation.factorId);
+    const option = model.options.find((candidate) => candidate.id === observation.optionId);
+    const unit = model.objective.unit ? ` ${model.objective.unit}` : "";
+    if (factor) return `${factor.label}: ${observation.value}`;
+    if (option) return `${option.label} produced ${observation.value}${unit}`;
+  }
+  const parts = [
+    observation.winner ? `winner: ${String(observation.winner)}` : "",
+    observation.cooperation !== undefined && observation.cooperation !== null ? `cooperation ${Math.round(Number(observation.cooperation) * 100)}%` : "",
+    observation.regime ? `regime: ${String(observation.regime)}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ") || JSON.stringify(observation);
+}
+
+/** The decision counterpart of `observationFrom`: one factor or one option, validated against the model. */
+function decisionObservationFrom(input: Record<string, unknown>, model: DecisionModel): DecisionObservation {
+  const text = (value: unknown) => value === undefined || value === null ? undefined : String(value);
+  const observation: DecisionObservation = {
+    ...(text(input.factorId) ? { factorId: text(input.factorId)! } : {}),
+    ...(text(input.optionId) ? { optionId: text(input.optionId)! } : {}),
+    value: Number(input.value),
+    ...(input.tolerance !== undefined && input.tolerance !== null ? { tolerance: Number(input.tolerance) } : {}),
+  };
+  assertDecisionObservation(model, observation);
+  return observation;
+}
+
+/** A decision run reweighted to its own outcome facts; unreadable facts are skipped, not fatal. */
+function decisionPosterior(model: DecisionModel, artifact: DecisionArtifact, state: TaskState): { baseline: DecisionPosterior; posterior: DecisionPosterior } {
+  const observations = state.facts.flatMap((fact) => {
+    if (fact.kind !== "outcome" || !fact.observation) return [];
+    try { return [decisionObservationFrom({ ...fact.observation }, model)]; } catch { return []; }
+  });
+  return {
+    baseline: fitDecisionPosterior(model, artifact.worlds, []),
+    posterior: fitDecisionPosterior(model, artifact.worlds, observations),
+  };
+}
+
+async function readDecisionArtifact(artifactUrl: string): Promise<DecisionArtifact> {
+  const fileName = artifactUrl.match(/^\/reports\/tasks\/([a-zA-Z0-9._-]+\.json)$/)?.[1];
+  if (!fileName) throw new Error("Invalid decision artifact path");
+  const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as DecisionArtifact;
+  if (artifact.schemaVersion !== 3 || !artifact.model || !Array.isArray(artifact.worlds)) throw new Error("Unsupported decision artifact");
+  return artifact;
 }
 
 /**
@@ -247,7 +292,7 @@ const conversationOf = (state: TaskState) => (state.messages ?? [])
   .slice(-12)
   .map(({ role, text }) => ({ role, text }));
 
-function analysisWorker(model: SimulationModel, trials: number, seed: number, signal: AbortSignal): Promise<{ html: string; labelNodes: WorldLabelNode[]; artifact: RiverArtifact | SimulationArtifact | DecisionArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
+function analysisWorker(model: SimulationModel, trials: number, seed: number, signal: AbortSignal): Promise<{ labelNodes: WorldLabelNode[]; artifact: RiverArtifact | DecisionArtifact; summary: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt"> }> {
   return new Promise((resolvePromise, reject) => {
     const worker = new Worker(new URL("./analysis-worker.ts", import.meta.url), { workerData: { model, trials, seed } });
     let settled = false;
@@ -255,8 +300,8 @@ function analysisWorker(model: SimulationModel, trials: number, seed: number, si
     const abort = () => { void worker.terminate(); finish(() => reject(new Error("Analysis was cancelled"))); };
     const timer = setTimeout(() => { void worker.terminate(); finish(() => reject(new Error(`Analysis timed out after ${analysisTimeoutMs}ms`))); }, analysisTimeoutMs);
     signal.addEventListener("abort", abort, { once: true });
-    worker.once("message", (message: { ok: boolean; html?: string; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact | SimulationArtifact | DecisionArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
-      if (message.ok && message.html && message.labelNodes && message.artifact && message.summary) finish(() => resolvePromise({ html: message.html!, labelNodes: message.labelNodes!, artifact: message.artifact!, summary: message.summary! }));
+    worker.once("message", (message: { ok: boolean; labelNodes?: WorldLabelNode[]; artifact?: RiverArtifact | DecisionArtifact; summary?: Omit<TaskAnalysis, "revision" | "visualUrl" | "completedAt">; error?: string }) => {
+      if (message.ok && message.labelNodes && message.artifact && message.summary) finish(() => resolvePromise({ labelNodes: message.labelNodes!, artifact: message.artifact!, summary: message.summary! }));
       else finish(() => reject(new Error(message.error ?? "Analysis failed")));
     });
     worker.once("error", (error) => finish(() => reject(error)));
@@ -265,14 +310,13 @@ function analysisWorker(model: SimulationModel, trials: number, seed: number, si
   });
 }
 
-async function labelAnalysis(id: string, analysis: TaskAnalysis, model: ScenarioModel, agent: AgentSelection | undefined, signal: AbortSignal, html: string, nodes: readonly WorldLabelNode[]): Promise<void> {
+async function labelAnalysis(id: string, analysis: TaskAnalysis, model: ScenarioModel, agent: AgentSelection | undefined, signal: AbortSignal, nodes: readonly WorldLabelNode[]): Promise<void> {
   let worldLabels: WorldLabels = {};
   let agentMeta;
   try {
     const labeled = await labelWorlds(model, nodes, agent, signal);
     worldLabels = labeled.labels;
     agentMeta = labeled.meta;
-    if (!signal.aborted) await writeFile(join(reportDirectory, analysis.visualUrl.split("/").at(-1)!), injectWorldLabels(html, worldLabels), "utf8");
   } catch (error) {
     if (signal.aborted) return;
     console.warn("Pi world labels unavailable:", error instanceof Error ? error.message : String(error));
@@ -283,7 +327,7 @@ async function labelAnalysis(id: string, analysis: TaskAnalysis, model: Scenario
 async function resumeAnalysisLabels(id: string, analysis: TaskAnalysis, model: ScenarioModel, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
   try {
     const result = await analysisWorker(model, analysis.trials, analysis.seed, signal);
-    if (!signal.aborted) await labelAnalysis(id, analysis, model, agent, signal, result.html, result.labelNodes);
+    if (!signal.aborted) await labelAnalysis(id, analysis, model, agent, signal, result.labelNodes);
   } catch (error) {
     if (signal.aborted) return;
     console.warn("Analysis label recovery unavailable:", error instanceof Error ? error.message : String(error));
@@ -312,9 +356,6 @@ async function modelForRun(id: string, agent: AgentSelection | undefined, now: s
   if (state.model && stale && !agent && !state.agent) {
     throw new Error("Situation changed — rebuild the model before running (agent not configured)");
   }
-  if (state.model && stale && (isStochasticProcess(state.model) || isPolymarket(state.model))) {
-    throw new Error(`Situation changed — imported ${state.model.adapter} models must be updated explicitly before running`);
-  }
   const effectiveAgent = agent ?? state.agent;
   const strategic = Boolean(state.model && !isDecisionModel(state.model));
   const built = strategic
@@ -339,22 +380,17 @@ async function runAnalysis(id: string, requested: { revision: number; trials: nu
     const analysisId = randomUUID();
     const fileName = `${id}-r${analysisRevision}-${requested.trials}w-${requested.seed}-${analysisId}.html`;
     const artifactName = fileName.replace(/\.html$/, ".json");
-    await writeFile(join(reportDirectory, fileName), result.html, "utf8");
-    unrecordedAssets.push(`/reports/tasks/${fileName}`);
     await writeFile(join(reportDirectory, artifactName), JSON.stringify(result.artifact), "utf8");
     unrecordedAssets.push(`/reports/tasks/${artifactName}`);
     const analysis: TaskAnalysis = { ...result.summary, id: analysisId, revision: analysisRevision, visualUrl: `/reports/tasks/${fileName}`, artifactUrl: `/reports/tasks/${artifactName}`, completedAt: new Date().toISOString() };
     const recorded = await ask(id, { tag: "RecordAnalysis", analysis });
     if (recorded.tag === "Rejected") throw new Error(recorded.reason);
     unrecordedAssets.length = 0;
-    if (isDecisionModel(model) || isStochasticProcess(model) || isPolymarket(model)) {
+    if (isDecisionModel(model)) {
       await ask(id, { tag: "CompleteAnalysisLabels", analysisId, worldLabels: {}, now: new Date().toISOString() });
-      if (!signal.aborted) await addMessage(id, "agent", "river", isDecisionModel(model)
-        ? `Decision rehearsal complete: ${analysis.trials} paired worlds. The report compares every option under the same uncertainty.`
-        : isPolymarket(model) ? `Polymarket simulation complete: ${analysis.trials} worlds. PnL/ROI and best-position share in report.`
-        : `Simulation complete: ${analysis.trials} worlds. Metrics and topology are available in the report.`);
+      if (!signal.aborted) await addMessage(id, "agent", "river", `Decision rehearsal complete: ${analysis.trials} paired worlds. The report compares every option under the same uncertainty.`);
     } else {
-      await labelAnalysis(id, analysis, model as ScenarioModel, agent, signal, result.html, result.labelNodes);
+      await labelAnalysis(id, analysis, model as ScenarioModel, agent, signal, result.labelNodes);
       if (!signal.aborted) await addMessage(id, "agent", "river", completedRunMessage(model as ScenarioModel, analysis));
     }
   } catch (error) {
@@ -367,13 +403,25 @@ function startAnalysis(id: string, requested: NonNullable<TaskState["activeAnaly
   const controller = new AbortController();
   analysisJobs.set(id, controller);
   const state = detail(id);
-  const work = requested.analysisId && state?.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model) && !isPolymarket(state.model)
+  const work = requested.analysisId && state?.model && !isDecisionModel(state.model)
     ? resumeAnalysisLabels(id, state.analyses.find((analysis) => analysis.id === requested.analysisId)!, state.model as ScenarioModel, requested.agent ?? state.agent, controller.signal)
     : runAnalysis(id, requested, controller.signal);
   void work.finally(() => { if (analysisJobs.get(id) === controller) analysisJobs.delete(id); });
 }
 
-async function runModelBuild(id: string, buildId: string, mode: ModelMode, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
+/**
+ * A rebuild keeps the model's existing type — switching engines under the user is never what they meant.
+ * A first build asks the assistant to read the situation, so the user never picks a modelling detail.
+ */
+async function resolveModelMode(state: TaskState, agent: AgentSelection | undefined, signal: AbortSignal, onProgress: (event: unknown) => void): Promise<ModelMode> {
+  if (state.model) return isDecisionModel(state.model) ? "decision" : "strategic";
+  onProgress({ stage: "routing", message: "Reading the situation to choose the model type…" });
+  const { mode, reason } = await classifyModelMode(state.situation, agent, signal);
+  onProgress({ stage: "routing", message: mode === "strategic" ? `Modelling this as a strategic interaction. ${reason}` : `Modelling this as a decision comparison. ${reason}` });
+  return mode;
+}
+
+async function runModelBuild(id: string, buildId: string, agent: AgentSelection | undefined, signal: AbortSignal): Promise<void> {
   let progress = Promise.resolve();
   const persistProgress = (event: unknown) => {
     const value = event && typeof event === "object" ? event as Record<string, unknown> : {};
@@ -393,8 +441,10 @@ async function runModelBuild(id: string, buildId: string, mode: ModelMode, agent
   try {
     const state = detail(id);
     if (!state) throw new Error("Task not found");
+    const mode = await resolveModelMode(state, agent, signal, persistProgress);
+    if (signal.aborted) return;
     const built = mode === "strategic"
-      ? await buildStrategicModel(state.situation, state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model) && !isPolymarket(state.model) ? state.model as ScenarioModel : undefined, agent, state.researchSources ?? [], persistProgress, signal)
+      ? await buildStrategicModel(state.situation, state.model && !isDecisionModel(state.model) ? state.model as ScenarioModel : undefined, agent, state.researchSources ?? [], persistProgress, signal)
       : await buildDecisionModel(state.situation, state.model && isDecisionModel(state.model) ? state.model : undefined, agent, state.researchSources ?? [], persistProgress, signal);
     if (signal.aborted) return;
     await progress;
@@ -412,7 +462,7 @@ async function runModelBuild(id: string, buildId: string, mode: ModelMode, agent
   }
 }
 
-function startModelBuild(id: string, agent: AgentSelection | undefined, mode: ModelMode = "decision", buildId: string = randomUUID()): string {
+function startModelBuild(id: string, agent: AgentSelection | undefined, buildId: string = randomUUID()): string {
   if (modelBuildJobs.has(id)) return detail(id)?.activeBuild?.buildId ?? buildId;
   const state = detail(id);
   if (!state) throw new Error("Task not found");
@@ -422,10 +472,10 @@ function startModelBuild(id: string, agent: AgentSelection | undefined, mode: Mo
   const controller = new AbortController();
   const job = (async () => {
     if (!started) {
-      const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, modelMode: mode, now: new Date().toISOString() });
+      const answer = await ask(id, { tag: "StartModelBuild", buildId, revision: state.revision, now: new Date().toISOString() });
       if (answer.tag === "Rejected") throw new Error(answer.reason);
     }
-    await runModelBuild(id, buildId, mode, agent, controller.signal);
+    await runModelBuild(id, buildId, agent, controller.signal);
   })();
   modelBuildJobs.set(id, { promise: job, controller });
   void job.finally(() => { if (modelBuildJobs.get(id)?.promise === job) modelBuildJobs.delete(id); });
@@ -452,7 +502,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "GET" && assetMatch?.[1]) {
     await sendAppFile(res, join("assets", assetMatch[1])); return;
   }
-  if (req.method === "GET" && (url.pathname === "/api/agent/status" || url.pathname === "/api/claude/status")) {
+  if (req.method === "GET" && url.pathname === "/api/agent/status") {
     const status = await getAgentAvailability();
     send(res, 200, { ...status, detail: status.available ? "Pi agent connected" : status.error ?? "Configure Pi authentication" }); return;
   }
@@ -531,11 +581,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
     const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === analysisId);
     if (!analysis) { send(res, 404, { error: "Run not found" }); return; }
-    if (analysis.adapter) { send(res, 409, { error: "This simulation adapter does not support posterior reweighting" }); return; }
-    if (!analysis.artifactUrl) { send(res, 200, { usesTeams: false, baseline: null, posterior: null }); return; }
+    if (analysis.adapter && analysis.adapter !== "decision") { send(res, 409, { error: "This simulation adapter does not support posterior reweighting" }); return; }
+    if (!analysis.artifactUrl) { send(res, 200, { adapter: analysis.adapter ?? null, usesTeams: false, baseline: null, posterior: null }); return; }
+    if (analysis.adapter === "decision") {
+      const artifact = await readDecisionArtifact(analysis.artifactUrl);
+      send(res, 200, { adapter: "decision", ...decisionPosterior(artifact.model, artifact, state) });
+      return;
+    }
     const artifact = await readRiverArtifact(analysis.artifactUrl);
-    const view = runPosterior(artifact, outcomeObservations(state, artifact));
-    send(res, 200, view);
+    send(res, 200, { adapter: null, ...runPosterior(artifact, outcomeObservations(state, artifact)) });
     return;
   }
   // Context/model conversation: collect missing information first; building remains an explicit action.
@@ -613,13 +667,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         ? { note: normalizedNote, display: normalizedNote.slice(0, 220) }
         : undefined;
       const observed = guided.kind === "outcome" && Object.keys(guided.observation).length ? guided.observation : undefined;
-      const validated = observed && analysis?.artifactUrl && fresh.model && !isDecisionModel(fresh.model) && !isStochasticProcess(fresh.model)
-        ? (() => { try { return observationFrom({ ...observed }, fresh.model as ScenarioModel); } catch { return undefined; } })()
-        : undefined;
+      // A reading is only offered for filing if the run's own adapter can actually make sense of it.
+      const validated = !observed || !analysis?.artifactUrl || !fresh.model ? undefined
+        : isDecisionModel(fresh.model)
+          ? (() => { try { return decisionObservationFrom({ ...observed }, fresh.model as DecisionModel); } catch { return undefined; } })()
+          : (() => { try { return observationFrom({ ...observed }, fresh.model as ScenarioModel); } catch { return undefined; } })();
       const result = {
         kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId),
         ...(pendingContext ? { pendingContext } : {}),
-        ...(observed ? { pendingOutcome: { observation: observed, display: JSON.stringify(observed), ...(validated ? { validated } : {}) } } : {}),
+        ...(observed ? { pendingOutcome: { observation: observed, display: describeObservation(observed, fresh.model), ...(validated ? { validated } : {}) } } : {}),
       };
       if (stream) { emit({ kind: "done", result }); stream.end(); } else send(res, 200, result);
     } catch (error) {
@@ -655,8 +711,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let disconnected = false;
     res.on("close", () => { disconnected = true; });
     try {
-      const mode = modelMode(input.mode ?? state.activeBuild?.modelMode);
-      const buildId = startModelBuild(streamId, agentFor(state, input.agent), mode, state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      const buildId = startModelBuild(streamId, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
       let sent = "";
       while (true) {
         if (disconnected) return;
@@ -723,8 +778,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const input = await body(req); const state = detail(id);
       if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
       if (!state.situation.trim()) { send(res, 409, { error: "Describe the situation first" }); return; }
-      const mode = modelMode(input.mode ?? state.activeBuild?.modelMode);
-      const buildId = startModelBuild(id, agentFor(state, input.agent), mode, state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
+      const buildId = startModelBuild(id, agentFor(state, input.agent), state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
       send(res, 200, await waitForModelBuild(id, buildId)); return;
     }
   }
@@ -749,9 +803,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Direct labeling — sub-runner will call CompleteAnalysisLabels on success
     void (async () => {
       try {
-        const html = generateWorldsVisual(artifact.model, analysis.trials, analysis.seed, artifact);
         const nodes = visibleWorldLabelNodes(artifact.model, resultFromArtifact(artifact));
-        await labelAnalysis(relabelId, analysis as TaskAnalysis, artifact.model, agent, controller.signal, html, nodes);
+        await labelAnalysis(relabelId, analysis as TaskAnalysis, artifact.model, agent, controller.signal, nodes);
       } catch (error) {
         if (!controller.signal.aborted) {
           await ask(relabelId, { tag: "CompleteAnalysisLabels", analysisId: analysis.id!, worldLabels: {}, now: new Date().toISOString() });
@@ -770,20 +823,45 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!text) { send(res, 422, { error: "Text is required" }); return; }
     const rawObs = (input.observation ?? {}) as Record<string, unknown>;
     const analysis = state.analyses.at(-1);
-    let observation: Observation | undefined;
-    if (analysis?.artifactUrl && !analysis.adapter) {
+    let observation: Observation | DecisionObservation | undefined;
+    if (analysis?.artifactUrl && analysis.adapter === "decision") {
+      try {
+        const artifact = await readDecisionArtifact(analysis.artifactUrl);
+        observation = decisionObservationFrom(rawObs, artifact.model);
+      } catch (error) { send(res, 422, { error: error instanceof Error ? error.message : String(error) }); return; }
+    } else if (analysis?.artifactUrl && !analysis.adapter) {
       try {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         observation = observationFrom(rawObs, artifact.model);
       } catch (error) { send(res, 422, { error: error instanceof Error ? error.message : String(error) }); return; }
-    } else if (state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model)) {
+    } else if (state.model && !isDecisionModel(state.model)) {
       try { observation = observationFrom(rawObs, state.model as ScenarioModel); } catch { observation = undefined; }
     }
     const now = new Date().toISOString();
     const added = await ask(confirmId, { tag: "AddFact", factId: randomUUID(), text: text.slice(0, 2000), kind: "outcome", source: "user", ...(observation ? { observation } : {}), now });
     if (added.tag === "Rejected") { send(res, 409, added); return; }
     let note = "";
-    if (analysis?.artifactUrl && !analysis.adapter && observation) {
+    if (analysis?.artifactUrl && analysis.adapter === "decision" && observation) {
+      const artifact = await readDecisionArtifact(analysis.artifactUrl);
+      const fresh = detail(confirmId)!;
+      const { baseline, posterior } = decisionPosterior(artifact.model, artifact, fresh);
+      const unit = artifact.model.objective.unit ? ` ${artifact.model.objective.unit}` : "";
+      const round = (value: number) => Math.abs(value) >= 100 ? Math.round(value).toLocaleString("en-US") : value.toFixed(2);
+      const labelOf = (id: string) => artifact.model.options.find((option) => option.id === id)?.label ?? id;
+      const shares = [...artifact.model.options]
+        .sort((a, b) => posterior.options[b.id]!.bestProbability - posterior.options[a.id]!.bestProbability)
+        .map((option) => `- ${option.label}: best in ${Math.round(baseline.options[option.id]!.bestProbability * 100)}% → ${Math.round(posterior.options[option.id]!.bestProbability * 100)}% of matching worlds`).join("\n");
+      const count = fresh.facts.filter((fact) => fact.kind === "outcome").length;
+      // A lead below the material gap is noise, so evidence never announces a flip it cannot support.
+      const moved = posterior.recommendation.close
+        ? `\n\nThe options stay within a rounding error of each other in the matching worlds — this evidence does not separate them.`
+        : posterior.recommendedOptionId !== baseline.recommendedOptionId
+        ? `\n\n**The recommendation moves to ${labelOf(posterior.recommendedOptionId)}** in the worlds that match this evidence.`
+        : `\n\n${labelOf(posterior.recommendedOptionId)} still leads in the worlds that match.`;
+      const fit = posterior.fit < 0.05 ? `\n\n_Unlikely under the current model (${Math.round(posterior.fit * 100)}% fit) — the ranges in the Model tab may be worth revisiting._` : "";
+      const recommended = posterior.recommendedOptionId;
+      note = `\n\n**Reweighted** — ${Math.round(posterior.effectiveSampleSize)} of ${analysis.trials} worlds match${count > 1 ? ` across ${count} outcome facts` : ""}. ${labelOf(recommended)} median ${round(baseline.options[recommended]!.p50)}${unit} → ${round(posterior.options[recommended]!.p50)}${unit}.\n${shares}${moved}${fit}`;
+    } else if (analysis?.artifactUrl && !analysis.adapter && observation) {
       const artifact = await readRiverArtifact(analysis.artifactUrl);
       const fresh = detail(confirmId)!;
       const view = runPosterior(artifact, outcomeObservations(fresh, artifact));
@@ -812,12 +890,6 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as DecisionArtifact;
         if (artifact.schemaVersion !== 3 || !artifact.model || !Array.isArray(artifact.worlds)) throw new Error("Unsupported decision artifact");
         html = generateDecisionReport(artifact.model, restoreDecisionRun(artifact.model, artifact.worlds));
-      } else if (analysis?.artifactUrl && analysis.adapter) {
-        const fileName = analysis.artifactUrl.match(/^\/reports\/tasks\/([a-zA-Z0-9._-]+\.json)$/)?.[1];
-        if (!fileName) throw new Error("Invalid simulation artifact path");
-        const artifact = JSON.parse(await readFile(join(reportDirectory, fileName), "utf8")) as SimulationArtifact;
-        if (artifact.schemaVersion !== 2 || !artifact.spec || !Array.isArray(artifact.worlds)) throw new Error("Unsupported simulation artifact");
-        html = generateSimulationReport(artifact.spec, { worlds: artifact.worlds, ...summarizeWorlds(artifact.worlds) });
       } else if (analysis?.artifactUrl && !analysis.adapter) {
         const artifact = await readRiverArtifact(analysis.artifactUrl);
         html = injectWorldLabels(generateWorldsVisual(artifact.model, analysis.trials, analysis.seed, artifact), analysis.worldLabels ?? {});
@@ -844,7 +916,7 @@ server.listen(port, "127.0.0.1", () => console.log(`Scenario workspace: http://1
 
 for (const summary of summaries()) {
   const state = detail(summary.id);
-  if (state?.activeBuild?.status === "running") startModelBuild(state.id, state.agent, modelMode(state.activeBuild.modelMode), state.activeBuild.buildId);
+  if (state?.activeBuild?.status === "running") startModelBuild(state.id, state.agent, state.activeBuild.buildId);
   if ((state?.status === "running" || state?.status === "labeling") && state.activeAnalysis) startAnalysis(state.id, state.activeAnalysis);
 }
 

@@ -34,16 +34,10 @@ export const taskSummaryProjection = projection<TaskEvent, TaskSummary>({
       case "TaskCreated": return { ...at(event.now), id: String(entityId), title: event.title, status: "ready", revision: 1, factCount: 0 };
       case "TitleSet": return { ...at(event.now), title: event.title };
       case "SituationSet": return { ...at(event.now), revision: event.revision };
-      case "AgentProposalRecorded": return { ...at(event.now), title: event.proposal.title?.trim() || view.title };
       case "FactAdded": return { ...at(event.now), revision: event.revision, factCount: view.factCount + 1, status: view.status === "new" ? "ready" : view.status };
-      case "ContextAdded": return { ...at(event.now), revision: event.revision, factCount: view.factCount + 1, status: view.status === "new" ? "ready" : view.status };
-      case "ObservationRecorded": return { ...at(event.now), factCount: view.factCount + 1 };
       case "FactRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
-      case "ContextRemoved": return { ...at(event.now), revision: event.revision, factCount: Math.max(0, view.factCount - 1) };
-      case "FactEdited": case "BriefEdited": case "ContextEdited": case "FactKindChanged":
-        return { ...at(event.now), revision: event.revision };
-      case "ModelBuilt": case "ModelReplaced": case "AgentProposalAccepted":
-        return { ...at(event.now), revision: event.revision };
+      case "FactEdited": return { ...at(event.now), revision: event.revision };
+      case "ModelBuilt": return { ...at(event.now), revision: event.revision };
       case "ModelBuildStarted": case "ModelBuildProgressed": return { ...at(event.now), status: "building" };
       case "ModelBuildFailed": return { ...at(event.now), status: "failed" };
       case "AnalysisRequested": return { ...at(event.now), status: "running" };

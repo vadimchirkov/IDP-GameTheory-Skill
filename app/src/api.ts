@@ -6,7 +6,6 @@ import type { AgentMode, Fact, FactKind, OpenQuestion, TaskMessage, TaskState } 
 import type { TaskSummary } from "../../src/task-projections";
 
 export type { AgentMode, AgentSelection, DecisionModel, Fact, FactKind, OpenQuestion, ScenarioModel, SimulationModel, TaskMessage, TaskState, TaskSummary };
-export type ModelMode = "decision" | "strategic";
 
 export interface AgentStatus {
   available: boolean;
@@ -81,12 +80,22 @@ export interface PosteriorView {
   strategyPosterior: Record<string, Record<string, number>>;
 }
 
-/** A run reweighted by its accumulated outcome facts; baseline/posterior are null for legacy runs. */
-export interface RunPosterior {
-  usesTeams: boolean;
-  baseline: PosteriorView | null;
-  posterior: PosteriorView | null;
+/** One side of a reweighted decision run: the option summaries the evidence implies. */
+export interface DecisionPosteriorView {
+  effectiveSampleSize: number;
+  fit: number;
+  options: Record<string, { mean: number; std: number; p05: number; p50: number; p95: number; bestProbability: number; meanRegret: number; targetProbability?: number }>;
+  recommendedOptionId: string;
+  recommendation: { criterion: "targetProbability" | "meanRegret"; margin: number; close: boolean };
 }
+
+/**
+ * A run reweighted by its accumulated outcome facts; baseline/posterior are null for legacy runs.
+ * `adapter` says which shape the two sides carry — decision option summaries or C/D shares.
+ */
+export type RunPosterior =
+  | { adapter: "decision"; baseline: DecisionPosteriorView; posterior: DecisionPosteriorView }
+  | { adapter: null; usesTeams: boolean; baseline: PosteriorView | null; posterior: PosteriorView | null };
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -128,7 +137,7 @@ export const getTasks = () => api<TaskSummary[]>("/api/tasks");
 export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
 export const createTask = (text: string, id: string) => post<TaskState>("/api/tasks", { text, id });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
-export const understandTask = (id: string, agent: AgentSelection | undefined, mode: ModelMode) => post<TaskState>(`/api/tasks/${id}/understand`, { agent, mode });
+export const understandTask = (id: string, agent: AgentSelection | undefined) => post<TaskState>(`/api/tasks/${id}/understand`, { agent });
 export const confirmContext = (id: string, note: string) => post<TaskState>(`/api/tasks/${id}/context/confirm`, { note });
 
 /** What the assistant is doing right now, so a wait is never an unexplained spinner. */
@@ -196,8 +205,8 @@ export const clarifyTask = async (
   signal?: AbortSignal,
 ) => (await postStream(`/api/tasks/${id}/clarify`, value, onEvent, signal)).result as ClarifyResult;
 
-export const understandTaskStream = async (id: string, agent: AgentSelection | undefined, mode: ModelMode, onEvent: (event: AgentEvent) => void) =>
-  (await postStream(`/api/tasks/${id}/understand/stream`, { agent, mode }, onEvent)).task as TaskState;
+export const understandTaskStream = async (id: string, agent: AgentSelection | undefined, onEvent: (event: AgentEvent) => void) =>
+  (await postStream(`/api/tasks/${id}/understand/stream`, { agent }, onEvent)).task as TaskState;
 export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
 export const relabelTask = (id: string, analysisId: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/relabel`, { analysisId, agent });
 export const confirmOutcome = (id: string, text: string, observation: Record<string, unknown>) => post<{ kind: string; message: string; task: TaskState }>(`/api/tasks/${id}/chat/confirm`, { text, observation });

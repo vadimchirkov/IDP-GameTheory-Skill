@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   clarifyTask, confirmContext, confirmOutcome, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, relabelTask, removeProviderKey, runTask, saveProviderKey, sendCommand, understandTaskStream,
-  type AgentEvent, type AgentModelStatus, type AgentSelection, type DecisionModel, type Fact, type FactCommand, type ModelMode, type PinnedContext, type PinnedKind, type RiverSelection, type ScenarioModel, type TaskState, type TaskSummary, type WorldReplay,
+  type AgentEvent, type AgentModelStatus, type AgentSelection, type DecisionModel, type Fact, type FactCommand, type PinnedContext, type PinnedKind, type RiverSelection, type ScenarioModel, type TaskState, type TaskSummary, type WorldReplay,
 } from "./api";
 import { REGIME_SHARE } from "../../src/adapters/decision";
 import { RiverActivity } from "./river-activity";
@@ -236,7 +236,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const [buildActivity, setBuildActivity] = useState<BuildActivityItem[]>([]);
   const [streamError, setStreamError] = useState("");
   const [modelError, setModelError] = useState("");
-  const [modelMode, setModelMode] = useState<ModelMode>("decision");
   const [nextSeed, setNextSeed] = useState<number>();
   const [agentKey, setAgentKey] = useState(savedSelection);
   const [settingsAgentKey, setSettingsAgentKey] = useState("");
@@ -300,7 +299,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setStreaming(false);
     setRebuildDone(false);
     setTrials(current?.analyses.at(-1)?.trials ?? 600);
-    setModelMode(current?.model && !("adapter" in current.model) ? "strategic" : "decision");
     setCenterTab(current?.analyses.length ? "river" : current?.model ? "model" : "context");
     setPinned([]);
     setPickerOpen(false);
@@ -469,7 +467,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       });
     };
     try {
-      cacheTask(await understandTaskStream(id, selectedAgent, modelMode, advanceStage));
+      cacheTask(await understandTaskStream(id, selectedAgent, advanceStage));
       if (buildCancelled.current) return;
       if (selectedAgent) { const value = selectionValue(selectedAgent); saveSelection(value, models); setAgentKey(value); }
       setRebuildDone(true);
@@ -903,7 +901,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             {!streaming && !workflowRunning && current.model && situationStale && <p className="workflow-copy">{modelBuildSupported ? "The situation changed. Rebuild the model before running it." : "The situation changed. This imported model cannot be rebuilt by the assistant; update or re-import it before running."}</p>}
             {workflowRunning && <button type="button" className="workflow-cancel" onClick={cancelAnalysis} disabled={busy}>Cancel</button>}
             {(streaming || buildActive) && <button type="button" className="workflow-cancel" onClick={() => void cancelModelBuild()} disabled={commandMutation.isPending || !current.activeBuild}>Cancel model build</button>}
-            {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && modelBuildSupported && <><fieldset className="model-mode"><legend>Model type</legend><label><input type="radio" name="model-mode" value="decision" checked={modelMode === "decision"} onChange={() => setModelMode("decision")} /><b>Decision comparison</b><span>Compare actions under shared uncertainty</span></label><label><input type="radio" name="model-mode" value="strategic" checked={modelMode === "strategic"} onChange={() => setModelMode("strategic")} /><b>Strategic interaction</b><span>Model repeated C/D reactions between parties</span></label></fieldset><button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button></>}
+            {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && modelBuildSupported && <button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button>}
             {buildActivity.length > 0 && (streaming || buildActive || buildFailed || rebuildDone) && <BuildActivity items={buildActivity} active={streaming || buildActive} detail={[agentStage?.detail, shortTime(elapsed)].filter(Boolean).join(" · ")} />}
             {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <section className="workflow-simulation"><div><span className="eyebrow">Simulation</span><p>Turn the finished model into possible worlds.</p></div><div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div></section>}
             {runError && !streaming && <div className="error" role="alert">{runError}</div>}
@@ -915,16 +913,16 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
       </div> : <>
         {selectedAnalysis ? <div className={`river-host ${analysisActive ? "processing" : ""}`}><iframe key={`${selectedAnalysis.visualUrl}:${current?.status}`} ref={riverFrame} className="river-frame" src={`${selectedAnalysis.visualUrl}?embed=1`} title="River of possibilities" />{analysisActive && <div className="river-processing"><RiverActivity label={current?.status === "labeling" ? "Labeling the new river" : "Building a new river"} detail={current?.status === "labeling" ? "The calculation is complete — Pi is adding clear branch names" : "The previous result remains visible while new worlds are calculated"} /></div>}</div> : <div className="river-empty"><div>{analysisActive ? <RiverActivity label={current?.status === "labeling" ? "Labeling the river" : "Building the river"} detail={current?.status === "labeling" ? "Pi is adding clear branch names" : "Exploring possible decisions and reactions"} /> : current ? <><h1>{current.model ? "The model is ready" : "Build the model first"}</h1><p>{current.model ? "Review it if needed, then press Run to create the river." : "Answer any useful questions, then build a model from the context."}</p><button className="primary" onClick={() => setCenterTab("model")}>{current.model ? "Go to Model" : "Build model"}</button></> : <><h1>Worlds begin with a situation</h1><p>Describe it in your own words to begin.</p><button className="primary" onClick={() => setPrompt({ mode: "create", taskId: crypto.randomUUID() })}>New situation</button></>}</div></div>}
         <div className="river-below">
-          {selectedAnalysis && !selectedAnalysis.adapter && (worldReplay || riverSelection || outcomeFacts.length > 0 || replayError) && <div className="river-detail">
-            {riverSelection && selectedAnalysis.artifactUrl ? <div className="river-tools"><div style={{display:"flex",gap:6,alignItems:"center"}}><button type="button" className="primary" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending}>{replayMutation.isPending ? "Replaying…" : `Replay world #${(riverSelection.worldIds[0] ?? 0) + 1}`}</button>{(() => {
+          {selectedAnalysis && (!selectedAnalysis.adapter || selectedAnalysis.adapter === "decision") && (worldReplay || riverSelection || outcomeFacts.length > 0 || replayError) && <div className="river-detail">
+            {riverSelection && selectedAnalysis.artifactUrl && !selectedAnalysis.adapter ? <div className="river-tools"><div style={{display:"flex",gap:6,alignItems:"center"}}><button type="button" className="primary" onClick={() => void replaySelectedWorld()} disabled={replayMutation.isPending}>{replayMutation.isPending ? "Replaying…" : `Replay world #${(riverSelection.worldIds[0] ?? 0) + 1}`}</button>{(() => {
               const bid = `branch-${riverSelection.kind}:${riverSelection.label}`;
               const already = pinned.some((p) => p.id === bid);
               return <button type="button" disabled={already} onClick={() => addPin({id:bid,kind:"branch",label:riverSelection.label,detail:`${riverSelection.worldIds.length} worlds · ${riverSelection.kind}`,meta:{worldIds:riverSelection.worldIds, kind: riverSelection.kind}})} title={already ? "Already in chat context" : "Pin this branch to chat"}>{already ? "✓ Pinned" : "Pin to chat"}</button>;
-            })()}</div><span className="river-tools-hint">{riverSelection.label}</span></div> : selectedAnalysis.artifactUrl ? <div className="river-tools river-tools-empty"><span>Click a branch in the river to inspect a world</span></div> : null}
+            })()}</div><span className="river-tools-hint">{riverSelection.label}</span></div> : selectedAnalysis.artifactUrl && !selectedAnalysis.adapter ? <div className="river-tools river-tools-empty"><span>Click a branch in the river to inspect a world</span></div> : null}
             {replayError && <div className="error" role="alert">{replayError}</div>}
             {worldReplay && <WorldReplayCard value={worldReplay} />}
-            {taskId && selectedAnalysis?.id && selectedAnalysis.artifactUrl && outcomeFacts.length > 0 && <EvidenceCard taskId={taskId} analysisId={selectedAnalysis.id} trials={selectedAnalysis.trials} outcomeCount={outcomeFacts.length} facts={outcomeFacts} busy={busy} onRemove={(factId) => void runCommand({ tag: "RemoveFact", factId })} />}
-            {!worldReplay && !outcomeFacts.length && !replayError && riverSelection && <button type="button" className="link-button river-relabel" onClick={() => void relabelAnalysis()} disabled={relabelPending || analysisActive} title={agentAvailable ? "Regenerate branch labels" : agentStatusText}>{relabelPending ? "Relabeling…" : "Relabel branches"}</button>}
+            {taskId && selectedAnalysis?.id && selectedAnalysis.artifactUrl && outcomeFacts.length > 0 && <EvidenceCard taskId={taskId} analysisId={selectedAnalysis.id} trials={selectedAnalysis.trials} outcomeCount={outcomeFacts.length} facts={outcomeFacts} busy={busy} model={current?.model} onRemove={(factId) => void runCommand({ tag: "RemoveFact", factId })} />}
+            {!worldReplay && !outcomeFacts.length && !replayError && riverSelection && !selectedAnalysis.adapter && <button type="button" className="link-button river-relabel" onClick={() => void relabelAnalysis()} disabled={relabelPending || analysisActive} title={agentAvailable ? "Regenerate branch labels" : agentStatusText}>{relabelPending ? "Relabeling…" : "Relabel branches"}</button>}
           </div>}
           {current && <RunHistory analyses={analyses} currentRevision={current.revision} selectedAnalysis={selectedAnalysis} collapsed={decisionCurrent} onSelect={onSelectRun} onDelete={(analysis) => void removeAnalysis(analysis)} onRelabel={() => void relabelAnalysis()} relabelPending={relabelPending} relabelDisabled={!selectedAnalysis?.artifactUrl || analysisActive || !agentAvailable} relabelTitle={agentAvailable ? "Regenerate branch labels" : agentStatusText} />}
         </div>
@@ -938,7 +936,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     <aside className={`agent-drawer ${agentPanel ? "open" : ""}`} aria-label="Pi assistant" aria-hidden={!agentPanel}>
       <header><div><b>Assistant</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : agentAvailable ? "No model selected" : "Not configured"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
       {!agentAvailable && <div className="agent-drawer-banner" role="status">Agent not configured — <button className="link-button" onClick={openSettings}>open Settings</button> to add an API key.</div>}
-      {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.display || pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.observation.winner ? `winner: ${String(pendingOutcome.observation.winner)}` : ""}{pendingOutcome.observation.cooperation !== undefined ? ` · coop ${(Number(pendingOutcome.observation.cooperation)*100).toFixed(0)}%` : ""}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
+      {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.display}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
       {pendingQueue.length > 0 && <div className="pending-outcome pending-context compact" role="status"><div><b>{pendingQueue.length} context suggestion{pendingQueue.length>1?"s":""} ready</b><small>Chat found new facts for Model Context. Review in Context tab to confirm, edit or dismiss.</small></div><div className="pending-actions"><button onClick={() => setCenterTab("context")}>Review in Context</button><button className="link-button" onClick={() => setPendingQueue([])}>Dismiss all</button></div></div>}
        <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty">{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.slice(0, 4).map((suggestion) => {
             const qid = openQuestionIds.get(suggestion);
@@ -985,27 +983,70 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   </div>;
 }
 
-/** One block: what happened (facts) + how it reweights the current run. */
-function EvidenceCard({ taskId, analysisId, trials, outcomeCount, facts, busy, onRemove }: { taskId: string; analysisId: string; trials: number; outcomeCount: number; facts: readonly Fact[]; busy: boolean; onRemove: (factId: string) => void }) {
+/** Shared frame: the facts, then whichever reweighting the run's own adapter produced. */
+function EvidenceShell({ heading, facts, busy, onRemove, children }: { heading: ReactNode; facts: readonly Fact[]; busy: boolean; onRemove: (factId: string) => void; children?: ReactNode }) {
+  return <section className="observed" aria-label={children ? "The run given what happened" : "What already happened"}>
+    <div className="observed-head"><div>{heading}</div></div>
+    <ul className={children ? "fact-list compact" : "fact-list"}>{facts.map((fact) => <li key={fact.id} className="fact outcome"><span className="fact-text">{fact.text}</span><button type="button" className="fact-remove" disabled={busy} aria-label={`Remove: ${fact.text}`} onClick={() => onRemove(fact.id)}>×</button></li>)}</ul>
+    {children}
+  </section>;
+}
+
+const observedFit = (fit: number, what: string) => fit < 0.05
+  ? <div className="observed-note">Unlikely under the current model ({Math.round(fit * 100)}% fit) — check the model {what}.</div>
+  : null;
+
+/**
+ * One block: what happened (facts) + how it reweights the current run. Both adapters reweight, but
+ * they answer different questions — who came out ahead, or which option the evidence now favours.
+ */
+function EvidenceCard({ taskId, analysisId, trials, outcomeCount, facts, busy, model, onRemove }: { taskId: string; analysisId: string; trials: number; outcomeCount: number; facts: readonly Fact[]; busy: boolean; model?: TaskState["model"]; onRemove: (factId: string) => void }) {
   const posterior = useQuery({ queryKey: ["posterior", taskId, analysisId, outcomeCount], queryFn: () => getPosterior(taskId, analysisId) });
-  const base = posterior.data?.baseline, post = posterior.data?.posterior, usesTeams = posterior.data?.usesTeams;
+  const view = posterior.data;
+  const pending = <EvidenceShell heading={<><small>What already happened</small><b>{outcomeCount} {word(outcomeCount, "fact", "facts", "facts")}</b></>} facts={facts} busy={busy} onRemove={onRemove} />;
+  const applied = <><small>Given what already happened</small><b>{outcomeCount} {word(outcomeCount, "fact", "facts", "facts")} applied to this run</b></>;
+
+  if (view?.adapter === "decision") {
+    const { baseline: base, posterior: post } = view;
+    const decision = model && "adapter" in model && model.adapter === "decision" ? model as DecisionModel : undefined;
+    const label = (id: string) => decision?.options.find((option) => option.id === id)?.label ?? id;
+    const unit = decision?.objective.unit ? ` ${decision.objective.unit}` : "";
+    const value = (n: number) => Math.abs(n) >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(2);
+    const ids = Object.keys(post.options).sort((a, b) => post.options[b]!.bestProbability - post.options[a]!.bestProbability);
+    return <EvidenceShell heading={applied} facts={facts} busy={busy} onRemove={onRemove}>
+      <div className="observed-result">
+        <div className="observed-stats">
+          <div><small>Worlds that match</small><b>{Math.round(post.effectiveSampleSize)} / {trials}</b></div>
+          <div><small>{label(post.recommendedOptionId)} median</small><b>{value(base.options[post.recommendedOptionId]!.p50)}{unit} → {value(post.options[post.recommendedOptionId]!.p50)}{unit}</b></div>
+        </div>
+        {post.recommendation.close
+          ? <div className="observed-note">The options stay within a rounding error of each other in the matching worlds — this evidence does not separate them.</div>
+          : post.recommendedOptionId !== base.recommendedOptionId
+          ? <div className="observed-note">Given this evidence the recommendation moves to <b>{label(post.recommendedOptionId)}</b>.</div>
+          : null}
+        {observedFit(post.fit, "ranges")}
+        <div className="observed-bars">{ids.map((id) => <div className="observed-row" key={id}>
+          <span className="observed-name">{label(id)}</span>
+          <span className="observed-bar"><i style={{ width: `${post.options[id]!.bestProbability * 100}%` }} /></span>
+          <span className="observed-num">{Math.round(base.options[id]!.bestProbability * 100)}→{Math.round(post.options[id]!.bestProbability * 100)}%</span>
+        </div>)}</div>
+      </div>
+    </EvidenceShell>;
+  }
+
+  const base = view?.adapter === null ? view.baseline : undefined;
+  const post = view?.adapter === null ? view.posterior : undefined;
+  const usesTeams = view?.adapter === null ? view.usesTeams : false;
   const baseWin = base && (usesTeams ? base.winPctTeam : base.winPct);
   const postWin = post && (usesTeams ? post.winPctTeam : post.winPct);
-  if (!base || !post || !baseWin || !postWin) {
-    return <section className="observed" aria-label="What already happened">
-      <div className="observed-head"><div><small>What already happened</small><b>{outcomeCount} {word(outcomeCount, "fact", "facts", "facts")}</b></div></div>
-      <ul className="fact-list">{facts.map((fact) => <li key={fact.id} className="fact outcome"><span className="fact-text">{fact.text}</span><button type="button" className="fact-remove" disabled={busy} aria-label={`Remove: ${fact.text}`} onClick={() => onRemove(fact.id)}>×</button></li>)}</ul>
-    </section>;
-  }
-  return <section className="observed" aria-label="The run given what happened">
-    <div className="observed-head"><div><small>Given what already happened</small><b>{outcomeCount} {word(outcomeCount, "fact", "facts", "facts")} applied to this run</b></div></div>
-    <ul className="fact-list compact">{facts.map((fact) => <li key={fact.id} className="fact outcome"><span className="fact-text">{fact.text}</span><button type="button" className="fact-remove" disabled={busy} aria-label={`Remove: ${fact.text}`} onClick={() => onRemove(fact.id)}>×</button></li>)}</ul>
+  if (!base || !post || !baseWin || !postWin) return pending;
+  return <EvidenceShell heading={applied} facts={facts} busy={busy} onRemove={onRemove}>
     <div className="observed-result">
       <div className="observed-stats"><div><small>Worlds that match</small><b>{Math.round(post.effectiveSampleSize)} / {trials}</b></div><div><small>Cooperation</small><b>{Math.round(base.cooperation.mean * 100)}% → {Math.round(post.cooperation.mean * 100)}%</b></div></div>
-      {post.fit < 0.05 && <div className="observed-note">Unlikely under the current model ({Math.round(post.fit * 100)}% fit) — check the model assumptions.</div>}
+      {observedFit(post.fit, "assumptions")}
       <div className="observed-bars">{Object.keys(postWin).sort((a, b) => (postWin[b] ?? 0) - (postWin[a] ?? 0)).map((name) => <div className="observed-row" key={name}><span className="observed-name">{name}</span><span className="observed-bar"><i style={{ width: `${postWin[name] ?? 0}%` }} /></span><span className="observed-num">{Math.round(baseWin[name] ?? 0)}→{Math.round(postWin[name] ?? 0)}%</span></div>)}</div>
     </div>
-  </section>;
+  </EvidenceShell>;
 }
 
 function WorldReplayCard({ value }: { value: WorldReplay }) {

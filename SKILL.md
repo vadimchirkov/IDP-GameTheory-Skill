@@ -16,7 +16,11 @@ Flumina turns a prose situation into an inspectable model and runs it through
 reproducible paired worlds. Your job is to frame the right comparison, keep uncertain
 inputs honest, run the engine, and explain what changes the choice.
 
-## Choose the mode first
+## The mode is chosen for you
+
+Flumina classifies the situation itself; there is no model-type control in the product. The criterion
+below is the one it applies, and it is worth knowing so you can tell when the classification is wrong
+and reword the situation rather than looking for a switch.
 
 Use **Decision comparison** when someone controls a choice among 2–5 actions. This
 is the default, including cases with many stakeholders.

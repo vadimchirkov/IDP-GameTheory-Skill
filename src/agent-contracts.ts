@@ -155,6 +155,10 @@ export const contextReplyOutputSchema = Type.Object({
       name: Type.String({ minLength: 1, maxLength: 120 }),
       rate: Type.Number({ minimum: 0, maximum: 1 }),
     }, closed))),
+    // Decision runs: the id of the factor or option the number belongs to, never both.
+    factorId: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+    optionId: nullable(Type.String({ minLength: 1, maxLength: 80 })),
+    value: nullable(Type.Number()),
   }, closed)),
   title: Type.String({ minLength: 1, maxLength: 72 }),
   researchQueries: Type.Array(Type.Object({
@@ -168,6 +172,16 @@ export const contextReplyOutputSchema = Type.Object({
   }, closed)),
 }, closed);
 export type ContextReplyOutput = Static<typeof contextReplyOutputSchema>;
+
+/**
+ * Which engine the situation needs. The user no longer picks this: a decision maker choosing among
+ * actions is a Decision comparison, while parties repeatedly reacting to one another is C/D.
+ */
+export const modelModeOutputSchema = Type.Object({
+  mode: stringEnum(["decision", "strategic"] as const),
+  reason: Type.String({ minLength: 1, maxLength: 240 }),
+}, closed);
+export type ModelModeOutput = Static<typeof modelModeOutputSchema>;
 
 export const worldLabelsOutputSchema = Type.Object({
   labels: Type.Array(Type.Object({

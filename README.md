@@ -56,6 +56,10 @@ The workflow has four stages:
    option that wins there and the resulting outcome. Use the stress lens to see
    when another option becomes preferable.
 
+Once something actually happens, tell the assistant. An observed factor value or option result
+reweights the finished run to the worlds that match, without re-simulating, and reports how many
+worlds survive the evidence.
+
 Each run reports:
 
 - the recommended option and whether the lead is close;
@@ -82,9 +86,13 @@ calculates the outcomes.
 
 ## Two model modes
 
+You do not choose between them. The assistant reads the situation and picks the engine: a decision
+maker weighing actions gets a Decision comparison, parties repeatedly reacting to one another get a
+Strategic interaction. Rebuilding an existing model keeps its type.
+
 ### Decision comparison
 
-Use this for a decision maker choosing among mutually exclusive actions: launch or
+This is for a decision maker choosing among mutually exclusive actions: launch or
 wait, build or buy, choose a supplier, enter a market, allocate a scarce resource,
 or select a policy. It is the default product mode.
 
@@ -225,8 +233,6 @@ web application / CLI
           |
           +-- Decision adapter
           +-- repeated C/D adapters
-          +-- stochastic-process adapter
-          +-- Polymarket adapter
                        |
                        v
           paired-world Monte Carlo
@@ -238,20 +244,11 @@ web application / CLI
 
 `src/monte-carlo.ts` owns deterministic world generation, summaries, and
 conditioning. `src/topology.ts` owns optional nodes and uncertain interactions.
-`src/simulation.ts` composes them for adapters that need both. Domain rules and
-reporting remain in `src/adapters/` and their report modules.
+Domain rules and reporting remain in `src/adapters/` and their report modules.
 
-The web product currently builds Decision and Strategic interaction models.
-Stochastic-process and Polymarket models are CLI adapters. The Polymarket bridge can
-record paper forecasts in an append-only ledger and later score them against market
-resolution; it never places orders.
-
-For a quick retrospective signal, `pnpm forecast:fast --limit 20` runs a blind
-backcast on recently closed YES/NO markets. It gives Pi only the question, a fixed
-historical cutoff, and the real Polymarket price at that cutoff, then reports paired
-Brier/log-loss scores. Use `--dry-run` to inspect the sealed cases without calling
-Pi. Backcasts remain vulnerable to model memory; only the prospective ledger proves
-out-of-sample forecasting ability.
+Both adapters are built by the web product; either can also be run from JSON on the
+CLI. Reports are rebuilt from the stored run artifact on request, so a run persists
+its worlds rather than a rendered page.
 
 See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for the engine and adapter
 boundaries.
@@ -278,7 +275,7 @@ pnpm cross:validate
 ```
 
 The verification pack checks deterministic replay, model validation, decision
-comparison, C/D mechanics, conditioning, and forecast scoring. Benchmark datasets
+comparison, C/D mechanics, and conditioning. Benchmark datasets
 and reproduction notes are in [data/README.md](data/README.md).
 
 The repeated-game benchmarks recover known behavioral signals and expose model-fit
@@ -311,7 +308,6 @@ to port `4317`.
 | `src/app-server.ts` | local API, SSE, workers, and reports |
 | `src/decision-report.ts` | Decision River report |
 | `src/worlds-report.ts` | Strategic interaction river report |
-| `src/forecast.ts` | adapter-neutral forecast ledger and scoring contract |
 
 ## Current limits
 
@@ -333,8 +329,9 @@ to port `4317`.
 - A joint dependency fires only when both of its factors sit in the outer third of
   their ranges, and its impact is capped relative to the option's own additive
   span. It is an assumption the run executes, never a finding the run validates.
-- Decision outcomes cannot yet reweight an existing run. C/D observations can.
-- The web agent builds Decision and compact C/D models; other adapters start from
-  JSON.
+- Reweighting an existing run needs evidence the model can read: one factor's observed value or
+  one option's observed result for a Decision, cooperation/winner/regime for a C/D interaction. A
+  vague impression is filed as context instead, and a reweighted lead below the material gap is
+  reported as a close call rather than as a reversal.
 - Results remain conditional on supplied ranges, effects, and structural
   assumptions. Domain evidence still decides whether the model deserves trust.

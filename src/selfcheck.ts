@@ -3,16 +3,12 @@ import { EntityId, replayAndVerify } from "@lambda-house/teob-ts/core";
 import { Value } from "typebox/value";
 import { createSingleRuntime } from "@lambda-house/teob-ts/inmem";
 import { analyzeScenario, replayScenarioWorld } from "./adapters/repeated-game.js";
-import { sequentialActionAdapter } from "./action-simulation.js";
-import { runDecision, type DecisionModel } from "./adapters/decision.js";
+import { fitDecisionPosterior, runDecision, type DecisionModel } from "./adapters/decision.js";
 import { generateDecisionReport } from "./decision-report.js";
 import type { ScenarioModel } from "./domain.js";
 import { conditionWorlds, runMonteCarlo } from "./monte-carlo.js";
-import { runPolymarket, type PolymarketSpec } from "./adapters/polymarket.js";
 import { Rng } from "./rng.js";
-import { runStochasticProcess, type StochasticProcessSpec } from "./adapters/stochastic-process.js";
-import { runSimulation } from "./simulation.js";
-import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
+import { applyTaskEvent, isRunStale, taskAggregate, taskCategory, taskEventCodec, taskStateCodec, type FactKind, type TaskAnalysis, type TaskEvent, type TaskState } from "./task.js";
 import { completeTopology, interactionsFor, sampleTopology } from "./topology.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes } from "./worlds-report.js";
 import { compactStrategyIds, contextReplyOutputSchema, decisionDraftSchema, normalizeStrategicDraft, strategicDraftSchema } from "./agent-contracts.js";
@@ -92,41 +88,46 @@ const tiedModel: DecisionModel = {
 };
 const tiedRuns = [11, 37, 73].map((seed) => runDecision(tiedModel, 2000, seed));
 assert.ok(tiedRuns.every((run) => run.recommendation.close && !run.stress.reversed && !run.failureBox), "a lead far below the objective spread reads as a close call, not as a reversal or a failure region");
+// Outcome facts reweight a finished decision run the same way they reweight a C/D river: no
+// re-simulation, evidence accumulates, and a strong enough observation may move the recommendation.
+const reversalModel: DecisionModel = {
+  schemaVersion: 1, adapter: "decision", situation: "capacity choice", question: "Which plan?",
+  objective: { label: "Margin", direction: "maximize", target: 20 },
+  factors: [{ id: "demand", label: "Demand", range: [0, 100] }],
+  options: [
+    { id: "lean", label: "Lean plan", baseline: [20, 20], effects: [{ factorId: "demand", impact: [-10, -10] }] },
+    { id: "scale", label: "Scale plan", baseline: [15, 15], effects: [{ factorId: "demand", impact: [15, 15] }] },
+  ], assumptions: [],
+};
+const reweighted = runDecision(reversalModel, 800, 42);
+const noEvidence = fitDecisionPosterior(reversalModel, reweighted.worlds, []);
+assert.ok(Math.abs(noEvidence.effectiveSampleSize - reweighted.worlds.length) < 1e-6, "no evidence leaves every decision world at full weight");
+assert.equal(noEvidence.recommendedOptionId, reweighted.recommendedOptionId, "no evidence leaves the recommendation alone");
+assert.ok(reweighted.options.lean!.bestProbability > 0 && Math.abs(noEvidence.options.lean!.bestProbability - reweighted.options.lean!.bestProbability) < 1e-9, "no evidence leaves the option summaries alone");
+const observedHigh = fitDecisionPosterior(reversalModel, reweighted.worlds, [{ factorId: "demand", value: 95, tolerance: 0.05 }]);
+const observedLow = fitDecisionPosterior(reversalModel, reweighted.worlds, [{ factorId: "demand", value: 5, tolerance: 0.05 }]);
+assert.ok(observedHigh.effectiveSampleSize < reweighted.worlds.length, "a real observation reduces the effective sample");
+assert.ok(observedHigh.options.scale!.mean > observedLow.options.scale!.mean, "conditioning moves a factor-sensitive option in the observed direction");
+assert.equal(observedHigh.recommendedOptionId, "scale", "observed high demand reverses the recommendation without re-simulating");
+assert.ok(fitDecisionPosterior(reversalModel, reweighted.worlds, [{ factorId: "demand", value: 95, tolerance: 0.05 }, { factorId: "demand", value: 95, tolerance: 0.05 }]).effectiveSampleSize <= observedHigh.effectiveSampleSize + 1e-9, "accumulating the same fact never grows the effective sample");
+const observedOutcome = fitDecisionPosterior(reversalModel, reweighted.worlds, [{ optionId: "scale", value: 29, tolerance: 0.05 }]);
+assert.ok(Math.abs(observedOutcome.options.scale!.mean - 29) < Math.abs(reweighted.options.scale!.mean - 29), "an observed outcome pulls that option's posterior toward what happened");
+assert.equal(observedHigh.recommendation.close, false, "a real reversal is reported as a material lead");
+// Evidence that pushes every option below its target leaves target probabilities at statistical dust.
+// Without the same material-gap guard the unweighted run uses, that dust reads as a confident flip.
+const dustModel: DecisionModel = { ...reversalModel, objective: { ...reversalModel.objective, target: 10_000 } };
+const dustRun = runDecision(dustModel, 800, 42);
+const dust = fitDecisionPosterior(dustModel, dustRun.worlds, [{ factorId: "demand", value: 95, tolerance: 0.05 }]);
+assert.ok(Object.values(dust.options).every((option) => option.targetProbability! < 0.01), "the unreachable target leaves every option near zero");
+assert.equal(dust.recommendation.close, true, "a lead built from rounding error is reported as a close call, never as a reversal");
+assert.throws(() => fitDecisionPosterior(reversalModel, reweighted.worlds, [{ factorId: "missing", value: 1 }]), /unknown factor/, "evidence is validated against the run's own model");
+assert.throws(() => fitDecisionPosterior(reversalModel, reweighted.worlds, [{ factorId: "demand", optionId: "lean", value: 1 }]), /exactly one/, "one observation names one quantity");
+
 const decisionReport = generateDecisionReport(reservoirDecision, decisionRun);
 assert.ok(decisionReport.includes("Decision River") && decisionReport.includes("Highest target chance"), "decision report names the recommendation criterion and explains the river");
 assert.ok(decisionReport.includes('aria-label="Decision River zoom controls"') && decisionReport.includes("prefers-reduced-motion"), "decision report keeps controls accessible");
 assert.ok(decisionReport.includes("Ribbon width = worlds, not value"), "the river states its visual encoding instead of implying utility");
 assert.ok(decisionReport.includes('data-regime="all"') && decisionReport.includes('data-metric="best"'), "the report can recalculate option summaries for a stress cohort");
-
-// Action adapters reuse the same Monte Carlo/topology runner: actions affect state,
-// while topology changes the transition rule rather than the engine contract.
-type Reservoir = { water: number; shortage: number };
-const reservoirSpec = {
-  schemaVersion: 1 as const, adapter: "reservoir-actions", situation: "shared reservoir",
-  topology: { nodes: ["farm-a", "farm-b", "farm-c"], interactions: [{ id: "ab", participants: ["farm-a", "farm-b"], probability: [0, 1] as const }, { id: "bc", participants: ["farm-b", "farm-c"], probability: [0, 1] as const }] },
-  model: { steps: 20, initial: [60, 90] as const, rain: [0, 8] as const, demand: [4, 10] as const },
-};
-const reservoir = sequentialActionAdapter<typeof reservoirSpec.model, Reservoir, number, { final: Reservoir; actionSteps: number }>({
-  id: "reservoir-actions", validate: () => {}, steps: (model) => model.steps,
-  actors: () => ["farm-a", "farm-b", "farm-c"],
-  initialState: (model, rng) => ({ water: rng.between(model.initial), shortage: 0 }),
-  chooseAction: (model, _actor, _state, _topology, rng) => model.demand[0] + rng.unit() * (model.demand[1] - model.demand[0]),
-  transition: (model, state, actions, topology, rng) => {
-    const use = Object.values(actions).reduce((sum, value) => sum + Number(value), 0);
-    const coordination = topology.interactions.length ? 0.9 : 1.1;
-    const water = Math.max(0, Math.min(100, state.water + rng.between(model.rain) - use * coordination));
-    return { water, shortage: state.shortage + (water < 15 ? 1 : 0) };
-  },
-  observe: (_model, initial, final, history, topology) => ({
-    inputs: { initial_water: initial.water, links: topology.interactions.length },
-    metrics: { final_water: final.water, shortage_steps: final.shortage },
-    path: [topology.interactions.length ? "connected" : "fragmented", final.water < 15 ? "shortage" : "survives"],
-    payload: { final, actionSteps: history.length },
-  }),
-});
-const reservoirRun = runSimulation(reservoirSpec, reservoir, 200, 17);
-assert.ok(reservoirRun.metrics.final_water && reservoirRun.paths["connected → shortage"] !== undefined, "action adapter produces topology-dependent worlds");
-assert.deepEqual(runSimulation(reservoirSpec, reservoir, 20, 17), runSimulation(reservoirSpec, reservoir, 20, 17), "action adapter remains deterministic for a fixed seed");
 
 const scenario: ScenarioModel = {
   situation: "exploit check",
@@ -141,7 +142,12 @@ const contextTurn = { kind: "answer" as const, message: "Проверю откр
 assert.equal(Value.Check(contextReplyOutputSchema, contextTurn), true, "context turns can request bounded public research");
 // One assistant answers, files context and reports outcomes, so all three must validate on one contract.
 assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "context", contextNote: "The supplier confirmed a 12-week lead time." }), true, "the same reply can distil a standalone context fact");
-assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: { cooperation: 0.2, winner: "Shark", regime: "conflict", playerCooperation: [{ name: "Mark", rate: 0.1 }] } }), true, "the same reply can report an observed outcome for reweighting");
+const cdReading = { cooperation: 0.2, winner: "Shark", regime: "conflict", playerCooperation: [{ name: "Mark", rate: 0.1 }], factorId: null, optionId: null, value: null };
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: cdReading }), true, "the same reply can report an observed C/D outcome for reweighting");
+// One contract carries both adapters' evidence: the unused half of the reading is null, never absent.
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: { cooperation: null, winner: null, regime: null, playerCooperation: null, factorId: "demand", optionId: null, value: 12000 } }), true, "the same reply can report an observed decision factor for reweighting");
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: { cooperation: null, winner: null, regime: null, playerCooperation: null, factorId: null, optionId: "broad", value: 240000 } }), true, "the same reply can report what an option actually produced");
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: { ...cdReading, unknownField: 1 } }), false, "the observation contract stays closed");
 assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "river" }), false, "the merged chat contract rejects unknown reply kinds");
 const providerDecisionSchema = toolCompatibleSchema(decisionDraftSchema) as unknown as Record<string, unknown>;
 assert.equal(JSON.stringify(providerDecisionSchema).includes("maxItems"), false, "provider tool schemas omit unsupported maxItems hints");
@@ -192,64 +198,22 @@ const canonicalTopology = sampleTopology({ nodes: ["A", "B", "C"], interactions:
 assert.deepEqual(reorderedTopology, canonicalTopology, "uncertain interactions have ID-derived streams and canonical order");
 const hyperedge = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "coalition", participants: ["A", "B", "C"], probability: [1, 1], weight: [2, 2] }] }, new Rng(3));
 assert.deepEqual(hyperedge.interactions[0], { id: "coalition", participants: ["A", "B", "C"], weight: 2 }, "topology executes a genuine three-participant hyperedge");
-const processSpec: StochasticProcessSpec = {
-  schemaVersion: 1,
-  adapter: "stochastic-process",
-  situation: "A shock spreads through two connected components",
-  topology: { nodes: ["source", "target"], interactions: [{ id: "link", participants: ["source", "target"], probability: [0.5, 0.5], weight: [0.5, 1] }] },
-  model: {
-    horizon: [4, 8], bounds: [0, 100], interactionRate: [0.1, 0.3],
-    nodes: [
-      { id: "source", initial: [70, 90], drift: [-2, 0], volatility: [0, 2] },
-      { id: "target", initial: [10, 30], drift: [0, 1], volatility: [0, 2] },
-    ],
-    shocks: [{ id: "outage", probability: [0.05, 0.2], delta: [-25, -10] }],
-    metrics: [{ id: "health", kind: "mean" }, { id: "failures", kind: "below", threshold: 20 }],
-  },
-};
-const processRun = runStochasticProcess(processSpec, 80, 123);
-assert.deepEqual(processRun, runStochasticProcess(processSpec, 80, 123), "stochastic processes replay exactly from one seed");
-assert.equal(processRun.worlds.length, 80, "the generic process produces one persisted world per trial");
-assert.ok(processRun.worlds.some((world) => world.topology.interactions.length === 0) && processRun.worlds.some((world) => world.topology.interactions.length === 1), "uncertain topology is sampled inside every world");
-assert.ok(processRun.metrics.health && processRun.sensitivity.health?.length, "generic metrics and sensitivity are summarized without game semantics");
-
-const marketSpec: PolymarketSpec = {
-  schemaVersion: 1, adapter: "polymarket", situation: "Compare one binary market position",
-  topology: { nodes: ["market"], interactions: [] },
-  model: {
-    markets: [{ id: "main", marketPrice: [0.6, 0.6], trueProb: [0.6, 0.6] }],
-    positions: [{ id: "no", side: "NO", size: [100, 100], entry: [0.35, 0.35] }, { id: "skip", side: "ABSTAIN", size: [0, 0] }],
-    fee: [0, 0],
-  },
-};
-const marketRun = runPolymarket(marketSpec, 20, 1);
-assert.equal(marketRun.worlds[0]!.inputs["no.entry"], 0.35, "an explicit NO entry is interpreted as the NO price");
-assert.throws(() => runPolymarket({ ...marketSpec, model: { ...marketSpec.model, markets: [...marketSpec.model.markets, { id: "second", marketPrice: [0.4, 0.4], trueProb: [0.5, 0.5] }] } }, 1, 1), /exactly one market/, "P0 rejects unsupported multi-market input");
-
-// A scenario is one list of facts. `situation` facts define the model and move `revision`;
-// `outcome` facts are evidence about a finished run and deliberately leave `revision` alone.
+// Facts are only ever `outcome`: evidence about a finished run, deliberately leaving `revision` alone.
 const state0: TaskState = { id: "legacy", status: "ready", title: "Legacy", situation: "", facts: [], openQuestions: [], messages: [], revision: 0, analyses: [] };
-const legacyJournal: TaskEvent[] = [
-  { tag: "TaskCreated", taskId: "legacy", title: "Legacy", brief: "A legacy brief", now: "2025-01-01T00:00:00Z" },
-  { tag: "ContextAdded", text: "a legacy clarification", revision: 2, now: "2025-01-01T00:00:01Z" },
-  { tag: "AgentProposalAccepted", model: scenario, revision: 3, now: "2025-01-01T00:00:02Z" },
-  { tag: "ObservationRecorded", analysisId: "run-1", observation: { fact: "cooperation collapsed", observation: { cooperation: 0.1 }, now: "2025-01-01T00:00:03Z" }, now: "2025-01-01T00:00:03Z" },
-];
-const legacyReplay = legacyJournal.reduce(applyTaskEvent, state0);
-assert.equal(replayAndVerify(taskAggregate, EntityId("legacy"), legacyJournal).violations.length, 0, "legacy journals satisfy the current aggregate invariants");
-assert.equal(legacyReplay.facts.length, 2, "an old context/observation journal replays into facts");
-assert.equal(legacyReplay.situation, "A legacy brief", "the old brief becomes the situation seed");
-assert.equal(legacyReplay.facts.filter((fact) => fact.kind === "outcome").length, 1, "an old observation replays as an outcome fact");
-assert.ok(legacyReplay.model, "an accepted legacy proposal still carries its model");
 
-// A journal whose prose only ever lived inside the model still opens with an editable situation —
-// without this the form is blank and the agent refuses to run ("Describe the situation first").
+// Most existing journals seed their prose from `fact`/`brief` rather than `situation`, and some carry
+// it only inside the model — without both fallbacks the form opens blank and the agent refuses to run.
+const seededJournal: TaskEvent[] = [
+  { tag: "TaskCreated", taskId: "seeded", title: "Seeded", fact: { id: "f-1", text: "A journal seed", kind: "outcome", source: "user", createdAt: "2025-01-01T00:00:00Z" }, now: "2025-01-01T00:00:00Z" },
+];
+assert.equal(seededJournal.reduce(applyTaskEvent, { ...state0, id: "seeded" }).situation, "A journal seed", "a pre-situation journal seeds its situation from the created fact");
 const modelOnlyJournal: TaskEvent[] = [
   { tag: "TaskCreated", taskId: "model-only", title: "Model only", now: "2025-01-01T00:00:00Z" },
   { tag: "ModelBuilt", model: scenario, revision: 1, now: "2025-01-01T00:00:01Z" },
 ];
 const modelOnlyReplay = modelOnlyJournal.reduce(applyTaskEvent, { ...state0, id: "model-only" });
 assert.equal(modelOnlyReplay.situation, scenario.situation, "a model-only journal recovers its situation from the model");
+assert.equal(replayAndVerify(taskAggregate, EntityId("model-only"), modelOnlyJournal).violations.length, 0, "replayed journals satisfy the current aggregate invariants");
 
 const removable = { id: "run-1", visualUrl: "/reports/tasks/run-1.html" } as TaskAnalysis;
 assert.equal(applyTaskEvent({ ...state0, status: "completed", analyses: [removable] }, { tag: "AnalysisRemoved", analysisId: "run-1", now: "2025-01-01T00:00:04Z" }).analyses.length, 0, "a saved run can be removed");
@@ -305,7 +269,7 @@ await sit.runtime.shutdown();
 const staleBuild = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const staleBuildId = EntityId("stale-build");
 await staleBuild.runtime.ask(staleBuildId, { tag: "CreateTask", taskId: "stale-build", text: "Original situation", now: "2026-01-01T00:00:00Z" }, taskCategory);
-await staleBuild.runtime.ask(staleBuildId, { tag: "StartModelBuild", buildId: "build-1", revision: 1, modelMode: "strategic", now: "2026-01-01T00:00:01Z" }, taskCategory);
+await staleBuild.runtime.ask(staleBuildId, { tag: "StartModelBuild", buildId: "build-1", revision: 1, now: "2026-01-01T00:00:01Z" }, taskCategory);
 await staleBuild.runtime.ask(staleBuildId, { tag: "SetSituation", text: "Changed situation", now: "2026-01-01T00:00:02Z" }, taskCategory);
 const staleCompletion = await staleBuild.runtime.ask(staleBuildId, { tag: "CompleteModelBuild", buildId: "build-1", model: scenario, now: "2026-01-01T00:00:03Z" }, taskCategory);
 assert.ok(staleCompletion.ok && staleCompletion.value.reply?.tag === "Rejected", "a model built from an older situation cannot overwrite current context");
@@ -343,8 +307,9 @@ await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-5", text: "The leade
 const withOutcomes = await taskState();
 assert.equal(withOutcomes.revision, beforeOutcome, "outcome facts do not move the fingerprint");
 assert.equal(withOutcomes.facts.filter((fact) => fact.kind === "outcome").length, 2, "outcome facts accumulate");
-// A situation statement is no longer a fact — AddFact only accepts outcomes.
-const situationRejected = await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-sit", text: "Prices are public", kind: "situation", source: "user", now: "2026-01-01T00:00:06Z" }, taskCategory);
+// A situation statement is no longer a fact — AddFact only accepts outcomes. The kind is cast because
+// the type now forbids it; the aggregate still guards the untyped HTTP boundary.
+const situationRejected = await task.runtime.ask(tid, { tag: "AddFact", factId: "fact-sit", text: "Prices are public", kind: "situation" as FactKind, source: "user", now: "2026-01-01T00:00:06Z" }, taskCategory);
 assert.ok(situationRejected.ok && situationRejected.value.reply?.tag === "Rejected", "situation statements are edited in the model, not filed as facts");
 
 const missing = await task.runtime.ask(tid, { tag: "EditFact", factId: "gone", text: "x", now: "2026-01-01T00:00:09Z" }, taskCategory);
@@ -356,8 +321,8 @@ assert.equal((await taskState()).openQuestions.length, 2, "the agent can raise q
 assert.equal((await taskState()).questionsRevision, (await taskState()).revision, "questions are stamped with their context revision");
 await task.runtime.ask(tid, { tag: "DismissQuestion", questionId: "q-2", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).openQuestions.length, 1, "a question can be dismissed");
-await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, modelMode: "strategic", now: "2026-01-01T00:00:11Z" }, taskCategory);
-assert.equal((await taskState()).activeBuild?.modelMode, "strategic", "a strategic build keeps its mode across recovery");
+await task.runtime.ask(tid, { tag: "StartModelBuild", buildId: "build-cancel", revision: (await taskState()).revision, now: "2026-01-01T00:00:11Z" }, taskCategory);
+assert.equal((await taskState()).activeBuild?.buildId, "build-cancel", "a started build is recoverable by its id");
 await task.runtime.ask(tid, { tag: "CancelModelBuild", buildId: "build-cancel", now: "2026-01-01T00:00:11Z" }, taskCategory);
 assert.equal((await taskState()).activeBuild, undefined, "a model build can be cancelled without leaving the task busy");
 

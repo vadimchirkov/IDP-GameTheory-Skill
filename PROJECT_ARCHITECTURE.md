@@ -30,12 +30,6 @@ engine interface or inheriting from framework classes.
   weight;
 - the module contains no graph algorithms or game rules.
 
-`src/simulation.ts` composes the two primitives. A `SimulationSpec` supplies a
-domain model and topology prior; a `SimulationAdapter` simulates one sampled
-world; the runner returns worlds, metric distributions, paths, and sensitivity.
-`src/adapters/stochastic-process.ts` is the first concrete adapter and a template for
-queues, markets, cascades, reliability models, or agent-based systems.
-
 ## Domain adapters
 
 `src/adapters/decision.ts` is the primary product adapter. It evaluates every option
@@ -52,30 +46,27 @@ kernel: disposition tournaments, replicator/Moran population evolution, and spat
 lattice updates. These modes keep their domain types and algorithms inside the adapter;
 the generic Monte Carlo, topology, and simulation modules do not depend on them.
 
-`src/abc.ts` keeps its domain-specific observation vocabulary but delegates generic
-world conditioning and weighted summaries to `src/monte-carlo.ts`.
+Both product adapters reweight a finished run from observed outcomes, and both delegate the
+generic step — `conditionWorlds` and the weighted summaries in `src/monte-carlo.ts`. Only the
+likelihood is domain code: `src/abc.ts` scores a world against cooperation, winner and regime;
+`fitDecisionPosterior` in `src/adapters/decision.ts` scores it against an observed factor value or
+option result. Neither re-simulates.
 
 ## Application boundary
 
 The React application, Pi modelling agent, TEOB `Task` aggregate, SQLite journal,
 worker, and HTML rivers are product infrastructure. They orchestrate and present
-Decision and C/D models; they are not dependencies of the reusable core. Imported
-stochastic-process and Polymarket models are CLI-level adapters for now and are not
-built by the web agent.
+Decision and C/D models; they are not dependencies of the reusable core.
 
-Forecast evaluation is a separate boundary above adapters. `src/forecast.ts` knows
-only categorical outcomes, probabilities, optional baseline probabilities, and an
-optional decision value for each outcome. Adapter-specific bridges translate live
-data into this contract; `src/adapters/polymarket-live.ts` is the first one. The append-only
-ledger and scorer therefore do not need branches for every future adapter.
+A run persists its model, seed and worlds as a JSON artifact. Reports are rendered
+from that artifact when they are requested, so there is no generated page to keep in
+sync with the journal.
 
 ```text
 application / CLI
        |
-       +-- Decision adapter -----------+
-       +-- repeated C/D adapters ------+
-       +-- stochastic-process adapter -+--> Monte Carlo primitives
-       +-- Polymarket adapter ---------+           |
+       +-- Decision adapter -----------+--> Monte Carlo primitives
+       +-- repeated C/D adapters ------+           |
                                                    +-- topology where needed
                                                    |
                                                    v
@@ -84,8 +75,10 @@ application / CLI
 
 ## Boundaries kept out
 
-The old `Run` and `Participant` aggregates, spatial heatmap UI, build-hints path, and
-duplicate predictive helpers stay removed. The dynamics adapter exposes pure,
+The old `Run` and `Participant` aggregates, spatial heatmap UI, build-hints path,
+duplicate predictive helpers, the library barrel, the speculative action-adapter
+layer, and the Polymarket/forecast surface stay removed. Forecast scoring is a
+separate product and no longer lives here. The dynamics adapter exposes pure,
 deterministic functions; persistence and presentation can be added when a product
 workflow actually needs them. New game types should start as a simulation callback
 and add abstractions only after two real implementations need the same behavior.

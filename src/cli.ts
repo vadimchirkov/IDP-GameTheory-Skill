@@ -4,10 +4,7 @@ import { fitPosterior, type Observation } from "./abc.js";
 import { generateDecisionReport } from "./decision-report.js";
 import { runDecision } from "./adapters/decision.js";
 import type { ScenarioModel } from "./domain.js";
-import { generateSimulationReport } from "./generic-report.js";
-import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
-import { runPolymarket } from "./adapters/polymarket.js";
-import { runStochasticProcess } from "./adapters/stochastic-process.js";
+import { isDecisionModel, type SimulationModel } from "./model.js";
 
 const args = process.argv.slice(2);
 const path = args[0];
@@ -58,12 +55,6 @@ if (!path) {
     const run = runDecision(parsed, trials, seed);
     if (visualMode) await saveVisual(generateDecisionReport(parsed, run));
     else console.log(JSON.stringify({ recommendedOptionId: run.recommendedOptionId, recommendation: run.recommendation, options: run.options, stress: run.stress, ...(run.jointEffects ? { jointEffects: run.jointEffects } : {}) }, null, 2));
-    process.exit(0);
-  }
-  if (isPolymarket(parsed) || isStochasticProcess(parsed)) {
-    const run = isPolymarket(parsed) ? runPolymarket(parsed, trials, seed) : runStochasticProcess(parsed, trials, seed);
-    if (visualMode) await saveVisual(generateSimulationReport(parsed, run));
-    else console.log(JSON.stringify({ metrics: run.metrics, sensitivity: run.sensitivity, paths: run.paths }, null, 2));
     process.exit(0);
   }
   const model = parsed as ScenarioModel;

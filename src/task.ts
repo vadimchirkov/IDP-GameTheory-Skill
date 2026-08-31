@@ -6,7 +6,6 @@ import { assertSimulationModel, type SimulationModel } from "./model.js";
 import type { DecisionOptionSummary, DecisionRun } from "./adapters/decision.js";
 import type { AgentRunMeta, AgentSelection } from "./agent-contracts.js";
 import type { ResearchSource } from "./web-research.js";
-import type { MetricSummary } from "./simulation.js";
 
 /**
  * The model (built from the `situation` prose seed) is the source of truth for the scenario.
@@ -15,15 +14,25 @@ import type { MetricSummary } from "./simulation.js";
  * finished run and never touch the model, so they leave `revision` alone. There is no separate
  * brief, context list, assumption set, or per-run observation store.
  */
-export type FactKind = "situation" | "outcome";
+export type FactKind = "outcome";
 export type FactSource = "user" | "agent";
 
-/** Structured reading of an `outcome` fact, used to reweight a run (see `fitPosterior`). */
+/**
+ * Structured reading of an `outcome` fact, used to reweight a finished run. The C/D fields feed
+ * `fitPosterior`; the decision fields feed `fitDecisionPosterior`. A fact carries one shape or the
+ * other — whichever the run's own adapter understands.
+ */
 export interface FactObservation {
+  /** Repeated C/D interaction. */
   cooperation?: number;
   winner?: string;
   regime?: string;
   playerCooperation?: Record<string, number>;
+  /** Decision comparison: one factor's observed value, or one option's observed objective value. */
+  factorId?: string;
+  optionId?: string;
+  value?: number;
+  tolerance?: number;
 }
 
 export interface Fact {
@@ -65,7 +74,6 @@ export type TaskStatus = "new" | "ready" | "building" | "running" | "labeling" |
 export interface ActiveModelBuild {
   buildId: string;
   revision: number;
-  modelMode?: "decision" | "strategic";
   stage: string;
   message: string;
   attempt: number;
@@ -84,8 +92,6 @@ export interface TaskAnalysis {
   /** Engine that computed this analysis; absent on analyses recorded before provenance stamping. */
   kernelVersion?: string;
   adapter?: string;
-  metrics?: Record<string, MetricSummary>;
-  primaryMetric?: string;
   paths?: Record<string, number>;
   decision?: {
     recommendedOptionId: string;
@@ -158,7 +164,7 @@ export type TaskCommand =
   | { tag: "SetTitle"; title: string; now: string }
   | { tag: "SetSituation"; text: string; now: string }
   | { tag: "SetModel"; model: SimulationModel; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
-  | { tag: "StartModelBuild"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
+  | { tag: "StartModelBuild"; buildId: string; revision: number; now: string }
   | { tag: "UpdateModelBuild"; buildId: string; stage: string; message: string; attempt?: number; now: string }
   | { tag: "CompleteModelBuild"; buildId: string; model: SimulationModel; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
   | { tag: "FailModelBuild"; buildId: string; reason: string; now: string }
@@ -173,11 +179,8 @@ export type TaskCommand =
   | { tag: "FailAnalysis"; revision: number; reason: string; now: string }
   | { tag: "GetTask" };
 
-/**
- * Events tagged "legacy" are never emitted any more; `apply` still folds them so existing journals
- * replay into the facts model without rewriting history.
- */
 export type TaskEvent =
+  /** `brief`/`fact` are the pre-situation seeds most existing journals still carry; `apply` reads them. */
   | { tag: "TaskCreated"; taskId: string; title: string; situation?: string; brief?: string; fact?: Fact; now: string }
   | { tag: "FactAdded"; fact: Fact; revision: number; now: string }
   | { tag: "FactEdited"; factId: string; text: string; revision: number; now: string }
@@ -189,7 +192,8 @@ export type TaskEvent =
   | { tag: "TitleSet"; title: string; now: string }
   | { tag: "SituationSet"; text: string; revision: number; now: string }
   | { tag: "ModelBuilt"; model: SimulationModel; revision: number; agent?: AgentSelection; agentMeta?: AgentRunMeta; now: string }
-  | { tag: "ModelBuildStarted"; buildId: string; revision: number; modelMode?: "decision" | "strategic"; now: string }
+  /** `modelMode` was a user-chosen build input in older journals; the assistant now derives it. */
+  | { tag: "ModelBuildStarted"; buildId: string; revision: number; now: string }
   | { tag: "ModelBuildProgressed"; buildId: string; stage: string; message: string; attempt: number; now: string }
   | { tag: "ModelBuildFailed"; buildId: string; reason: string; now: string }
   | { tag: "ModelBuildCancelled"; buildId: string; now: string }
@@ -201,19 +205,7 @@ export type TaskEvent =
   | { tag: "RelabelRequested"; analysisId: string; agent?: AgentSelection; now: string }
   | { tag: "AnalysisCancelled"; revision: number; hasResult: boolean; now: string }
   | { tag: "AnalysisCompleted"; analysis: TaskAnalysis }
-  | { tag: "AnalysisFailed"; revision: number; reason: string; now: string }
-  // legacy — replay only
-  | { tag: "BriefEdited"; brief: string; revision: number; now: string }
-  | { tag: "ContextAdded"; text: string; revision: number; invalidatesModel?: boolean; now: string }
-  | { tag: "ContextEdited"; index: number; text: string; revision: number; now: string }
-  | { tag: "ContextRemoved"; index: number; revision: number; now: string }
-  | { tag: "FactKindChanged"; factId: string; kind: FactKind; revision: number; now: string }
-  | { tag: "ModelReplaced"; model: SimulationModel; revision: number; now: string }
-  | { tag: "AgentProposalRecorded"; proposal: { title?: string }; now: string }
-  | { tag: "AgentProposalAccepted"; model: SimulationModel; agent?: AgentSelection; revision: number; now: string }
-  | { tag: "AgentProposalRejected"; proposalId?: string; now: string }
-  | { tag: "ObservationRecorded"; analysisId: string; observation: { fact: string; observation: FactObservation; now: string }; now: string }
-  | { tag: "ObservationsCleared"; analysisId: string; now: string };
+  | { tag: "AnalysisFailed"; revision: number; reason: string; now: string };
 
 export type TaskReply =
   | { tag: "Accepted"; revision: number }
@@ -227,7 +219,6 @@ const questionKey = (prompt: string) => prompt.trim().toLowerCase().replace(/\s+
 
 const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], researchSources: [], messages: [], revision: 0, analyses: [] });
 const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
-const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
 
 function boundedResearchSources(sources: readonly ResearchSource[]): ResearchSource[] {
   return sources.slice(0, 12).flatMap((source, index) => {
@@ -299,7 +290,7 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "SituationSet": return { ...state, situation: event.text, revision: event.revision, updatedAt: event.now };
     // A run builds its model as its first step, so this must not disturb an in-flight run's status.
     case "ModelBuilt": return { ...omit(state, "lastError", "activeBuild", "modelMeta"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...(state.activeAnalysis ? { activeAnalysis: { ...state.activeAnalysis, revision: event.revision } } : {}), ...(event.agent ? { agent: event.agent } : {}), ...(event.agentMeta ? { modelMeta: event.agentMeta } : {}), status: state.status === "running" || state.status === "labeling" ? state.status : readyStatus(state), updatedAt: event.now };
-    case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, ...(event.modelMode ? { modelMode: event.modelMode } : {}), stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
+    case "ModelBuildStarted": return { ...omit(state, "lastError"), status: "building", activeBuild: { buildId: event.buildId, revision: event.revision, stage: "start", message: "Starting the model build…", attempt: 1, status: "running", startedAt: event.now, updatedAt: event.now }, updatedAt: event.now };
     case "ModelBuildProgressed": {
       if (state.activeBuild?.buildId !== event.buildId) return state;
       return { ...state, status: "building", activeBuild: { ...state.activeBuild, stage: event.stage, message: event.message, attempt: event.attempt, status: "running", updatedAt: event.now }, updatedAt: event.now };
@@ -327,39 +318,6 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "AnalysisCancelled": return { ...omit(state, "activeAnalysis", "lastError"), status: event.hasResult || state.analyses.length ? "completed" : "ready", updatedAt: event.now };
     case "AnalysisCompleted": return { ...omit(state, "activeAnalysis"), analyses: [...state.analyses, event.analysis], status: "completed", updatedAt: event.analysis.completedAt };
     case "AnalysisFailed": return { ...omit(state, "activeAnalysis"), status: "failed", lastError: event.reason, updatedAt: event.now };
-
-    // ── legacy journal events: fold the old brief/context/proposal/observation shape into facts ──
-    case "BriefEdited": {
-      const [first, ...rest] = state.facts;
-      const edited: Fact = first
-        ? { ...first, text: event.brief }
-        : { id: legacyId("brief", event.now, 0), text: event.brief, kind: "situation", source: "user", createdAt: event.now };
-      return { ...state, facts: [edited, ...rest], revision: event.revision, updatedAt: event.now };
-    }
-    case "ContextAdded": {
-      const fact: Fact = { id: legacyId("context", event.now, state.facts.length), text: event.text, kind: "situation", source: "user", createdAt: event.now };
-      return { ...state, facts: [...state.facts, fact], revision: event.revision, status: state.status === "new" ? "ready" : state.status, updatedAt: event.now };
-    }
-    case "ContextEdited": {
-      const target = state.facts[event.index + 1];
-      return { ...state, facts: target ? state.facts.map((fact) => fact.id === target.id ? { ...fact, text: event.text } : fact) : state.facts, revision: event.revision, updatedAt: event.now };
-    }
-    case "ContextRemoved": {
-      const target = state.facts[event.index + 1];
-      return { ...state, facts: target ? state.facts.filter((fact) => fact.id !== target.id) : state.facts, revision: event.revision, updatedAt: event.now };
-    }
-    case "FactKindChanged":
-      return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, kind: event.kind } : fact), revision: event.revision, updatedAt: event.now };
-    case "ModelReplaced":
-    case "AgentProposalAccepted":
-      return { ...omit(state, "lastError"), model: event.model, situation: situationFor(state, event.model), revision: event.revision, ...("agent" in event && event.agent ? { agent: event.agent } : {}), status: readyStatus(state), updatedAt: event.now };
-    case "AgentProposalRecorded": return { ...state, title: event.proposal.title?.trim() || state.title, updatedAt: event.now };
-    case "AgentProposalRejected": return state;
-    case "ObservationRecorded": {
-      const fact: Fact = { id: legacyId("observation", event.now, state.facts.length), text: event.observation.fact, kind: "outcome", source: "user", observation: event.observation.observation, createdAt: event.observation.now };
-      return { ...state, facts: [...state.facts, fact], updatedAt: event.now };
-    }
-    case "ObservationsCleared": return { ...state, facts: state.facts.filter((fact) => fact.kind !== "outcome"), updatedAt: event.now };
   }
 }
 
@@ -445,7 +403,7 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "StartModelBuild":
         if (state.activeBuild?.status === "running") return rejected(state, "A model build is already running");
         if (command.revision !== state.revision) return rejected(state, "That build belongs to an older situation");
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildStarted", buildId: command.buildId, revision: command.revision, ...(command.modelMode ? { modelMode: command.modelMode } : {}), now: command.now }), { tag: "Accepted", revision: state.revision });
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildStarted", buildId: command.buildId, revision: command.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       case "UpdateModelBuild":
         if (state.activeBuild?.buildId !== command.buildId || state.activeBuild.status !== "running") return rejected(state, "That build is no longer active");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "ModelBuildProgressed", buildId: command.buildId, stage: command.stage.slice(0, 40), message: command.message.slice(0, 500), attempt: Math.max(1, command.attempt ?? state.activeBuild.attempt), now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -515,9 +473,5 @@ export const taskEventCodec = tagCodec<TaskEvent>(
   "QuestionsSuggested", "QuestionDismissed", "ResearchRecorded", "MessageAdded", "TitleSet", "SituationSet", "ModelBuilt", "ModelBuildStarted", "ModelBuildProgressed", "ModelBuildFailed", "ModelBuildCancelled",
   "AnalysisRemoved", "TaskDeleted", "AnalysisRequested", "AnalysisCalculated",
   "RelabelRequested", "AnalysisLabelsCompleted", "AnalysisCancelled", "AnalysisCompleted", "AnalysisFailed",
-  // legacy tags kept readable so old journals still replay
-  "BriefEdited", "ContextAdded", "ContextEdited", "ContextRemoved", "FactKindChanged", "ModelReplaced",
-  "AgentProposalRecorded", "AgentProposalAccepted", "AgentProposalRejected",
-  "ObservationRecorded", "ObservationsCleared",
 );
 export const taskStateCodec = objectCodec<TaskState>("ScenarioTaskState");
