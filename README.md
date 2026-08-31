@@ -11,9 +11,7 @@ the recommendation, the assumptions behind it, and the conditions that would mak
 another option preferable. Runs are local and reproducible: the same model and seed
 produce the same worlds.
 
-[![Flumina walkthrough: Context, Model, and Decision River](flumina-demo.gif)](flumina-demo.mp4)
-
-[Open the 8-second MP4](flumina-demo.mp4).
+![Flumina walkthrough: Context, Model, and Decision River](flumina-demo.gif)
 
 ## Who it is for
 
