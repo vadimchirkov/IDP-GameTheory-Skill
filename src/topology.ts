@@ -68,6 +68,7 @@ export function assertTopologyPrior(prior: TopologyPrior): void {
 }
 
 const sampleRange = (value: NumberRange, rng: Rng): number => value[0] === value[1] ? value[0] : rng.between(value);
+const TOPOLOGY_STREAM = 0x746f706f;
 
 /** Complete pair topology in stable input order; the current C/D game uses this as its compatibility topology. */
 export function completeTopology(nodes: readonly string[]): Topology {
@@ -85,12 +86,13 @@ export function completeTopology(nodes: readonly string[]): Topology {
 /** Sample uncertain links and weights without imposing game semantics on them. */
 export function sampleTopology(prior: TopologyPrior, rng: Rng): Topology {
   assertTopologyPrior(prior);
-  const interactions = prior.interactions.flatMap((interaction) => {
+  const interactions = [...prior.interactions].sort((a, b) => a.id < b.id ? -1 : 1).flatMap((interaction) => {
+    const interactionRng = rng.fork(TOPOLOGY_STREAM, interaction.id);
     const probability = range(interaction.probability, [1, 1], `${interaction.id}.probability`);
-    const presence = sampleRange(probability, rng);
-    if (presence === 0 || (presence < 1 && rng.unit() >= presence)) return [];
+    const presence = sampleRange(probability, interactionRng);
+    if (presence === 0 || (presence < 1 && interactionRng.unit() >= presence)) return [];
     const weight = range(interaction.weight, [1, 1], `${interaction.id}.weight`);
-    return [{ id: interaction.id, participants: [...interaction.participants], weight: sampleRange(weight, rng) }];
+    return [{ id: interaction.id, participants: [...interaction.participants], weight: sampleRange(weight, interactionRng) }];
   });
   const topology = { nodes: [...prior.nodes], interactions };
   assertTopology(topology);

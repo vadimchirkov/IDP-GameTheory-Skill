@@ -1,9 +1,11 @@
 /** Small explicit PRNG: deterministic across all kernel calls, never Math.random(). */
 export class Rng {
   private state: number;
+  private readonly rootSeed: number;
 
   constructor(seed: number) {
-    this.state = (seed >>> 0) || 0x9e3779b9;
+    this.rootSeed = (seed >>> 0) || 0x9e3779b9;
+    this.state = this.rootSeed;
   }
 
   nextUint32(): number {
@@ -28,13 +30,28 @@ export class Rng {
     if (value === undefined) throw new Error("Cannot pick from an empty array");
     return value;
   }
+
+  /** Stable child stream that does not depend on how much the parent already consumed. */
+  fork(...parts: readonly SeedPart[]): Rng {
+    return new Rng(deriveSeed(this.rootSeed, ...parts));
+  }
 }
 
-export function deriveSeed(root: number, ...parts: readonly number[]): number {
-  let hash = (root >>> 0) || 0x811c9dc5;
+/** A stream address: a raw number, or a string id hashed into one. */
+export type SeedPart = number | string;
+
+/** FNV-1a over a string id, so callers address streams by identity instead of array position. */
+export function hash(value: string): number {
+  let result = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) result = Math.imul(result ^ value.charCodeAt(index), 0x01000193) >>> 0;
+  return result;
+}
+
+export function deriveSeed(root: number, ...parts: readonly SeedPart[]): number {
+  let mixed = (root >>> 0) || 0x811c9dc5;
   for (const part of parts) {
-    hash ^= part >>> 0;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    mixed ^= (typeof part === "string" ? hash(part) : part) >>> 0;
+    mixed = Math.imul(mixed, 0x01000193) >>> 0;
   }
-  return hash;
+  return mixed;
 }

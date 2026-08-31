@@ -2,33 +2,61 @@
 
 > Map the currents. Choose your course.
 
-Flumina is a local decision-rehearsal workspace for choices whose outcome depends
-on uncertain conditions. Describe the situation in ordinary language, compare the
-actions available to you, and inspect where the recommendation holds or changes.
+Flumina helps you choose between actions when the outcome depends on uncertain
+conditions or on what other people do next. Describe the situation in plain
+language, review the model, and explore the worlds in which each option works best.
 
-The AI turns prose and public evidence into an explicit model. A deterministic
-TypeScript engine then evaluates every option in the same sampled worlds. You can
-inspect the assumptions, rerun the calculation with the same seed, and see which
-uncertainty deserves more attention before acting. The AI never supplies the
-simulated outcome.
+The result is an inspectable decision rehearsal, not a prediction. Flumina shows
+the recommendation, the assumptions behind it, and the conditions that would make
+another option preferable. Runs are local and reproducible: the same model and seed
+produce the same worlds.
 
-## The product
+<video src="flumina-demo.mp4" controls muted playsinline width="1280">
+  <a href="flumina-demo.mp4">Watch the 8-second walkthrough</a> — Context → Model → Decision River.
+</video>
 
-The primary workflow is deliberately short:
+## Who it is for
+
+Flumina is for people who must explain a consequential choice before they make it:
+
+- founders, product leaders, and operators comparing launches, suppliers, build-or-buy
+  choices, or allocations of scarce resources;
+- strategy and policy analysts stress-testing a recommendation against uncertain
+  conditions and reactions from other parties;
+- researchers and engineers who need an explicit model, deterministic replay, and
+  inspectable output rather than an answer produced entirely by an LLM.
+
+It is most useful when there are a few real options, the important uncertainties can
+be bounded, and learning where the recommendation reverses is as valuable as the
+recommendation itself. It is not a substitute for domain evidence or a calibrated
+forecasting system.
+
+## Use cases
+
+| Question | Mode | What Flumina adds |
+|---|---|---|
+| Launch broadly, launch narrowly, or wait? | Decision comparison | Compares every option under the same demand, cost, and execution conditions. |
+| Build, buy, or choose between suppliers? | Decision comparison | Shows expected outcome, downside, regret, and the conditions that reverse the choice. |
+| How should a limited budget or team be allocated? | Decision comparison | Makes the objective, trade-offs, and shared uncertainties explicit. |
+| How might a negotiation, price war, alliance, or standards contest unfold? | Strategic interaction | Simulates repeated cooperation and defection under uncertain behavior and payoffs. |
+| Which unknown deserves more research before deciding? | Either | Identifies the factors and regimes most capable of changing the recommendation. |
+
+## How it works
+
+The workflow has four stages:
 
 1. **Context** — describe the decision, options, goal, constraints, and unknowns.
    The assistant can research public facts and raises only questions that may change
    the model.
 2. **Model** — review the objective, optional timeframe, 2–5 options, 1–8 shared
-   uncertain factors, option effects, assumptions, and sources. Change the context
-   and rebuild if the framing is wrong.
+   uncertain factors, option effects, bounded joint dependencies, assumptions, and
+   sources. Change the context and rebuild if the framing is wrong.
 3. **Worlds** — run hundreds or thousands of reproducible paired worlds. Every
    option sees the same environment, so the comparison isolates the choice rather
    than the random draw.
 4. **Decision River** — follow worlds from the main uncertainty boundary to the
    option that wins there and the resulting outcome. Use the stress lens to see
-   when another option becomes preferable. When a two-factor failure region survives
-   a train/holdout check, the report shows it as a conditional recommendation.
+   when another option becomes preferable.
 
 Each run reports:
 
@@ -37,11 +65,22 @@ Each run reports:
 - median and tail outcomes;
 - how often each option is best in the same worlds;
 - expected regret from choosing it when another option would have worked better;
-- the factor and regime most capable of changing the recommendation;
-- a two-factor failure region only when it passes the holdout quality gate.
+- **What could change this**: the strongest factor regime, any two-factor failure
+  region that passes the holdout gate, and accepted joint dependencies that change
+  the result. Supporting counts, lift, activation share, and contrasts remain one
+  disclosure away.
 
 Treat the sampled share of worlds as conditional evidence for the decision, never
 as the true probability of the future.
+
+## Foundations
+
+Flumina combines [TEOB](https://github.com/lambda-house/teob-ts) for the event-sourced
+workflow, the [Monte Carlo method](https://en.wikipedia.org/wiki/Monte_Carlo_method)
+for reproducible world sampling, [Pi](https://pi.dev) for model framing and research,
+and [game theory](https://plato.stanford.edu/entries/game-theory/) for strategic
+interaction. The AI builds and labels the model; the deterministic TypeScript engine
+calculates the outcomes.
 
 ## Two model modes
 
@@ -57,6 +96,12 @@ A Decision model is a small response surface:
 - shared external factors sampled once per world;
 - a baseline outcome for each option;
 - explicit effects describing how each factor changes each option.
+
+The model may also contain up to two explicit joint dependencies. Each one applies
+an additional option impact only when two low/high factor regimes hold together.
+The AI proposes at most one and must state the distinct mechanism; the Model stage
+shows it before Run, and the report compares the result with and without it. These
+relations are accepted stress-test assumptions, not causal findings.
 
 This structure stays understandable enough to challenge. It does not infer
 causality or hide an optimizer behind the recommendation.
@@ -108,13 +153,22 @@ simulation engine and CLI need no API key once model JSON exists.
 ## Run a model from the CLI
 
 ```bash
+pnpm bench:joint-effects
+```
+
+This runs the included launch-decision spike and writes an inspectable report to
+`reports/joint-effects-spike.html`.
+
+```bash
 pnpm scenario model.json 600 --seed 42
 pnpm scenario model.json 600 --seed 42 --visual
+pnpm scenario example_gtm_motion.json 900 --seed 42 --visual
 ```
 
 The first command prints the model-specific summary. The second writes an
-interactive report to `reports/visual.html`. Trials default to `600`; the default
-seed is `42`.
+interactive report to `reports/visual.html`. The included
+`example_gtm_motion.json` is the English go-to-market case shown in the demo.
+Trials default to `600`; the default seed is `42`.
 
 A minimal Decision model looks like this:
 
@@ -270,9 +324,17 @@ to port `4317`.
   therefore reported by the stress lens rather than dressed up as an interaction.
 - Regret comparisons are called meaningful against the objective spread the options
   span, so two options separated by a rounding error read as a close call.
+- Every range — factor, baseline, effect, joint impact — is sampled uniformly. A
+  range states the bounds you consider possible, not a belief that the middle is
+  more likely than the edges. Medians and best-in-worlds shares are robust to this;
+  p05, p95 and target probability are the numbers it moves, so read them as the
+  spread implied by the stated bounds rather than as calibrated tails.
 - Factors are sampled independently, so tail values and target probability assume
   no coupling between them. Tightly linked factors change the spread by a factor of
   several; the recommendation itself is unaffected.
+- A joint dependency fires only when both of its factors sit in the outer third of
+  their ranges, and its impact is capped relative to the option's own additive
+  span. It is an assumption the run executes, never a finding the run validates.
 - Decision outcomes cannot yet reweight an existing run. C/D observations can.
 - The web agent builds Decision and compact C/D models; other adapters start from
   JSON.

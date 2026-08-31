@@ -10,7 +10,7 @@ import type { ScenarioModel } from "./domain.js";
 import { isDecisionModel, isPolymarket, isStochasticProcess, type SimulationModel } from "./model.js";
 import { agentThinkingLevels, type AgentSelection } from "./agent-contracts.js";
 import { getAgentAvailability, removeProviderApiKey, saveProviderApiKey } from "./pi-agent.js";
-import { buildDecisionModel, buildStrategicModel, continueContext, labelWorlds, routeMessage } from "./scenario-agent.js";
+import { buildDecisionModel, buildStrategicModel, continueContext, labelWorlds } from "./scenario-agent.js";
 import { taskDetailProjection, taskSummaryProjection, type TaskSummary } from "./task-projections.js";
 import { generateWorldsVisual, injectWorldLabels, visibleWorldLabelNodes, type WorldLabelNode, type WorldLabels } from "./worlds-report.js";
 import {
@@ -239,9 +239,11 @@ async function addMessage(id: string, role: "user" | "agent", mode: AgentMode, t
   if (answer.tag === "Rejected") throw new Error(answer.reason);
 }
 
-/** Two conversations, not three: everything before a run is one thread ("model" is a legacy mode). */
-const conversationOf = (state: TaskState, bucket: "context" | "river") => (state.messages ?? [])
-  .filter((message) => (bucket === "river" ? message.mode === "river" : message.mode !== "river"))
+/**
+ * One thread. Older journals split messages into "context", "model" and "river" buckets, which meant
+ * half the conversation vanished whenever the workspace tab changed; `mode` is now only history.
+ */
+const conversationOf = (state: TaskState) => (state.messages ?? [])
   .slice(-12)
   .map(({ role, text }) => ({ role, text }));
 
@@ -551,11 +553,32 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const controller = new AbortController();
     req.once("aborted", () => controller.abort());
     res.once("close", () => { if (!res.writableEnded) controller.abort(); });
-     try {
-       const pinned = Array.isArray(input.pinned) ? (input.pinned as Array<{ id: string; kind: string; label: string; detail?: string; meta?: Record<string, unknown> }>).slice(0, 12) : [];
-       emit({ kind: "status", stage: "reading", message: "Reading the context…" });
-       let guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), [], controller.signal, (text) => emit({ kind: "text", text }), pinned);
-       let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
+    try {
+      const pinned = Array.isArray(input.pinned) ? (input.pinned as Array<{ id: string; kind: string; label: string; detail?: string; meta?: Record<string, unknown> }>).slice(0, 12) : [];
+      const selection = input.selection && typeof input.selection === "object" ? input.selection as Record<string, unknown> : undefined;
+      const focus = selection && typeof selection.label === "string" && Array.isArray(selection.worldIds)
+        ? { label: selection.label.slice(0, 180), worldCount: selection.worldIds.length }
+        : undefined;
+      const requestedAnalysisId = String(input.analysisId ?? "");
+      const analysis = fresh.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? fresh.analyses.at(-1);
+      const runContext = analysis
+        ? { summary: analysis.report ?? "The run finished but produced no summary.", ...(focus ? { focus } : {}), facts: fresh.facts }
+        : undefined;
+      const turn = (researchSources: readonly Awaited<ReturnType<typeof researchPublicContext>>[number][]) => continueContext({
+        situation: fresh.situation,
+        ...(fresh.model ? { model: fresh.model } : {}),
+        history: conversationOf(fresh),
+        ...(message ? { userMessage: message } : {}),
+        ...(agentFor(fresh, input.agent) ? { selection: agentFor(fresh, input.agent)! } : {}),
+        researchSources,
+        signal: controller.signal,
+        onText: (text) => emit({ kind: "text", text }),
+        pinned,
+        ...(runContext ? { run: runContext } : {}),
+      });
+      emit({ kind: "status", stage: "reading", message: analysis ? "Reading the situation and the run…" : "Reading the context…" });
+      let guided = await turn([]);
+      let researched: Awaited<ReturnType<typeof researchPublicContext>> = [];
       if (guided.researchQueries.length) {
         // Don't re-research same queries again and again — cache per task
         const seen = new Set((fresh.researchSources ?? []).map((s) => s.query.toLowerCase().trim()));
@@ -564,12 +587,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
           console.log(`clarify skip research: all ${guided.researchQueries.length} queries already have sources`);
         } else {
           if (newQueries.length < guided.researchQueries.length) console.log(`clarify research deduped: ${guided.researchQueries.length} → ${newQueries.length} new`);
-          emit({ kind: "status", stage: "research", message: "Checking public sources…" });
+          emit({ kind: "status", stage: "research", message: `Checking public sources · ${newQueries.length} ${newQueries.length === 1 ? "query" : "queries"}…` });
           researched = await researchPublicContext(newQueries, controller.signal);
           if (researched.length) {
-            emit({ kind: "text", text: "" });
-             emit({ kind: "status", stage: "synthesis", message: "Connecting the evidence…" });
-             guided = await continueContext(fresh.situation, fresh.model, conversationOf(fresh, "context"), message || undefined, agentFor(fresh, input.agent), researched, controller.signal, (text) => emit({ kind: "text", text }), pinned);
+            // The second pass rewrites the whole reply from the evidence, so drop the streamed draft.
+            emit({ kind: "restart" });
+            emit({ kind: "status", stage: "synthesis", message: `Reading ${researched.length} ${researched.length === 1 ? "source" : "sources"}…` });
+            guided = await turn(researched);
           }
         }
       }
@@ -578,19 +602,25 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         if (recorded.tag === "Rejected") throw new Error(recorded.reason);
       }
       const now = new Date().toISOString();
+      // The aggregate decides whether this is still the unnamed placeholder; a later title is a no-op.
       await ask(clarifyId, { tag: "SetTitle", title: guided.title, now });
       await ask(clarifyId, { tag: "SuggestQuestions", questions: guided.questions.map((question) => ({ id: randomUUID(), ...question })), now });
       await addMessage(clarifyId, "agent", "context", guided.message, guided.suggestions);
       // Pending is shown whenever agent distilled a standalone fact, even if kind was answer — classification misses otherwise.
-      const rawNote = (guided.contextNote || "").trim();
-      const normalizedNote = rawNote.replace(/\s+/g, " ").trim();
-      const isNullishNote = !normalizedNote || /^(null|undefined|none)$/i.test(normalizedNote) || normalizedNote.length < 8;
-      const alreadyHas = !isNullishNote && normalizedNote && fresh.situation.replace(/\s+/g, " ").includes(normalizedNote);
-      const pendingContext = !isNullishNote && normalizedNote && !alreadyHas
+      const normalizedNote = (guided.contextNote ?? "").replace(/\s+/g, " ").trim();
+      const usableNote = normalizedNote.length >= 8 && !/^(null|undefined|none)$/i.test(normalizedNote);
+      const pendingContext = usableNote && !fresh.situation.replace(/\s+/g, " ").includes(normalizedNote)
         ? { note: normalizedNote, display: normalizedNote.slice(0, 220) }
         : undefined;
-      if (!pendingContext && rawNote && !isNullishNote) console.warn(`clarify no pending: kind=${guided.kind} note="${rawNote.slice(0,80)}" alreadyHas=${alreadyHas}`);
-      const result = { kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId), ...(pendingContext ? { pendingContext } : {}) };
+      const observed = guided.kind === "outcome" && Object.keys(guided.observation).length ? guided.observation : undefined;
+      const validated = observed && analysis?.artifactUrl && fresh.model && !isDecisionModel(fresh.model) && !isStochasticProcess(fresh.model)
+        ? (() => { try { return observationFrom({ ...observed }, fresh.model as ScenarioModel); } catch { return undefined; } })()
+        : undefined;
+      const result = {
+        kind: guided.kind, message: guided.message, suggestions: guided.suggestions, task: detail(clarifyId),
+        ...(pendingContext ? { pendingContext } : {}),
+        ...(observed ? { pendingOutcome: { observation: observed, display: JSON.stringify(observed), ...(validated ? { validated } : {}) } } : {}),
+      };
       if (stream) { emit({ kind: "done", result }); stream.end(); } else send(res, 200, result);
     } catch (error) {
       if (!stream) throw error;
@@ -649,7 +679,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       res.end(); return;
     }
   }
-  const match = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)(?:\/(commands|chat|understand|run|events|activity))?$/);
+  const match = url.pathname.match(/^\/api\/tasks\/([a-f0-9-]+)(?:\/(commands|understand|run|events|activity))?$/);
   if (match) {
     const id = match[1] ?? ""; const action = match[2];
     if (req.method === "GET" && !action) { const state = detail(id); send(res, state && !state.deleted ? 200 : 404, state && !state.deleted ? state : { error: "Task not found" }); return; }
@@ -696,35 +726,6 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const mode = modelMode(input.mode ?? state.activeBuild?.modelMode);
       const buildId = startModelBuild(id, agentFor(state, input.agent), mode, state.activeBuild?.status === "running" ? state.activeBuild.buildId : randomUUID());
       send(res, 200, await waitForModelBuild(id, buildId)); return;
-    }
-    // The single conversational entry point: a question is answered, a fact is filed by kind.
-    // Outcome facts now use a preview+confirm flow so the UI can show what was parsed before persisting.
-    if (req.method === "POST" && action === "chat") {
-      const input = await body(req); const state = detail(id);
-      if (!state || state.deleted) { send(res, 404, { error: "Task not found" }); return; }
-      const message = String(input.message ?? "").trim();
-      if (!message || message.length > 4_000) { send(res, 422, { error: "The message is empty or too long" }); return; }
-      const agent = agentFor(state, input.agent);
-      const selection = input.selection && typeof input.selection === "object" ? input.selection as Record<string, unknown> : undefined;
-      const focus = selection && typeof selection.label === "string" && Array.isArray(selection.worldIds)
-        ? { label: selection.label.slice(0, 180), worldCount: selection.worldIds.length }
-        : undefined;
-       const requestedAnalysisId = String(input.analysisId ?? "");
-       const analysis = state.analyses.find((candidate) => (candidate.id ?? candidate.visualUrl) === requestedAnalysisId) ?? state.analyses.at(-1);
-       const pinned = Array.isArray(input.pinned) ? (input.pinned as Array<{ id: string; kind: string; label: string; detail?: string; meta?: Record<string, unknown> }>).slice(0, 12) : [];
-       await addMessage(id, "user", "river", message);
-       const routed = await routeMessage(state.facts, state.model, message, analysis?.report ?? "no run yet", agent, state.situation, conversationOf(state, "river"), focus, undefined, pinned);
-      await addMessage(id, "agent", "river", routed.message, routed.suggestions);
-      if (routed.kind === "answer") { send(res, 200, { kind: "answer", message: routed.message, suggestions: routed.suggestions, task: detail(id) }); return; }
-      // outcome: return preview without persisting; caller must POST /chat/confirm to file it
-      const previewObservation = analysis?.artifactUrl && state.model && !isDecisionModel(state.model) && !isStochasticProcess(state.model)
-        ? (() => { try { return observationFrom({ ...routed.observation }, state.model! as ScenarioModel); } catch { return undefined; } })()
-        : undefined;
-      // Validate against model if we have one, but don't require artifact
-      const display = routed.observation.winner || routed.observation.cooperation !== undefined || routed.observation.regime
-        ? JSON.stringify(routed.observation) : message.slice(0, 120);
-      send(res, 200, { kind: "outcome", message: routed.message, suggestions: routed.suggestions, task: detail(id), pendingOutcome: { observation: routed.observation, display, ...(previewObservation ? { validated: previewObservation } : {}) } });
-      return;
     }
   }
   // Relabel a finished run — re-run Pi labeling without recomputing worlds

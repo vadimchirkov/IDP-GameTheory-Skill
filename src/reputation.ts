@@ -1,5 +1,5 @@
 /**
- * Leading Eight + gossip + quantitative assessment (DYNAMIC_MODELS.md:B)
+ * Leading Eight + gossip + quantitative assessment; see GAME_THEORY.md for the model boundary.
  * Reputation is per-participant private knowledge, not global.
  * Each Participant aggregate keeps `image: Map<opponentId -> G|B>` and `score: Map<...>`.
  * This file is pure — no TEOB runtime import — so it can be unit-tested via verify-pack.

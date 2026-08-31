@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "adapter": "decision",
+  "situation": "A company must choose between a broad product launch and a focused launch while demand and supplier capacity remain uncertain.",
+  "timeframe": "first commercial year",
+  "question": "Which launch scope should the company commit to?",
+  "objective": {
+    "label": "First-year contribution",
+    "unit": "kEUR",
+    "direction": "maximize"
+  },
+  "factors": [
+    {
+      "id": "demand",
+      "label": "Demand",
+      "range": [0, 100],
+      "lowLabel": "Low demand",
+      "highLabel": "High demand"
+    },
+    {
+      "id": "capacity",
+      "label": "Supplier capacity",
+      "range": [0, 100],
+      "lowLabel": "Low capacity",
+      "highLabel": "High capacity"
+    }
+  ],
+  "options": [
+    {
+      "id": "broad",
+      "label": "Broad launch",
+      "description": "Launch the full range across all channels.",
+      "baseline": [120, 120],
+      "effects": [
+        { "factorId": "demand", "impact": [35, 35] },
+        { "factorId": "capacity", "impact": [10, 10] }
+      ]
+    },
+    {
+      "id": "focused",
+      "label": "Focused launch",
+      "description": "Launch the highest-confidence products in selected channels.",
+      "baseline": [105, 105],
+      "effects": [
+        { "factorId": "demand", "impact": [15, 15] },
+        { "factorId": "capacity", "impact": [8, 8] }
+      ]
+    }
+  ],
+  "jointEffects": [
+    {
+      "id": "demand-capacity-mismatch",
+      "label": "Demand overwhelms constrained supply",
+      "when": [
+        { "factorId": "demand", "regime": "high" },
+        { "factorId": "capacity", "regime": "low" }
+      ],
+      "impacts": [
+        { "optionId": "broad", "additionalImpact": [-180, -180] }
+      ],
+      "assumption": "High demand creates value for the broad launch only when supplier capacity can fulfil the wider range; otherwise shortages and recovery costs create an additional loss."
+    }
+  ],
+  "assumptions": [
+    "The joint loss is a stress-test assumption and must be replaced with operational evidence before a real commitment."
+  ]
+}

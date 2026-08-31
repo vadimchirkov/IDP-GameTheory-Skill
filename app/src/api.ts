@@ -129,58 +129,77 @@ export const getTask = (id: string) => api<TaskState>(`/api/tasks/${id}`);
 export const createTask = (text: string, id: string) => post<TaskState>("/api/tasks", { text, id });
 export const sendCommand = (id: string, value: FactCommand) => post<TaskState>(`/api/tasks/${id}/commands`, value);
 export const understandTask = (id: string, agent: AgentSelection | undefined, mode: ModelMode) => post<TaskState>(`/api/tasks/${id}/understand`, { agent, mode });
-export const clarifyTask = (id: string, value: { message?: string; agent?: AgentSelection; pinned?: PinnedContext[] }, signal?: AbortSignal) => api<ChatResult & { task: TaskState; pendingContext?: { note: string; display: string } }>(`/api/tasks/${id}/clarify`, { method: "POST", body: JSON.stringify(value), signal });
 export const confirmContext = (id: string, note: string) => post<TaskState>(`/api/tasks/${id}/context/confirm`, { note });
-export async function understandTaskStream(id: string, agent: AgentSelection | undefined, mode: ModelMode, onEvent: (ev: Record<string, unknown>) => void): Promise<TaskState> {
-  const response = await fetch(`/api/tasks/${id}/understand/stream`, {
+
+/** What the assistant is doing right now, so a wait is never an unexplained spinner. */
+export interface AgentEvent {
+  kind: "status" | "text" | "restart" | "progress" | "done" | "error";
+  stage?: string;
+  message?: string;
+  text?: string;
+  attempt?: number;
+  error?: string;
+}
+
+/**
+ * Read one server-sent agent stream and resolve with its `done` event. Both long agent operations —
+ * building a model and answering in chat — narrate themselves the same way, so they share this reader.
+ */
+async function postStream(path: string, value: unknown, onEvent: (event: AgentEvent) => void, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const response = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream" },
-    body: JSON.stringify({ agent, mode }),
+    body: JSON.stringify(value),
+    ...(signal ? { signal } : {}),
   });
-  if (response.status === 404 || response.status === 409) {
-    const value: unknown = await response.json().catch(() => ({}));
-    const failure = value as { error?: string; reason?: string };
-    throw new Error(failure.error ?? failure.reason ?? `HTTP ${response.status}`);
-  }
   if (!response.ok && !response.headers.get("content-type")?.includes("text/event-stream")) {
-    const value: unknown = await response.json().catch(() => ({}));
-    const failure = value as { error?: string; reason?: string };
-    throw new Error(failure.error ?? failure.reason ?? `HTTP ${response.status}`);
+    const failure = await response.json().catch(() => ({})) as { error?: string; reason?: string };
+    throw new Error(failure.reason ?? failure.error ?? `HTTP ${response.status}`);
   }
   if (!response.body) throw new Error("Streaming not supported");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let doneTask: TaskState | undefined;
+  let done: Record<string, unknown> | undefined;
   let error: string | undefined;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
     for (const part of parts) {
-      const line = part.split("\n").find((l) => l.startsWith("data: "));
+      const line = part.split("\n").find((item) => item.startsWith("data: "));
       if (!line) continue;
-      const json = line.slice(6);
-      try {
-        const ev = JSON.parse(json) as Record<string, unknown>;
-        if (ev.kind === "done" && ev.task) doneTask = ev.task as TaskState;
-        else if (ev.kind === "error") error = (ev.error as string) ?? "Agent failed";
-        onEvent(ev);
-        if (ev.kind === "error" || ev.kind === "done") {
-          // keep reading until stream ends
-        }
-      } catch {}
+      let event: AgentEvent & Record<string, unknown>;
+      try { event = JSON.parse(line.slice(6)) as AgentEvent & Record<string, unknown>; } catch { continue; }
+      if (event.kind === "done") done = event;
+      if (event.kind === "error") error = event.error ?? "The agent failed";
+      onEvent(event);
     }
   }
   if (error) throw new Error(error);
-  if (doneTask) return doneTask;
-  throw new Error("Agent stream ended without result");
+  if (done) return done;
+  throw new Error("The agent stream ended without a result");
 }
+
+export type ClarifyResult = ChatResult & {
+  task: TaskState;
+  pendingContext?: { note: string; display: string };
+  pendingOutcome?: { observation: Record<string, unknown>; display: string };
+};
+
+export const clarifyTask = async (
+  id: string,
+  value: { message?: string; clientMessageId?: string; agent?: AgentSelection; pinned?: PinnedContext[]; selection?: RiverSelection; analysisId?: string },
+  onEvent: (event: AgentEvent) => void = () => {},
+  signal?: AbortSignal,
+) => (await postStream(`/api/tasks/${id}/clarify`, value, onEvent, signal)).result as ClarifyResult;
+
+export const understandTaskStream = async (id: string, agent: AgentSelection | undefined, mode: ModelMode, onEvent: (event: AgentEvent) => void) =>
+  (await postStream(`/api/tasks/${id}/understand/stream`, { agent, mode }, onEvent)).task as TaskState;
 export const runTask = (id: string, value: { trials?: number; seed?: number; agent?: AgentSelection }) => post<TaskState>(`/api/tasks/${id}/run`, value);
 export const relabelTask = (id: string, analysisId: string, agent?: AgentSelection) => post<TaskState>(`/api/tasks/${id}/relabel`, { analysisId, agent });
-export const chatTask = (id: string, message: string, agent?: AgentSelection, selection?: RiverSelection, analysisId?: string, pinned?: PinnedContext[]) => post<ChatResult & { pendingOutcome?: { observation: Record<string, unknown>; display: string } }>(`/api/tasks/${id}/chat`, { message, agent, selection, analysisId, pinned });
 export const confirmOutcome = (id: string, text: string, observation: Record<string, unknown>) => post<{ kind: string; message: string; task: TaskState }>(`/api/tasks/${id}/chat/confirm`, { text, observation });
 export const getWorldReplay = (taskId: string, analysisId: string, index: number) => api<WorldReplay>(`/api/tasks/${taskId}/analyses/${analysisId}/worlds/${index}/replay`);
 export const getPosterior = (taskId: string, analysisId: string) => api<RunPosterior>(`/api/tasks/${taskId}/analyses/${analysisId}/posterior`);

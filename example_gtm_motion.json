@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "adapter": "decision",
+  "situation": "An early-stage developer tools company is launching an AI coding assistant and must choose its first paid go-to-market motion. It can sell self-serve subscriptions to individual developers, team plans to startups, or annual contracts to large engineering organizations. The goal is to maximize 12-month gross profit while preserving a path to repeatable growth. Demand, sales-cycle length, model inference costs, and retention are uncertain; the wrong first motion could consume the runway before the product finds a reliable market.",
+  "timeframe": "The first 12 months after launch",
+  "question": "Which go-to-market motion should the company choose first to maximize 12-month gross profit?",
+  "objective": {
+    "label": "12-month gross profit",
+    "unit": "USD",
+    "direction": "maximize",
+    "target": 500000
+  },
+  "factors": [
+    {
+      "id": "developerDemand",
+      "label": "Developer demand",
+      "range": [0.55, 1.25],
+      "lowLabel": "Slow adoption",
+      "highLabel": "Strong adoption"
+    },
+    {
+      "id": "enterpriseCycle",
+      "label": "Enterprise sales cycle",
+      "range": [2, 9],
+      "lowLabel": "Fast close",
+      "highLabel": "Long procurement"
+    },
+    {
+      "id": "inferenceCost",
+      "label": "Inference cost per active seat",
+      "range": [2, 12],
+      "lowLabel": "Efficient models",
+      "highLabel": "Expensive models"
+    },
+    {
+      "id": "retention",
+      "label": "Customer retention",
+      "range": [0.55, 0.9],
+      "lowLabel": "Weak retention",
+      "highLabel": "Strong retention"
+    }
+  ],
+  "options": [
+    {
+      "id": "selfServe",
+      "label": "Self-serve developers",
+      "description": "Sell monthly subscriptions directly to individual developers. Fast feedback and low sales overhead, but higher churn and support volume.",
+      "baseline": [180000, 320000],
+      "effects": [
+        { "factorId": "developerDemand", "impact": [80000, 150000] },
+        { "factorId": "enterpriseCycle", "impact": [-20000, -5000] },
+        { "factorId": "inferenceCost", "impact": [-90000, -25000] },
+        { "factorId": "retention", "impact": [50000, 120000] }
+      ]
+    },
+    {
+      "id": "startupTeams",
+      "label": "Startup team plans",
+      "description": "Sell per-seat plans to funded startups. A moderate sales motion with expansion potential and a manageable feedback loop.",
+      "baseline": [160000, 300000],
+      "effects": [
+        { "factorId": "developerDemand", "impact": [70000, 140000] },
+        { "factorId": "enterpriseCycle", "impact": [-40000, -10000] },
+        { "factorId": "inferenceCost", "impact": [-75000, -20000] },
+        { "factorId": "retention", "impact": [80000, 150000] }
+      ]
+    },
+    {
+      "id": "enterprise",
+      "label": "Enterprise contracts",
+      "description": "Pursue annual contracts with large engineering organizations. Higher contract value, but slower procurement and heavier implementation.",
+      "baseline": [90000, 260000],
+      "effects": [
+        { "factorId": "developerDemand", "impact": [50000, 120000] },
+        { "factorId": "enterpriseCycle", "impact": [-100000, -20000] },
+        { "factorId": "inferenceCost", "impact": [-60000, -15000] },
+        { "factorId": "retention", "impact": [90000, 180000] }
+      ]
+    }
+  ],
+  "assumptions": [
+    "The company can support all three motions with the current product and team.",
+    "Gross profit includes inference and selling costs but excludes fixed R&D spending.",
+    "The factors are bounded planning assumptions, not calibrated probabilities."
+  ]
+}

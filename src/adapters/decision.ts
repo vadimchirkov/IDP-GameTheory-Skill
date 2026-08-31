@@ -1,5 +1,5 @@
 import { correlation, mean, runMonteCarlo, standardDeviation } from "../monte-carlo.js";
-import { deriveSeed, Rng } from "../rng.js";
+import { hash, Rng } from "../rng.js";
 import type { NumberRange } from "../topology.js";
 
 export interface DecisionFactor {
@@ -25,6 +25,19 @@ export interface DecisionOption {
   effects: readonly DecisionEffect[];
 }
 
+export interface DecisionJointEffect {
+  id: string;
+  label: string;
+  /** Both factor regimes must hold before the additional impacts apply. */
+  when: readonly [
+    { factorId: string; regime: "low" | "high" },
+    { factorId: string; regime: "low" | "high" },
+  ];
+  impacts: readonly { optionId: string; additionalImpact: NumberRange }[];
+  /** Plain-language reason why the combination is not already captured additively. */
+  assumption: string;
+}
+
 export interface DecisionModel {
   schemaVersion: 1;
   adapter: "decision";
@@ -40,6 +53,8 @@ export interface DecisionModel {
   };
   factors: readonly DecisionFactor[];
   options: readonly DecisionOption[];
+  /** Explicit non-additive mechanisms. Kept deliberately small and reviewable. */
+  jointEffects?: readonly DecisionJointEffect[];
   assumptions: readonly string[];
 }
 
@@ -48,6 +63,8 @@ export interface DecisionWorld {
   seed: number;
   factors: Record<string, number>;
   normalizedFactors: Record<string, number>;
+  /** Sparse per-option contributions; an absent ID means the relation did not match this world. */
+  jointEffects?: Record<string, Record<string, number>>;
   results: Record<string, number>;
   regrets: Record<string, number>;
   bestOptionId: string;
@@ -76,6 +93,24 @@ export interface DecisionFailureBox {
   failureCount: number;
 }
 
+export interface DecisionJointEffectSummary {
+  activeWorlds: number;
+  activationShare: number;
+  winnerChanges: number;
+  winnerChangeShare: number;
+  activeWinnerChangeShare: number;
+  bestOptionIdWhenActive: string;
+  recommendedWithoutEffectId: string;
+  recommendationChanged: boolean;
+  /** Tests that separate the joint mechanism from either factor acting alone. */
+  contrastPlan: readonly {
+    changeFactorId: string;
+    changeTo: "low" | "high";
+    holdFactorId: string;
+    holdAt: "low" | "high";
+  }[];
+}
+
 export interface DecisionRun {
   worlds: readonly DecisionWorld[];
   options: Record<string, DecisionOptionSummary>;
@@ -99,6 +134,7 @@ export interface DecisionRun {
   };
   /** Holdout-validated two-factor region where another option meaningfully leads. */
   failureBox?: DecisionFailureBox;
+  jointEffects?: Record<string, DecisionJointEffectSummary>;
   paths: Record<string, number>;
 }
 
@@ -143,14 +179,52 @@ export function assertDecisionModel(model: DecisionModel): void {
       assertRange(effect.impact, `${option.id}.${effect.factorId}.impact`);
     }
   }
+  if ((model.jointEffects?.length ?? 0) > 2) throw new Error("a decision supports at most two joint effects");
+  const jointIds = new Set<string>();
+  for (const joint of model.jointEffects ?? []) {
+    if (!joint.id || jointIds.has(joint.id)) throw new Error("joint effect ids must be unique and non-empty");
+    jointIds.add(joint.id);
+    if (!joint.label.trim() || joint.label.length > 120) throw new Error(`${joint.id}.label must be a non-empty string within 120 characters`);
+    if (!joint.assumption.trim() || joint.assumption.length > 320) throw new Error(`${joint.id}.assumption must be a non-empty string within 320 characters`);
+    if (!Array.isArray(joint.when) || joint.when.length !== 2 || joint.when[0].factorId === joint.when[1].factorId) throw new Error(`${joint.id} needs exactly two distinct factor conditions`);
+    for (const condition of joint.when) {
+      if (!factorIds.has(condition.factorId)) throw new Error(`${joint.id} references unknown factor ${condition.factorId}`);
+      if (condition.regime !== "low" && condition.regime !== "high") throw new Error(`${joint.id} has an invalid factor regime`);
+    }
+    if (!joint.impacts.length) throw new Error(`${joint.id} needs at least one option impact`);
+    const impacted = new Set<string>();
+    for (const impact of joint.impacts) {
+      if (!optionIds.has(impact.optionId)) throw new Error(`${joint.id} references unknown option ${impact.optionId}`);
+      if (impacted.has(impact.optionId)) throw new Error(`${joint.id} repeats option ${impact.optionId}`);
+      impacted.add(impact.optionId);
+      assertRange(impact.additionalImpact, `${joint.id}.${impact.optionId}.additionalImpact`);
+      const span = additiveSpan(model.options.find((option) => option.id === impact.optionId)!);
+      const largest = Math.max(Math.abs(impact.additionalImpact[0]), Math.abs(impact.additionalImpact[1]));
+      if (largest > JOINT_IMPACT_LIMIT * span) throw new Error(`${joint.id}.${impact.optionId}.additionalImpact of ${largest} exceeds ${JOINT_IMPACT_LIMIT}x the option's additive span of ${span}; model such a dominant mechanism as its own option or factor`);
+    }
+  }
 }
 
-const hash = (value: string): number => {
-  let result = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) result = Math.imul(result ^ value.charCodeAt(index), 0x01000193) >>> 0;
-  return result;
-};
 const sample = (range: NumberRange, rng: Rng): number => range[0] === range[1] ? range[0] : rng.between(range);
+/**
+ * A joint condition holds in the outer third of its factor range: "low" is the bottom third,
+ * "high" the top third. Two independent uniform factors therefore combine in about 11% of worlds.
+ * The value is part of the model contract — the AI is told what low/high mean when it sizes impacts.
+ */
+export const REGIME_BOUNDARY = 1 / 3;
+/** Share of a factor's range each regime covers, and how often two of them coincide. Reports and the
+ *  model-building prompt read these instead of restating "a third" as prose that would drift. */
+export const REGIME_SHARE = (1 - REGIME_BOUNDARY) / 2;
+export const JOINT_ACTIVATION_SHARE = REGIME_SHARE * REGIME_SHARE;
+/**
+ * A joint effect is a correction to an option's response, so it must stay smaller than the response
+ * itself by a wide margin. Beyond this multiple the decision is driven by one asserted mechanism and
+ * belongs in the model as its own option or factor, where it gets a range and a stress lens.
+ */
+export const JOINT_IMPACT_LIMIT = 3;
+/** Full additive span of an option: baseline width plus each factor moving from low to high. */
+const additiveSpan = (option: DecisionOption): number =>
+  option.baseline[1] - option.baseline[0] + option.effects.reduce((sum, effect) => sum + 2 * Math.max(Math.abs(effect.impact[0]), Math.abs(effect.impact[1])), 0);
 const oriented = (model: DecisionModel, value: number): number => model.objective.direction === "maximize" ? value : -value;
 const quantile = (sorted: readonly number[], fraction: number): number => {
   const position = (sorted.length - 1) * fraction;
@@ -278,7 +352,7 @@ function findFailureBox(
   return { rules: selected.rules, alternativeOptionId: selected.alternativeOptionId, baseline, density, coverage, lift, support: cohort.length, failureCount };
 }
 
-function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[]): Omit<DecisionRun, "worlds"> {
+function summarizeOptions(model: DecisionModel, worlds: readonly DecisionWorld[]): Record<string, DecisionOptionSummary> {
   const options: Record<string, DecisionOptionSummary> = {};
   for (const option of model.options) {
     const values = worlds.map((world) => world.results[option.id]!);
@@ -291,13 +365,34 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
       ...(targetHits !== undefined ? { targetProbability: targetHits } : {}),
     };
   }
-  const criterion = model.objective.target === undefined ? "meanRegret" as const : "targetProbability" as const;
-  const ranked = [...model.options].sort((left, right) => {
+  return options;
+}
+
+function rankOptions(model: DecisionModel, options: Record<string, DecisionOptionSummary>, criterion: DecisionRun["recommendation"]["criterion"]): DecisionOption[] {
+  return [...model.options].sort((left, right) => {
     const a = options[left.id]!, b = options[right.id]!;
     return criterion === "targetProbability"
       ? b.targetProbability! - a.targetProbability! || a.meanRegret - b.meanRegret || b.bestProbability - a.bestProbability
       : a.meanRegret - b.meanRegret || b.bestProbability - a.bestProbability || oriented(model, b.p50) - oriented(model, a.p50);
   });
+}
+
+/** The single definition of who wins a world and what the others give up by being chosen instead. */
+function worldWithResults(model: DecisionModel, world: Omit<DecisionWorld, "results" | "regrets" | "bestOptionId">, results: Record<string, number>): DecisionWorld {
+  const best = model.options.reduce((leader, option) => oriented(model, results[option.id]!) > oriented(model, results[leader.id]!) ? option : leader);
+  const bestValue = oriented(model, results[best.id]!);
+  return {
+    ...world,
+    results,
+    bestOptionId: best.id,
+    regrets: Object.fromEntries(model.options.map((option) => [option.id, bestValue - oriented(model, results[option.id]!) ])),
+  };
+}
+
+function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[]): Omit<DecisionRun, "worlds"> {
+  const options = summarizeOptions(model, worlds);
+  const criterion = model.objective.target === undefined ? "meanRegret" as const : "targetProbability" as const;
+  const ranked = rankOptions(model, options, criterion);
   const recommendedOptionId = ranked[0]!.id;
   const runnerUp = options[ranked[1]!.id]!;
   const winner = options[recommendedOptionId]!;
@@ -343,6 +438,33 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
   };
   const driver = drivers.find((candidate) => candidate.factorId === stress.factorId)!;
   const failureBox = findFailureBox(model, worlds, recommendedOptionId, criterion, objectiveScale);
+  const jointEffects = Object.fromEntries((model.jointEffects ?? []).map((joint) => {
+    const active = worlds.filter((world) => world.jointEffects?.[joint.id]);
+    const ablated = worlds.map((world) => {
+      const contributions = world.jointEffects?.[joint.id];
+      if (!contributions) return world;
+      return worldWithResults(model, world, Object.fromEntries(model.options.map((option) => [option.id, world.results[option.id]! - (contributions[option.id] ?? 0)])));
+    });
+    const recommendedWithoutEffectId = rankOptions(model, summarizeOptions(model, ablated), criterion)[0]!.id;
+    const winnerChanges = worlds.filter((world, index) => world.bestOptionId !== ablated[index]!.bestOptionId).length;
+    // Two conditions leave exactly two useful tests: relax one while holding the other. One test cannot
+    // tell the two single-factor explanations apart, so this pair is already the minimum contrast set.
+    const contrastPlan = joint.when.map((changed, index) => {
+      const held = joint.when[index === 0 ? 1 : 0]!;
+      return { changeFactorId: changed.factorId, changeTo: changed.regime === "low" ? "high" as const : "low" as const, holdFactorId: held.factorId, holdAt: held.regime };
+    });
+    return [joint.id, {
+      activeWorlds: active.length,
+      activationShare: active.length / worlds.length,
+      winnerChanges,
+      winnerChangeShare: winnerChanges / worlds.length,
+      activeWinnerChangeShare: active.length ? winnerChanges / active.length : 0,
+      bestOptionIdWhenActive: rankOptions(model, active.length ? summarizeOptions(model, active) : options, criterion)[0]!.id,
+      recommendedWithoutEffectId,
+      recommendationChanged: recommendedWithoutEffectId !== recommendedOptionId,
+      contrastPlan,
+    } satisfies DecisionJointEffectSummary];
+  }));
   const factor = model.factors.find((candidate) => candidate.id === driver.factorId)!;
   const optionLabels = new Map(model.options.map((option) => [option.id, option.label]));
   const paths: Record<string, number> = {};
@@ -356,11 +478,19 @@ function summarizeDecision(model: DecisionModel, worlds: readonly DecisionWorld[
     const key = world.path.join(" → ");
     paths[key] = (paths[key] ?? 0) + 1;
   }
-  return { options, recommendedOptionId, recommendation: { criterion, margin, close }, driver, stress, ...(failureBox ? { failureBox } : {}), paths };
+  return { options, recommendedOptionId, recommendation: { criterion, margin, close }, driver, stress, ...(failureBox ? { failureBox } : {}), ...(Object.keys(jointEffects).length ? { jointEffects } : {}), paths };
 }
 
 export function runDecision(model: DecisionModel, trials: number, seed: number): DecisionRun {
   assertDecisionModel(model);
+  // Stream addresses and canonical order are properties of the model, so they are resolved once rather
+  // than per world. Order still matters: two relations touching one option must add up the same way every
+  // run, and float addition is not associative.
+  const joints = [...(model.jointEffects ?? [])].sort((a, b) => a.id < b.id ? -1 : 1).map((joint) => ({
+    joint,
+    stream: hash(`joint:${joint.id}`),
+    impacts: [...joint.impacts].sort((a, b) => a.optionId < b.optionId ? -1 : 1).map((impact) => ({ impact, stream: hash(impact.optionId) })),
+  }));
   const worlds = runMonteCarlo(trials, seed, (rng, worldSeed, index): DecisionWorld => {
     const factors: Record<string, number> = {}, normalizedFactors: Record<string, number> = {};
     for (const factor of model.factors) {
@@ -370,16 +500,24 @@ export function runDecision(model: DecisionModel, trials: number, seed: number):
     }
     const results: Record<string, number> = {};
     for (const option of model.options) {
-      const optionRng = new Rng(deriveSeed(worldSeed, hash(option.id)));
+      const optionRng = rng.fork(option.id);
       results[option.id] = sample(option.baseline, optionRng) + option.effects.reduce((sum, effect) => sum + normalizedFactors[effect.factorId]! * sample(effect.impact, optionRng), 0);
     }
-    const best = [...model.options].sort((a, b) => oriented(model, results[b.id]!) - oriented(model, results[a.id]!))[0]!;
-    const bestValue = oriented(model, results[best.id]!);
-    return {
-      index, seed: worldSeed, factors, normalizedFactors, results, bestOptionId: best.id,
-      regrets: Object.fromEntries(model.options.map((option) => [option.id, bestValue - oriented(model, results[option.id]!) ])),
-      path: [],
-    };
+    const jointEffects: Record<string, Record<string, number>> = {};
+    for (const entry of joints) {
+      const matches = entry.joint.when.every((condition) => condition.regime === "low"
+        ? normalizedFactors[condition.factorId]! < -REGIME_BOUNDARY
+        : normalizedFactors[condition.factorId]! > REGIME_BOUNDARY);
+      if (!matches) continue;
+      const contributions: Record<string, number> = {};
+      for (const { impact, stream } of entry.impacts) {
+        const contribution = sample(impact.additionalImpact, rng.fork(entry.stream, stream));
+        contributions[impact.optionId] = contribution;
+        results[impact.optionId] = results[impact.optionId]! + contribution;
+      }
+      jointEffects[entry.joint.id] = contributions;
+    }
+    return worldWithResults(model, { index, seed: worldSeed, factors, normalizedFactors, ...(joints.length ? { jointEffects } : {}), path: [] }, results);
   });
   return { worlds, ...summarizeDecision(model, worlds) };
 }

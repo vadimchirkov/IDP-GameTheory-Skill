@@ -15,6 +15,19 @@ export const rangeSchema = Type.Object({ min: Type.Number(), max: Type.Number() 
 const normalizeRange = (range: { min: number; max: number }): [number, number] => [range.min, range.max];
 
 const decisionEffectSchema = Type.Object({ factorId: Type.String({ minLength: 1, maxLength: 80 }), impact: rangeSchema }, closed);
+const decisionJointEffectSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 80 }),
+  label: Type.String({ minLength: 1, maxLength: 120 }),
+  when: Type.Array(Type.Object({
+    factorId: Type.String({ minLength: 1, maxLength: 80 }),
+    regime: stringEnum(["low", "high"] as const),
+  }, closed), { minItems: 2, maxItems: 2 }),
+  impacts: Type.Array(Type.Object({
+    optionId: Type.String({ minLength: 1, maxLength: 80 }),
+    additionalImpact: rangeSchema,
+  }, closed), { minItems: 1, maxItems: 5 }),
+  assumption: Type.String({ minLength: 1, maxLength: 320 }),
+}, closed);
 export const decisionDraftSchema = Type.Object({
   timeframe: nullable(Type.String({ minLength: 1, maxLength: 240 })),
   question: Type.String({ minLength: 1, maxLength: 320 }),
@@ -33,6 +46,7 @@ export const decisionDraftSchema = Type.Object({
     description: Type.String({ minLength: 1, maxLength: 320 }), baseline: rangeSchema,
     effects: Type.Array(decisionEffectSchema, { maxItems: 8 }),
   }, closed), { minItems: 2, maxItems: 5 }),
+  jointEffects: Type.Array(decisionJointEffectSchema, { maxItems: 1 }),
   assumptions: Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 12 }),
   questions: Type.Array(Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 200 }), field: nullable(Type.String({ minLength: 1, maxLength: 80 })) }, closed), { maxItems: 4 }),
   // Natural-language fields are trimmed at the application boundary. A wider tool contract avoids
@@ -44,15 +58,26 @@ export type DecisionDraft = Static<typeof decisionDraftSchema>;
 const id = (value: string, fallback: string): string => value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback;
 export function normalizeDecisionDraft(output: DecisionDraft, situation: string): DecisionModel {
   const factorIds = new Map(output.factors.map((factor, index) => [factor.id, id(factor.id, `factor-${index + 1}`)]));
+  const optionIds = new Map(output.options.map((option, index) => [option.id, id(option.id, `option-${index + 1}`)]));
   const timeframe = optionalText(output.timeframe);
   return {
     schemaVersion: 1, adapter: "decision", situation, ...(timeframe ? { timeframe } : {}), question: output.question.trim(),
     objective: { label: output.objective.label.trim(), direction: output.objective.direction, ...(output.objective.unit ? { unit: output.objective.unit.trim() } : {}), ...(output.objective.target !== null ? { target: output.objective.target } : {}) },
     factors: output.factors.map((factor, index) => ({ id: factorIds.get(factor.id) ?? `factor-${index + 1}`, label: factor.label.trim(), range: normalizeRange(factor.range), lowLabel: factor.lowLabel.trim(), highLabel: factor.highLabel.trim() })),
     options: output.options.map((option, index) => ({
-      id: id(option.id, `option-${index + 1}`), label: option.label.trim(), description: option.description.trim(), baseline: normalizeRange(option.baseline),
+      id: optionIds.get(option.id) ?? `option-${index + 1}`, label: option.label.trim(), description: option.description.trim(), baseline: normalizeRange(option.baseline),
       effects: option.effects.map((effect) => ({ factorId: factorIds.get(effect.factorId) ?? id(effect.factorId, effect.factorId), impact: normalizeRange(effect.impact) })),
     })),
+    ...(output.jointEffects.length ? { jointEffects: output.jointEffects.map((joint, index) => ({
+      id: id(joint.id, `joint-${index + 1}`),
+      label: joint.label.trim(),
+      when: [0, 1].map((position) => {
+        const condition = joint.when[position]!;
+        return { factorId: factorIds.get(condition.factorId) ?? id(condition.factorId, condition.factorId), regime: condition.regime };
+      }) as [{ factorId: string; regime: "low" | "high" }, { factorId: string; regime: "low" | "high" }],
+      impacts: joint.impacts.map((impact) => ({ optionId: optionIds.get(impact.optionId) ?? id(impact.optionId, impact.optionId), additionalImpact: normalizeRange(impact.additionalImpact) })),
+      assumption: joint.assumption.trim(),
+    })) } : {}),
     assumptions: output.assumptions.map((assumption) => assumption.trim()).filter(Boolean),
   };
 }
@@ -112,12 +137,25 @@ export const agentSelectionSchema = Type.Object({
 }, closed);
 export type AgentSelection = Static<typeof agentSelectionSchema>;
 
-/** One context-building turn before the deterministic model is (re)built. */
+/**
+ * One chat turn. The same reply covers every stage of the workflow: `answer` is a plain reply,
+ * `context` distils a standalone fact the user can add to the situation, and `outcome` reports what
+ * already happened so the run can be reweighted. `message` is always the reply to show.
+ */
 export const contextReplyOutputSchema = Type.Object({
-  kind: stringEnum(["answer", "context"] as const),
+  kind: stringEnum(["answer", "context", "outcome"] as const),
   message: Type.String({ minLength: 1, maxLength: 2000 }),
   suggestions: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 2 }),
   contextNote: nullable(Type.String({ minLength: 1, maxLength: 800 })),
+  observation: nullable(Type.Object({
+    cooperation: nullable(Type.Number({ minimum: 0, maximum: 1 })),
+    winner: nullable(Type.String({ minLength: 1, maxLength: 120 })),
+    regime: nullable(stringEnum(["cooperation", "oscillation", "fragile", "conflict", "exit"] as const)),
+    playerCooperation: nullable(Type.Array(Type.Object({
+      name: Type.String({ minLength: 1, maxLength: 120 }),
+      rate: Type.Number({ minimum: 0, maximum: 1 }),
+    }, closed))),
+  }, closed)),
   title: Type.String({ minLength: 1, maxLength: 72 }),
   researchQueries: Type.Array(Type.Object({
     query: Type.String({ minLength: 1, maxLength: 240 }),
@@ -130,27 +168,6 @@ export const contextReplyOutputSchema = Type.Object({
   }, closed)),
 }, closed);
 export type ContextReplyOutput = Static<typeof contextReplyOutputSchema>;
-
-/**
- * Router output for a chat turn. The agent decides whether the message is a plain question or a
- * statement about what the situation is (`answer`, replied to and left for the user to edit the model),
- * or a fact about what already happened (`outcome`, reweight now). `message` is always the reply to show.
- */
-export const factRoutingOutputSchema = Type.Object({
-  kind: stringEnum(["answer", "outcome"] as const),
-  message: Type.String({ minLength: 1, maxLength: 2000 }),
-  suggestions: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 2 }),
-  observation: nullable(Type.Object({
-    cooperation: nullable(Type.Number({ minimum: 0, maximum: 1 })),
-    winner: nullable(Type.String({ minLength: 1, maxLength: 120 })),
-    regime: nullable(stringEnum(["cooperation", "oscillation", "fragile", "conflict", "exit"] as const)),
-    playerCooperation: nullable(Type.Array(Type.Object({
-      name: Type.String({ minLength: 1, maxLength: 120 }),
-      rate: Type.Number({ minimum: 0, maximum: 1 }),
-    }, closed))),
-  }, closed)),
-}, closed);
-export type FactRoutingOutput = Static<typeof factRoutingOutputSchema>;
 
 export const worldLabelsOutputSchema = Type.Object({
   labels: Type.Array(Type.Object({

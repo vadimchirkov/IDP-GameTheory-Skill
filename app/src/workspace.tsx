@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  chatTask, clarifyTask, confirmContext, confirmOutcome, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, relabelTask, removeProviderKey, runTask, saveProviderKey, sendCommand, understandTask, understandTaskStream,
-  type AgentMode, type AgentModelStatus, type AgentSelection, type DecisionModel, type Fact, type FactCommand, type ModelMode, type PinnedContext, type PinnedKind, type RiverSelection, type ScenarioModel, type TaskState, type TaskSummary, type WorldReplay,
+  clarifyTask, confirmContext, confirmOutcome, createTask, getAgentStatus, getPosterior, getTask, getTasks, getWorldReplay, relabelTask, removeProviderKey, runTask, saveProviderKey, sendCommand, understandTaskStream,
+  type AgentEvent, type AgentModelStatus, type AgentSelection, type DecisionModel, type Fact, type FactCommand, type ModelMode, type PinnedContext, type PinnedKind, type RiverSelection, type ScenarioModel, type TaskState, type TaskSummary, type WorldReplay,
 } from "./api";
+import { REGIME_SHARE } from "../../src/adapters/decision";
 import { RiverActivity } from "./river-activity";
 import { relativeTime } from "./relative-time";
 
@@ -12,6 +13,11 @@ const statusName = { ready: "Ready", running: "Running", labeling: "Labeling", c
 type PromptState = { mode: "create"; taskId: string };
 type ModelOption = AgentModelStatus;
 type BuildActivityItem = { id: string; stage: string; message: string; status: "active" | "done" | "failed" };
+/** Mark whatever was running as failed and append the reason as the last step. */
+const failStage = (items: BuildActivityItem[], message: string): BuildActivityItem[] => [
+  ...items.map((item) => item.status === "active" ? { ...item, status: "failed" as const } : item),
+  { id: `error-${items.length}`, stage: "error", message, status: "failed" as const },
+].slice(-6);
 type PendingDelete =
   | { id: string; kind: "task"; task: TaskSummary; nextTaskId?: string; committing?: boolean }
   | { id: string; kind: "analysis"; taskId: string; revision: number; analysis: TaskState["analyses"][number]; wasSelected: boolean; committing?: boolean };
@@ -243,6 +249,8 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   });
   const [relabelPending, setRelabelPending] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [agentStage, setAgentStage] = useState<{ label: string; detail?: string }>();
+  const [streamedReply, setStreamedReply] = useState("");
   const [initialGuidePending, setInitialGuidePending] = useState(false);
   const initialGuideAbort = useRef<AbortController | undefined>(undefined);
   const [chatFollowUps, setChatFollowUps] = useState<string[]>([]);
@@ -274,10 +282,9 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId!), enabled: Boolean(taskId) });
   const agent = useQuery({ queryKey: ["agent-status"], queryFn: getAgentStatus, retry: 0 });
   const current = task.data;
-  // Two roles, not three: one thread guides the situation before a run, the other reads the river after
-  // it. The agent cannot edit the model in either, so a separate "model" chat promised what it can't do.
-  const assistantMode: AgentMode = current?.model && centerTab === "river" ? "river" : "context";
-  const chatMessages = (current?.messages ?? []).filter((message) => (assistantMode === "river" ? message.mode === "river" : message.mode !== "river"));
+  // One assistant, one thread. The workspace tab used to decide which agent answered and which half of
+  // the history was visible, so moving between Context and Worlds silently hid the conversation.
+  const chatMessages = current?.messages ?? [];
   const storedFollowUps = [...chatMessages].reverse().find((message) => message.role === "agent" && message.suggestions?.length)?.suggestions ?? [];
 
   useEffect(() => {
@@ -300,19 +307,13 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setPendingQueue([]);
   }, [taskId, current?.id]);
 
-  // auto-clean nullish pending items (fixes "Suggested from chat null" bug)
-  useEffect(() => {
-    setPendingQueue((prev) => {
-      const filtered = prev.filter((p) => p.note && !/^(null|undefined|none)$/i.test(p.note.trim()) && p.note.trim().length >= 8);
-      return filtered.length === prev.length ? prev : filtered;
-    });
-  }, [pendingQueue]);
-
   useEffect(() => {
     if (!taskId) return;
     const stream = new EventSource(`/api/tasks/${taskId}/events`);
     stream.onmessage = () => {
-      void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      // The chat response is authoritative when it finishes. Refetching snapshots while it is in
+      // flight can briefly replace the optimistic turn or the final response with older history.
+      if (!chatAbort.current && !initialGuideAbort.current) void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     };
     stream.onopen = () => setStreamError("");
@@ -351,51 +352,61 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
 
   const createMutation = useMutation({ mutationFn: ({ text, id }: { text: string; id: string }) => createTask(text, id) });
   const commandMutation = useMutation({ mutationFn: ({ id, value }: { id: string; value: FactCommand }) => sendCommand(id, value) });
-  const agentMutation = useMutation({ mutationFn: ({ id, mode }: { id: string; mode: ModelMode }) => understandTask(id, selectedAgent, mode) });
-  // keep agentMutation for fallback non-stream calls; streaming uses understandTaskStream directly
   const keyMutation = useMutation({ mutationFn: ({ provider, key }: { provider: string; key?: string }) => key ? saveProviderKey(provider, key) : removeProviderKey(provider) });
   const addPin = (item: PinnedContext) => setPinned((prev) => prev.some((p) => p.id === item.id) ? prev : [...prev, item].slice(0, 12));
   const removePin = (id: string) => setPinned((prev) => prev.filter((p) => p.id !== id));
   const clearPins = () => setPinned([]);
 
+  /** Every agent stream narrates itself the same way, so build and chat share one progress reducer. */
+  const trackAgent = (event: AgentEvent) => {
+    if (event.kind === "status" || event.kind === "progress") {
+      setAgentStage({ label: event.message ?? "Working…", ...(event.attempt && event.attempt > 1 ? { detail: `attempt ${event.attempt}` } : {}) });
+    }
+    // onText carries the whole reply so far, never a delta — replace, do not append.
+    if (event.kind === "text") setStreamedReply(event.text ?? "");
+    // A research pass rewrites the answer. Keep the first draft visible until replacement text
+    // arrives instead of flashing an empty bubble between the two passes.
+  };
+
   // The chat is the conversational way in: the agent answers questions and files facts itself, so the
   // user never has to decide which box a sentence belongs in.
   const chatMutation = useMutation({
-    mutationFn: async (vars: { message: string }) => {
+    mutationFn: async (vars: { message: string; messageId: string }) => {
       if (!taskId) throw new Error("Open a situation first");
       const controller = new AbortController();
       chatAbort.current = controller;
-      const routed = assistantMode === "river"
-        ? await chatTask(taskId, vars.message, selectedAgent, riverSelection, selectedAnalysisId, pinned)
-        : await clarifyTask(taskId, { message: vars.message, agent: selectedAgent, pinned }, controller.signal).catch((error: unknown) => {
-          // A running pre-upgrade server has no /clarify route yet; keep context prompts usable.
-          if (error instanceof Error && error.message === "Not found") return chatTask(taskId, vars.message, selectedAgent, undefined, undefined, pinned);
-          throw error;
-        });
+      setAgentStage(undefined);
+      setStreamedReply("");
+      const routed = await clarifyTask(taskId, {
+        message: vars.message, clientMessageId: vars.messageId, agent: selectedAgent, pinned,
+        ...(riverSelection ? { selection: riverSelection } : {}),
+        ...(selectedAnalysisId ? { analysisId: selectedAnalysisId } : {}),
+      }, trackAgent, controller.signal);
       if (routed.task) cacheTask(routed.task);
-      const pending = (routed as unknown as { pendingContext?: { note: string; display: string } }).pendingContext;
-      if (pending?.note) {
-        const norm = pending.note.trim();
-        const isNullish = !norm || /^(null|undefined|none)$/i.test(norm) || norm.length < 8;
-        if (isNullish) return routed;
-        const display = (pending.display && !/^(null|undefined)$/i.test(pending.display)) ? pending.display : norm.slice(0, 220);
-        setPendingQueue((prev) => {
-          if (prev.some((p) => p.note === norm)) return prev;
-          const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
-          return [...prev, { id, note: norm, display, edit: norm }];
-        });
-      }
+      // The server owns what counts as a usable note; the client only queues it for review.
+      const pending = routed.pendingContext;
+      if (pending?.note) setPendingQueue((prev) => prev.some((item) => item.note === pending.note)
+        ? prev
+        : [...prev, { id: crypto.randomUUID(), note: pending.note, display: pending.display, edit: pending.note }]);
       return routed;
     },
-    onSettled: () => { chatAbort.current = undefined; },
+    onMutate: async ({ message, messageId }) => {
+      if (!taskId) return;
+      await queryClient.cancelQueries({ queryKey: ["task", taskId] });
+      queryClient.setQueryData<TaskState>(["task", taskId], (state) => state && !state.messages.some((item) => item.id === messageId)
+        ? { ...state, messages: [...state.messages, { id: messageId, role: "user", mode: "context", text: message, revision: state.revision, createdAt: new Date().toISOString() }] }
+        : state);
+    },
+    onError: () => { if (taskId) void queryClient.invalidateQueries({ queryKey: ["task", taskId] }); },
+    onSettled: () => { chatAbort.current = undefined; setAgentStage(undefined); setStreamedReply(""); },
   });
   const replayMutation = useMutation({ mutationFn: ({ taskId, analysisId, index }: { taskId: string; analysisId: string; index: number }) => getWorldReplay(taskId, analysisId, index) });
   const buildActive = current?.activeBuild?.status === "running" || current?.status === "building";
   const buildFailed = buildActivity.some((item) => item.status === "failed");
-  const busy = createMutation.isPending || commandMutation.isPending || agentMutation.isPending || streaming || buildActive;
+  const busy = createMutation.isPending || commandMutation.isPending || streaming || buildActive;
   const promptBusy = createMutation.isPending;
   const elapsed = useElapsed(busy);
-  const assistantPending = chatMutation.isPending || agentMutation.isPending || initialGuidePending;
+  const assistantPending = chatMutation.isPending || initialGuidePending;
   const chatElapsed = useElapsed(assistantPending);
 
   const cacheTask = (value: TaskState) => {
@@ -435,57 +446,39 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     setRunError("");
     setRebuildDone(false);
     setBuildActivity([]);
+    setAgentStage(undefined);
     setStreaming(true);
     setCenterTab("model");
-    const advanceStage = (ev: Record<string, unknown>) => {
-      const stage = String(ev.stage ?? "");
-      if (ev.kind === "error") {
-        const message = String(ev.error ?? "The model build stopped").trim();
-        setBuildActivity((items) => {
-          const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
-          const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
-          return next.slice(-6);
-        });
+    const advanceStage = (event: AgentEvent) => {
+      trackAgent(event);
+      if (event.kind === "error") {
+        setBuildActivity((items) => failStage(items, (event.error ?? "The model build stopped").trim()));
         return;
       }
-      if (ev.kind === "done") {
+      if (event.kind === "done") {
         setBuildActivity((items) => items.map((item) => ({ ...item, status: "done" as const })));
         return;
       }
-      const message = String(ev.message ?? "").trim();
-      if (!message || !stage || stage === "shape" || stage === "save") return;
+      const message = (event.message ?? "").trim();
+      const stage = event.stage ?? "";
+      if (!message || !stage) return;
       setBuildActivity((items) => {
-        const current = items.at(-1);
-        if (current?.stage === stage && current.message === message) return items;
+        const last = items.at(-1);
+        if (last?.stage === stage && last.message === message) return items;
         return [...items.map((item) => ({ ...item, status: "done" as const })), { id: `${stage}-${items.length}`, stage, message, status: "active" as const }].slice(-6);
       });
     };
     try {
-      // Prefer streaming endpoint (shows live agent messages); fallback to classic
-      let task: TaskState;
-      try {
-        task = await understandTaskStream(id, selectedAgent, modelMode, advanceStage);
-      } catch (e) {
-        // If streaming not available, fallback
-        if (!String(e).includes("Streaming not supported")) throw e;
-        task = await agentMutation.mutateAsync({ id, mode: modelMode });
-      }
-      cacheTask(task);
+      cacheTask(await understandTaskStream(id, selectedAgent, modelMode, advanceStage));
       if (buildCancelled.current) return;
       if (selectedAgent) { const value = selectionValue(selectedAgent); saveSelection(value, models); setAgentKey(value); }
       setRebuildDone(true);
       window.setTimeout(() => setRebuildDone(false), 4000);
     } catch (error) {
       if (buildCancelled.current) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setBuildActivity((items) => {
-        if (items.at(-1)?.status === "failed") return items;
-        const failed: BuildActivityItem[] = items.map((item) => ({ ...item, status: (item.status === "active" ? "failed" : item.status) as BuildActivityItem["status"] }));
-        const next: BuildActivityItem[] = [...failed, { id: `error-${items.length}`, stage: "error", message, status: "failed" }];
-        return next.slice(-6);
-      });
+      setBuildActivity((items) => items.at(-1)?.status === "failed" ? items : failStage(items, error instanceof Error ? error.message : String(error)));
     }
-    finally { setStreaming(false); }
+    finally { setStreaming(false); setAgentStage(undefined); }
   };
 
   const submitPrompt = async (event: FormEvent) => {
@@ -508,14 +501,18 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
         initialGuideAbort.current = controller;
         setInitialGuidePending(true);
         setChatError("");
+        setAgentStage(undefined);
+        setStreamedReply("");
         try {
-          const guided = await clarifyTask(created.id, { agent: selectedAgent }, controller.signal);
+          const guided = await clarifyTask(created.id, { agent: selectedAgent }, trackAgent, controller.signal);
           cacheTask(guided.task);
         } catch (error) {
-          if (!(error instanceof DOMException && error.name === "AbortError")) setChatError(`The situation was saved, but the context guide failed: ${error instanceof Error ? error.message : String(error)}`);
+          if (!(error instanceof DOMException && error.name === "AbortError")) setChatError(`The situation was saved, but the assistant failed: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
           if (initialGuideAbort.current === controller) initialGuideAbort.current = undefined;
           setInitialGuidePending(false);
+          setAgentStage(undefined);
+          setStreamedReply("");
         }
       }
     } catch (error) { setPromptError(error instanceof Error ? error.message : String(error)); }
@@ -671,13 +668,10 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     if (!selectedAgent && !agentAvailable) { setChatError(agentStatusText); openSettings(); return; }
     setChatError("");
     try {
-      if (assistantMode !== "river") await persistSituation();
-      const result = await chatMutation.mutateAsync({ message });
+      await persistSituation();
+      const result = await chatMutation.mutateAsync({ message, messageId: crypto.randomUUID() });
       setChatFollowUps(result.suggestions ?? []);
-      if ((result as unknown as { pendingOutcome?: { observation: Record<string, unknown>; display: string } }).pendingOutcome) {
-        const pending = (result as unknown as { pendingOutcome: { observation: Record<string, unknown>; display: string } }).pendingOutcome;
-        setPendingOutcome({ message, observation: pending.observation, display: pending.display });
-      }
+      if (result.pendingOutcome) setPendingOutcome({ message, observation: result.pendingOutcome.observation, display: result.pendingOutcome.display });
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) setChatError(error instanceof Error ? error.message : String(error));
     }
@@ -778,23 +772,22 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
   const questionsStale = current?.questionsRevision !== undefined && current.questionsRevision !== current.revision;
   const researchStale = current?.researchRevision !== undefined && current.researchRevision !== current.revision;
   const openQs = (current?.openQuestions ?? []).slice(0, 3);
-  const contextualSuggestions = assistantMode === "context"
-    ? [
-        ...openQs.map((q) => q.prompt),
-        ...(current?.model
-          ? ["Which assumption changes the result most?", "What is the weakest part of this model?"]
-          : [
-              ...(openQs.length ? [] : ["What important context is still missing?"]),
-              ...(current?.researchSources?.length ? ["Which public evidence matters most here?"] : ["What could you verify from public sources?"]),
-            ]),
-      ].slice(0, 4)
-    : riverSelection && riverSelection.kind !== "all"
+  // Open questions come first wherever the user is standing; the rest follows how far the work has got.
+  const contextualSuggestions = [
+    ...openQs.map((question) => question.prompt),
+    ...(riverSelection && riverSelection.kind !== "all"
       ? [`Why does “${riverSelection.label}” emerge?`, "What would make this branch less likely?"]
       : selectedAnalysis
         ? decisionCurrent
           ? ["What makes the recommended option robust?", "What could reverse this recommendation?"]
           : ["What drives the most likely outcome?", "Which assumption changes this run most?"]
-        : ["What will the first run reveal?", "What should I check before running it?"];
+        : current?.model
+          ? ["Which assumption changes the result most?", "What is the weakest part of this model?"]
+          : [
+              ...(openQs.length ? [] : ["What important context is still missing?"]),
+              ...(current?.researchSources?.length ? ["Which public evidence matters most here?"] : ["What could you verify from public sources?"]),
+            ]),
+  ].slice(0, 4);
   const chatSuggestions = chatFollowUps.length ? chatFollowUps : storedFollowUps.length ? [...storedFollowUps] : contextualSuggestions;
   const openQuestionIds = new Map(openQs.map((q) => [q.prompt, q.id]));
 
@@ -808,12 +801,12 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
 
   useEffect(() => { setChatError(""); }, [taskId]);
 
-  useEffect(() => { setChatFollowUps([]); }, [taskId, assistantMode, selectedAnalysisId, riverSelection?.kind, riverSelection?.label]);
+  useEffect(() => { setChatFollowUps([]); }, [taskId, selectedAnalysisId, riverSelection?.kind, riverSelection?.label]);
 
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight, behavior: "smooth" }));
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight, behavior: assistantPending ? "auto" : "smooth" }));
     return () => cancelAnimationFrame(frame);
-  }, [chatMessages.length, chatMutation.isPending, streaming]);
+  }, [chatMessages.length, assistantPending, streamedReply, streaming]);
 
   useEffect(() => {
     const receiveSelection = (event: MessageEvent) => {
@@ -857,7 +850,6 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     catch (error) { setReplayError(error instanceof Error ? error.message : String(error)); }
   };
   const appClass = ["app", hideSituations && "hide-situations", agentPanel && "agent-open", situationsOpen && "mobile-situations"].filter(Boolean).join(" ");
-  const assistantTitle = assistantMode === "river" ? "River analyst" : "Context guide";
   const promptTitle = "New situation";
   const promptHint = "Describe the situation in your own words: who is involved, what they want, which choices they have, and what makes it hard. The agent will fill in the rest and ask about anything it cannot infer.";
   const workingLabel = "Reading the situation";
@@ -912,7 +904,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
             {workflowRunning && <button type="button" className="workflow-cancel" onClick={cancelAnalysis} disabled={busy}>Cancel</button>}
             {(streaming || buildActive) && <button type="button" className="workflow-cancel" onClick={() => void cancelModelBuild()} disabled={commandMutation.isPending || !current.activeBuild}>Cancel model build</button>}
             {!streaming && !buildActive && !workflowRunning && (!current.model || situationStale) && modelBuildSupported && <><fieldset className="model-mode"><legend>Model type</legend><label><input type="radio" name="model-mode" value="decision" checked={modelMode === "decision"} onChange={() => setModelMode("decision")} /><b>Decision comparison</b><span>Compare actions under shared uncertainty</span></label><label><input type="radio" name="model-mode" value="strategic" checked={modelMode === "strategic"} onChange={() => setModelMode("strategic")} /><b>Strategic interaction</b><span>Model repeated C/D reactions between parties</span></label></fieldset><button type="button" className="primary workflow-action" onClick={() => void reviewWithAgent()} disabled={busy || !agentAvailable}>{current.model ? "Rebuild model" : "Build model"}</button></>}
-            {buildActivity.length > 0 && (streaming || buildActive || buildFailed || rebuildDone) && <BuildActivity items={buildActivity} active={streaming || buildActive} />}
+            {buildActivity.length > 0 && (streaming || buildActive || buildFailed || rebuildDone) && <BuildActivity items={buildActivity} active={streaming || buildActive} detail={[agentStage?.detail, shortTime(elapsed)].filter(Boolean).join(" · ")} />}
             {!streaming && !buildActive && !workflowRunning && current.model && !situationStale && <section className="workflow-simulation"><div><span className="eyebrow">Simulation</span><p>Turn the finished model into possible worlds.</p></div><div className="workflow-run"><label><span>Worlds to explore</span><input type="number" min="1" max="5000" step="1" value={trials} disabled={analysisActive} onChange={(event) => { if (Number.isFinite(event.currentTarget.valueAsNumber)) setTrials(event.currentTarget.valueAsNumber); }} onBlur={() => setTrials(Math.min(5000, Math.max(1, Math.round(trials))))} /></label><button type="button" className="primary" onClick={() => void runAnalysis()} disabled={busy}>{selectedAnalysis ? "Run again" : "Run simulation"}</button></div></section>}
             {runError && !streaming && <div className="error" role="alert">{runError}</div>}
           </section>
@@ -944,24 +936,24 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
     <div className="toast-region" aria-label="Notifications" aria-live="polite">{pendingDeletes.filter((item) => !item.committing).map((item) => <div className="undo-toast" role="status" key={item.id}><span>{item.kind === "task" ? `World “${item.task.title}” deleted` : `Run with ${item.analysis.trials} ${word(item.analysis.trials, "world", "worlds", "worlds")} deleted`}</span><button onClick={() => undoDelete(item.id)}>Undo</button></div>)}</div>
 
     <aside className={`agent-drawer ${agentPanel ? "open" : ""}`} aria-label="Pi assistant" aria-hidden={!agentPanel}>
-      <header><div><b>{assistantTitle}</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : agentAvailable ? "No model selected" : "Not configured"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
+      <header><div><b>Assistant</b><span>{selectedAgent ? models.find((model) => model.provider === selectedAgent.provider && model.model === selectedAgent.model)?.name ?? selectedAgent.model : agentAvailable ? "No model selected" : "Not configured"}</span></div><button className="icon quiet" onClick={() => setAgentPanel(false)} aria-label="Close assistant"><Icon name="close" /></button></header>
       {!agentAvailable && <div className="agent-drawer-banner" role="status">Agent not configured — <button className="link-button" onClick={openSettings}>open Settings</button> to add an API key.</div>}
       {pendingOutcome && <div className="pending-outcome" role="dialog" aria-label="Confirm outcome fact"><div><b>File as outcome?</b><span>{pendingOutcome.display || pendingOutcome.message.slice(0,180)}</span><small>{pendingOutcome.observation.winner ? `winner: ${String(pendingOutcome.observation.winner)}` : ""}{pendingOutcome.observation.cooperation !== undefined ? ` · coop ${(Number(pendingOutcome.observation.cooperation)*100).toFixed(0)}%` : ""}</small></div><div className="pending-actions"><button onClick={() => setPendingOutcome(null)}>Cancel</button><button className="primary" onClick={() => void confirmPendingOutcome()}>File it</button></div></div>}
       {pendingQueue.length > 0 && <div className="pending-outcome pending-context compact" role="status"><div><b>{pendingQueue.length} context suggestion{pendingQueue.length>1?"s":""} ready</b><small>Chat found new facts for Model Context. Review in Context tab to confirm, edit or dismiss.</small></div><div className="pending-actions"><button onClick={() => setCenterTab("context")}>Review in Context</button><button className="link-button" onClick={() => setPendingQueue([])}>Dismiss all</button></div></div>}
        <div className="chat-messages" ref={chatScroll}>{chatMessages.length ? chatMessages.map((message) => <div className={`chat-entry ${message.role}`} key={message.id}><div className="chat-message"><MarkdownMessage text={message.text} /></div></div>) : <div className="chat-empty">{chatSuggestions.length > 0 && <div className="chat-suggestions">{chatSuggestions.slice(0, 4).map((suggestion) => {
             const qid = openQuestionIds.get(suggestion);
             return qid ? (
-              <div key={suggestion} className="chat-suggestion-row"><button type="button" onClick={() => answerQuestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button><button type="button" className="icon quiet" onClick={() => void runCommand({ tag: "DismissQuestion", questionId: qid })} aria-label="Dismiss question">×</button></div>
+              <div key={suggestion} className="chat-suggestion-row"><button type="button" onClick={() => answerQuestion(suggestion)} disabled={chatMutation.isPending || !agentAvailable}>{suggestion}</button><button type="button" className="icon quiet" onClick={() => void runCommand({ tag: "DismissQuestion", questionId: qid })} aria-label="Dismiss question">×</button></div>
             ) : (
-              <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}>{suggestion}</button>
+              <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || !agentAvailable}>{suggestion}</button>
             );
-          })}</div>}</div>}{assistantPending && !streaming && <div className="chat-entry agent pending"><div className="chat-pending"><RiverActivity compact label={assistantMode === "river" ? "Reading the river" : "Checking the context"} detail={assistantMode === "river" ? "Connecting your question to the calculated worlds" : `May check public sources · ${shortTime(chatElapsed)}`} />{assistantMode !== "river" && <button type="button" onClick={() => { chatAbort.current?.abort(); initialGuideAbort.current?.abort(); }}>Cancel</button>}</div></div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
+          })}</div>}</div>}{assistantPending && !streaming && <div className="chat-entry agent pending"><div className="chat-pending"><RiverActivity compact label={agentStage?.label ?? "Reading the context…"} detail={[agentStage?.detail, shortTime(chatElapsed)].filter(Boolean).join(" · ")} /><button type="button" onClick={() => { chatAbort.current?.abort(); initialGuideAbort.current?.abort(); }}>Cancel</button></div>{streamedReply && <div className="chat-message chat-streaming"><MarkdownMessage text={streamedReply} /></div>}</div>}{chatError && <div className="error" role="alert">{chatError}</div>}</div>
       <form className="chat-form" onSubmit={(event) => void submitChat(event)}>{chatMessages.length > 0 && <div className="chat-quick-actions">{chatSuggestions.slice(0, 4).map((suggestion) => {
             const qid = openQuestionIds.get(suggestion);
             return qid ? (
-              <div key={suggestion} className="chat-suggestion-row"><button type="button" onClick={() => answerQuestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending}>{suggestion}</button><button type="button" className="icon quiet" onClick={() => void runCommand({ tag: "DismissQuestion", questionId: qid })} aria-label="Dismiss">×</button></div>
+              <div key={suggestion} className="chat-suggestion-row"><button type="button" onClick={() => answerQuestion(suggestion)} disabled={chatMutation.isPending}>{suggestion}</button><button type="button" className="icon quiet" onClick={() => void runCommand({ tag: "DismissQuestion", questionId: qid })} aria-label="Dismiss">×</button></div>
             ) : (
-              <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending || agentMutation.isPending}>{suggestion}</button>
+              <button type="button" key={suggestion} onClick={() => void handleSuggestion(suggestion)} disabled={chatMutation.isPending}>{suggestion}</button>
             );
           })}</div>}<div className="chat-input-shell">
         {(pinned.length > 0 || pickerOpen) && <div className="chat-pinned-row">
@@ -970,7 +962,7 @@ export function Workspace({ taskId, selectedRun, onSelectRun = () => {} }: { tas
         </div>}
         {!pinned.length && !pickerOpen && <button type="button" className="pinned-add pinned-add-empty" onClick={() => setPickerOpen(true)}><Icon name="plus" /><span>Add context</span><small>@ branch · option · factor</small></button>}
         {pickerOpen && <PinnedPicker current={current} riverSelection={riverSelection} pinnedIds={new Set(pinned.map((p) => p.id))} query={pickerQuery} onQuery={setPickerQuery} onPick={(item) => { addPin(item); setPickerOpen(false); setPickerQuery(""); }} onClose={() => setPickerOpen(false)} />}
-        <textarea ref={chatInput} name="chat" aria-label="Message the assistant" placeholder={!agentAvailable ? "Configure agent first…" : assistantMode === "river" ? decisionCurrent ? "Ask what makes an option win…" : "Ask about the river or report an outcome…" : "Add context or ask what is missing…"} rows={3} disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } if (event.key === "Backspace" && !event.currentTarget.value && pinned.length) { event.preventDefault(); removePin(pinned[pinned.length - 1]!.id); } if (event.key === "@" && !pickerOpen) setPickerOpen(true); }} onChange={(e) => { if (e.target.value.includes("@")) setPickerOpen(true); }} /><div className="chat-input-footer"><span className="chat-enter-hint">Shift + Enter — new line · @ to add context · Backspace to remove last chip</span></div><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || agentMutation.isPending || !agentAvailable}><Icon name="send" /></button></div></form>
+        <textarea ref={chatInput} name="chat" aria-label="Message the assistant" placeholder={!agentAvailable ? "Configure agent first…" : selectedAnalysis ? "Ask about the result, add context, or report what happened…" : "Add context or ask what is still missing…"} rows={3} disabled={chatMutation.isPending || !agentAvailable} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } if (event.key === "Backspace" && !event.currentTarget.value && pinned.length) { event.preventDefault(); removePin(pinned[pinned.length - 1]!.id); } if (event.key === "@" && !pickerOpen) setPickerOpen(true); }} onChange={(e) => { if (e.target.value.includes("@")) setPickerOpen(true); }} /><div className="chat-input-footer"><span className="chat-enter-hint">Shift + Enter — new line · @ to add context · Backspace to remove last chip</span></div><button className="chat-send icon" aria-label="Send message" title="Send" disabled={chatMutation.isPending || !agentAvailable}><Icon name="send" /></button></div></form>
     </aside>
 
     <dialog ref={promptDialog} onClose={() => setPrompt(undefined)}>
@@ -1037,13 +1029,21 @@ function WorldReplayCard({ value }: { value: WorldReplay }) {
   </section>;
 }
 
-function BuildActivity({ items, active }: { items: BuildActivityItem[]; active: boolean }) {
+/**
+ * The live model build. Drafting the model is one long agent call, so the head shows what it is doing
+ * now with a running clock — the finished steps behind it are a trail, not the progress signal.
+ */
+function BuildActivity({ items, active, detail }: { items: BuildActivityItem[]; active: boolean; detail?: string }) {
   const failed = items.some((item) => item.status === "failed");
-  return <section className="model-build-report" aria-label="Live model build" aria-live="polite">
-    <div className="model-build-report-head"><span>{failed ? "Model build stopped" : active ? "Working on the model" : "Model build complete"}</span></div>
-    <ol>
-      {items.map((item) => <li className={item.status} key={item.id}><i aria-hidden>{item.status === "done" ? "✓" : item.status === "failed" ? "!" : ""}</i><span>{item.message}</span></li>)}
-    </ol>
+  const head = items.find((item) => item.status === (failed ? "failed" : "active")) ?? items.at(-1);
+  const trail = items.filter((item) => item !== head);
+  return <section className={`model-build-report${failed ? " failed" : ""}`} aria-label="Live model build" aria-live="polite">
+    {active
+      ? <RiverActivity compact label={head?.message ?? "Working on the model…"} {...(detail ? { detail } : {})} />
+      : <div className="model-build-head"><i aria-hidden>{failed ? "!" : "✓"}</i><span>{failed ? head?.message ?? "The model build stopped" : "Model build complete"}</span></div>}
+    {trail.length > 0 && <ol>
+      {trail.map((item) => <li className={item.status} key={item.id}><i aria-hidden>{item.status === "failed" ? "!" : "✓"}</i><span>{item.message}</span></li>)}
+    </ol>}
   </section>;
 }
 
@@ -1068,6 +1068,11 @@ function DecisionModelReview({ model, onPin }: { model: DecisionModel; onPin?: (
     <p className="model-caveat">Ranges and effects are inspectable scenario assumptions, not measured forecasts. Public sources support only the claims they explicitly state.</p>
     <div className="decision-model-grid"><section><h3>Options</h3><ol>{model.options.map((option) => <li key={option.id}><b>{option.label}</b><span>{option.description}</span><small>midpoint outcome {range(option.baseline)}{model.objective.unit ? ` ${model.objective.unit}` : ""}</small>{onPin && <button className="link-button" onClick={() => onPin({id:`option-${option.id}`,kind:"option",label:option.label,detail:option.description})}>Pin to chat</button>}</li>)}</ol></section><section><h3>Shared uncertainties</h3><ul>{model.factors.map((factor) => <li key={factor.id}><b>{factor.label}</b><span>{range(factor.range)}</span><small>{factor.lowLabel} ↔ {factor.highLabel}</small>{onPin && <button className="link-button" onClick={() => onPin({id:`factor-${factor.id}`,kind:"factor",label:factor.label,detail:`${range(factor.range)} · ${factor.lowLabel} ↔ ${factor.highLabel}`})}>Pin to chat</button>}</li>)}</ul></section></div>
     <details className="decision-effects"><summary>How options respond</summary><p>Objective change at each factor’s high end; the low end applies the opposite change.</p><div><table><thead><tr><th>Option</th>{model.factors.map((factor) => <th key={factor.id}>{factor.highLabel || factor.label}</th>)}</tr></thead><tbody>{model.options.map((option) => <tr key={option.id}><th>{option.label}</th>{model.factors.map((factor) => <td key={factor.id}>{effect(option.effects.find((item) => item.factorId === factor.id)?.impact)}{model.objective.unit ? ` ${model.objective.unit}` : ""}</td>)}</tr>)}</tbody></table></div></details>
+    {!!model.jointEffects?.length && <details><summary>Joint dependencies · {model.jointEffects.length}</summary><p>Extra effects the run applies only when both conditions hold. You are accepting them as assumptions; the run cannot confirm them.</p><ul>{model.jointEffects.map((joint) => {
+      const conditions = joint.when.map((condition) => { const factor = model.factors.find((item) => item.id === condition.factorId)!; return condition.regime === "low" ? factor.lowLabel || `Low ${factor.label}` : factor.highLabel || `High ${factor.label}`; }).join(" and ");
+      const impacts = joint.impacts.map((impact) => { const option = model.options.find((item) => item.id === impact.optionId)!; return `${option.label} ${effect(impact.additionalImpact)}${model.objective.unit ? ` ${model.objective.unit}` : ""}`; }).join(", ");
+      return <li key={joint.id}><b>{joint.label}</b><span>When {conditions} — each the outer {Math.round(REGIME_SHARE * 100)}% of its range — the run adds {impacts}.</span><small>{joint.assumption}</small>{onPin && <button className="link-button" onClick={() => onPin({id:`assump-joint-${joint.id}`,kind:"assumption",label:joint.label,detail:`${conditions}. ${joint.assumption}`})}>Pin</button>}</li>;
+    })}</ul></details>}
     {!!model.assumptions.length && <details><summary>Material assumptions · {model.assumptions.length}</summary><ul>{model.assumptions.map((assumption, index) => <li key={index}><span>{assumption}</span>{onPin && <button className="link-button" onClick={() => onPin({id:`assump-${index}`,kind:"assumption",label:assumption.slice(0,40),detail:assumption})}>Pin</button>}</li>)}</ul></details>}
   </section>;
 }

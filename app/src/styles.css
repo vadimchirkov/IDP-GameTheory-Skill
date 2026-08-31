@@ -166,7 +166,7 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .stage-switcher button i { width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: inherit; font-size: 8px; font-style: normal; font-variant-numeric: tabular-nums }
 .stage-switcher button.active i { border-color: var(--ink) }.stage-switcher button.done i { border-color: var(--accent) }
 .stage-switcher > b { width: 28px; height: 1px; background: var(--line-strong) }
-.model-pane { flex: 1; min-height: 0; display: flex; overflow: hidden }
+.model-pane { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scroll-padding-block: 16px }
 .context-pane { flex: 1; min-height: 0; overflow: auto; padding: 28px 16px 40px }
 .context-workspace { width: min(640px, 100%); margin: 0 auto }
 .context-card { margin: 0; border: 0; border-radius: 0; background: transparent }
@@ -195,7 +195,7 @@ input::placeholder, textarea::placeholder { color: #686868; opacity: 1 }
 .research-source-list span { display: block; overflow: hidden; padding-right: 18px; text-overflow: ellipsis; white-space: nowrap; font-size: 10px }
 .research-source-list small { display: block; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap }
 .context-sources.stale, .question-list.stale { opacity: .58 }
-.model-workspace { width: min(672px, 100%); min-height: 0; display: flex; flex: 1; flex-direction: column; margin: 0 auto }
+.model-workspace { width: min(960px, 100%); min-height: 100%; display: flex; flex-direction: column; margin: 0 auto; padding-bottom: 24px }
 .workflow-card { flex: 0 0 auto; margin: 12px 16px 0; padding: 0 0 4px; text-align: center }
 .workflow-card.toy { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 24px 16px 32px }
 .workflow-head { display:flex; align-items:center; justify-content:center; gap:12px }
@@ -370,7 +370,10 @@ label:has(> select:disabled)::after { opacity: .4 }
 .chat-entry.user .chat-message { border-bottom-right-radius: 4px; background: #2a2c2f }
 .chat-entry.agent .chat-message { border-bottom-left-radius: 4px }
 .chat-entry.pending { align-items: center }
+.chat-entry.pending { flex-direction: column; align-items: stretch; gap: 6px }
 .chat-entry.pending .river-activity { max-width: 100%; flex: 1; margin: 0 }
+/* Streaming is the visible answer, not hidden reasoning, so it uses the finished-message treatment. */
+.chat-streaming { max-width: 100%; border-bottom-left-radius: 4px }
 .chat-pending { width: 100%; display: flex; align-items: center; gap: 6px }
 .chat-pending > button { min-height: 32px; flex: 0 0 auto; background: transparent; color: var(--muted); padding: 0 8px; font-size: 9px }
 .markdown-message > :first-child { margin-top: 0 }
@@ -450,7 +453,7 @@ label:has(> select:disabled)::after { opacity: .4 }
   .river-below { max-height: 52% }
   .toggle { padding: 0 9px }
   .toggle .ui-icon { display: none }
-  .river-toolbar .stage-switcher { left: 82px; right: 8px; justify-content: flex-end; transform: none; overflow: hidden }
+  .river-toolbar .stage-switcher { left: 82px; right: 76px; justify-content: center; transform: none; overflow: hidden }
   .stage-switcher button { gap: 4px; padding-inline: 5px; font-size: 9px }
   .stage-switcher > b { width: 14px; flex: 0 0 14px }
   .agent-tools { right: 6px }
@@ -499,7 +502,6 @@ label:has(> select:disabled)::after { opacity: .4 }
 .question-actions button { min-height: 32px; border-radius: 7px; background: rgba(255,255,255,.045); padding: 0 9px; color: var(--muted-strong); font-size: 9px }
 .question-stale-note { display: block; margin: 6px 0 8px; color: #e8c07a; font-size: 9px; line-height: 1.4 }
 
-@keyframes model-pulse { 50% { opacity:.5 } }
 .agent-drawer-banner { margin: 8px 12px; padding: 8px 10px; border-radius: 9px; background: rgba(210,154,58,.12); border: 1px solid rgba(210,154,58,.22); color: #e8c07a; font-size: 11px; display: flex; align-items: center; gap: 6px }
 .pending-outcome { margin: 8px 12px; padding: 10px; border-radius: 10px; background: #191919; border: 1px solid var(--line-strong); display: grid; gap: 8px }
 .pending-outcome b { font-size: 11px; display: block }
@@ -531,18 +533,19 @@ label:has(> select:disabled)::after { opacity: .4 }
 .observed .fact-list.compact { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line) }
 .river-empty .primary { margin-top: 14px }
 .model-build-report { width: min(440px, 100%); flex: 0 0 auto; margin: 12px auto 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); text-align: left }
-.model-build-report-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11px; font-weight: 590 }
-.model-build-report-head small { color: var(--accent); font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em }
+.model-build-report .river-activity.compact { margin-top: 0; padding: 0; background: none }
+.model-build-head { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 11px; font-weight: 590 }
+.model-build-head i { width: 15px; height: 15px; flex: 0 0 15px; display: grid; place-items: center; border-radius: 50%; background: var(--good); color: #17211e; font-size: 9px; font-style: normal }
+.model-build-report.failed .model-build-head { color: #e8c07a }
+.model-build-report.failed .model-build-head i { background: #d29a3a }
 .model-build-report ol { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none }
 .model-build-report li { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 10px; line-height: 1.35 }
 .model-build-report li i { width: 13px; height: 13px; flex: 0 0 13px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: transparent; font-size: 8px; font-style: normal }
 .model-build-report li.done { color: var(--muted-strong) }
 .model-build-report li.done i { border-color: var(--good); background: var(--good); color: #17211e }
-.model-build-report li.active { color: var(--ink) }
-.model-build-report li.active i { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(255,255,255,.06); animation: model-pulse 1.2s ease-in-out infinite }
 .model-build-report li.failed { color: #e8c07a }
 .model-build-report li.failed i { border-color: #d29a3a; color: #d29a3a }
-.decision-model { width: min(900px, calc(100% - 24px)); margin: 14px auto; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
+.decision-model { width: min(900px, calc(100% - 24px)); margin: 14px auto 24px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
 .model-preview.stale { opacity:.72 }.model-preview.stale .decision-model { border-style:dashed }
 .decision-model>header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid var(--line) }
 .decision-model h2 { max-width: 650px; margin: 4px 0 0; font-size: 17px; line-height: 1.25; text-wrap: balance }

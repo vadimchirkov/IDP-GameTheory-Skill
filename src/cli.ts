@@ -57,7 +57,7 @@ if (!path) {
   if (isDecisionModel(parsed)) {
     const run = runDecision(parsed, trials, seed);
     if (visualMode) await saveVisual(generateDecisionReport(parsed, run));
-    else console.log(JSON.stringify({ recommendedOptionId: run.recommendedOptionId, recommendation: run.recommendation, options: run.options, stress: run.stress }, null, 2));
+    else console.log(JSON.stringify({ recommendedOptionId: run.recommendedOptionId, recommendation: run.recommendation, options: run.options, stress: run.stress, ...(run.jointEffects ? { jointEffects: run.jointEffects } : {}) }, null, 2));
     process.exit(0);
   }
   if (isPolymarket(parsed) || isStochasticProcess(parsed)) {

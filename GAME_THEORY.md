@@ -30,5 +30,5 @@ operations rather than universal-engine concepts.
 conditioning primitive. New games should define their own world type, simulation
 callback, observation likelihood, and summaries instead of extending this schema.
 
-The research catalogue in `DYNAMIC_MODELS.md` is background material, not a list of
-implemented engine features.
+The mechanisms above are the implemented ones. Background research notes are kept
+outside the repository and describe candidates, not engine features.

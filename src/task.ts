@@ -95,6 +95,7 @@ export interface TaskAnalysis {
     driver: { factorId: string; correlation: number };
     stress: DecisionRun["stress"];
     failureBox?: DecisionRun["failureBox"];
+    jointEffects?: DecisionRun["jointEffects"];
   };
   report: string;
   winPct: Record<string, number>;
@@ -120,6 +121,8 @@ export interface TaskState {
   situation: string;
   facts: readonly Fact[];
   openQuestions: readonly OpenQuestion[];
+  /** Prompts the user has dismissed. A later suggestion restating one must not resurrect it. */
+  dismissedQuestions?: readonly string[];
   /** Revision for which the current questions were generated. */
   questionsRevision?: number;
   /** Public sources used to fill model context; excerpts are bounded and treated as untrusted data. */
@@ -219,6 +222,9 @@ export type TaskReply =
 
 export const taskCategory = categoryTypes<TaskCommand, TaskReply>(CategoryId("scenario-task"));
 
+/** Questions are matched by their text, so a reworded restatement of a dismissed question can return. */
+const questionKey = (prompt: string) => prompt.trim().toLowerCase().replace(/\s+/g, " ");
+
 const initialTask = (id = ""): TaskState => ({ id, status: "new", title: "", situation: "", facts: [], openQuestions: [], researchSources: [], messages: [], revision: 0, analyses: [] });
 const titleFrom = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 72) || "New situation";
 const legacyId = (prefix: string, now: string, index: number) => `${prefix}-${index}-${now}`;
@@ -277,7 +283,15 @@ export function applyTaskEvent(state: TaskState, event: TaskEvent): TaskState {
     case "FactEdited": return { ...state, facts: state.facts.map((fact) => fact.id === event.factId ? { ...fact, text: event.text, source: "user" } : fact), revision: event.revision, updatedAt: event.now };
     case "FactRemoved": return { ...state, facts: state.facts.filter((fact) => fact.id !== event.factId), revision: event.revision, updatedAt: event.now };
     case "QuestionsSuggested": return { ...state, openQuestions: event.questions, questionsRevision: event.revision ?? state.revision, updatedAt: event.now };
-    case "QuestionDismissed": return { ...state, openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId), updatedAt: event.now };
+    case "QuestionDismissed": {
+      const dismissed = state.openQuestions.find((question) => question.id === event.questionId);
+      return {
+        ...state,
+        openQuestions: state.openQuestions.filter((question) => question.id !== event.questionId),
+        ...(dismissed ? { dismissedQuestions: [...new Set([...(state.dismissedQuestions ?? []), questionKey(dismissed.prompt)])].slice(-40) } : {}),
+        updatedAt: event.now,
+      };
+    }
     case "ResearchRecorded": return { ...state, researchSources: event.sources, researchRevision: event.revision ?? state.revision, updatedAt: event.now };
     // ponytail: keep a bounded journal until long conversations justify summarization.
     case "MessageAdded": return { ...state, messages: [...(state.messages ?? []), event.message].slice(-200), updatedAt: event.message.createdAt };
@@ -390,8 +404,17 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
         if (!target) return rejected(state, "That fact no longer exists");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "FactRemoved", factId: command.factId, revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
-      case "SuggestQuestions":
-        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions: command.questions.slice(0, 5), revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
+      case "SuggestQuestions": {
+        // The agent restates its open questions every turn. Without this, dismissing one only hid it
+        // until the next reply, and an unchanged question got a new id and lost its place in the list.
+        const dismissed = new Set(state.dismissedQuestions ?? []);
+        const known = new Map(state.openQuestions.map((question) => [questionKey(question.prompt), question.id]));
+        const questions = command.questions
+          .filter((question) => !dismissed.has(questionKey(question.prompt)))
+          .map((question) => ({ ...question, id: known.get(questionKey(question.prompt)) ?? question.id }))
+          .slice(0, 5);
+        return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionsSuggested", questions, revision: state.revision, now: command.now }), { tag: "Accepted", revision: state.revision });
+      }
       case "DismissQuestion":
         if (!state.openQuestions.some((question) => question.id === command.questionId)) return rejected(state, "That question is already gone");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "QuestionDismissed", questionId: command.questionId, now: command.now }), { tag: "Accepted", revision: state.revision });
@@ -408,6 +431,9 @@ export const taskAggregate: Aggregate<TaskCommand, TaskReply, TaskEvent, TaskSta
       case "SetTitle": {
         const title = command.title.trim().slice(0, 72);
         if (!title) return rejected(state, "The title is empty");
+        // The agent proposes a title on every turn. Renaming the situation under the user each time is
+        // churn, so only the truncated prose placeholder from CreateTask is ever replaced.
+        if (state.title.trim() && state.title !== titleFrom(state.situation)) return rejected(state, "The situation is already named");
         return andReply(persist<TaskEvent, TaskReply>({ tag: "TitleSet", title, now: command.now }), { tag: "Accepted", revision: state.revision });
       }
       case "SetModel": {

@@ -70,7 +70,7 @@ const interactionRun = interactionRuns.at(-1)!;
 assert.equal(interactionRun.stress.reversed, false, "one-factor stress misses a joint corner failure");
 assert.ok(interactionRun.failureBox && interactionRun.failureBox.rules.length === 2 && interactionRun.failureBox.support >= 50 && interactionRun.failureBox.lift >= 1.5, "a two-factor failure region must pass the holdout quality gate");
 assert.ok(interactionRuns.every((run) => run.failureBox?.rules.every((rule) => rule.side === "high") && run.failureBox.coverage >= 0.8), "failure-box direction and coverage remain stable across seeds");
-assert.ok(generateDecisionReport(interactionModel, interactionRun).includes("Where the recommendation changes"), "the report explains a validated failure box without adding another result view");
+assert.ok(generateDecisionReport(interactionModel, interactionRun).includes("Choose Growth plan instead when"), "a validated failure region reads as the action it implies, inside the one section about changing the recommendation");
 const paddedModel: DecisionModel = {
   schemaVersion: 1, adapter: "decision", situation: "One driver, padded with an irrelevant factor", question: "Which plan?",
   objective: { label: "Value", direction: "maximize" },
@@ -137,7 +137,12 @@ const scenario: ScenarioModel = {
   payoffs: { T: [5, 5], R: [3, 3], P: [1, 1], S: [0, 0] },
   structure: { w: [0.9, 0.9], noise: [0, 0] },
 };
-assert.equal(Value.Check(contextReplyOutputSchema, { kind: "answer", message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] }), true, "context turns can request bounded public research");
+const contextTurn = { kind: "answer" as const, message: "Проверю открытые источники.", suggestions: ["Show me the strongest source", "What remains uncertain?"], contextNote: null, observation: null, title: "Проверка", researchQueries: [{ query: "public market data", field: "payoffs", purpose: "Ground market conditions" }], questions: [] };
+assert.equal(Value.Check(contextReplyOutputSchema, contextTurn), true, "context turns can request bounded public research");
+// One assistant answers, files context and reports outcomes, so all three must validate on one contract.
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "context", contextNote: "The supplier confirmed a 12-week lead time." }), true, "the same reply can distil a standalone context fact");
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "outcome", observation: { cooperation: 0.2, winner: "Shark", regime: "conflict", playerCooperation: [{ name: "Mark", rate: 0.1 }] } }), true, "the same reply can report an observed outcome for reweighting");
+assert.equal(Value.Check(contextReplyOutputSchema, { ...contextTurn, kind: "river" }), false, "the merged chat contract rejects unknown reply kinds");
 const providerDecisionSchema = toolCompatibleSchema(decisionDraftSchema) as unknown as Record<string, unknown>;
 assert.equal(JSON.stringify(providerDecisionSchema).includes("maxItems"), false, "provider tool schemas omit unsupported maxItems hints");
 assert.equal(JSON.stringify(decisionDraftSchema).includes("maxItems"), true, "local structured-output validation keeps array bounds");
@@ -161,7 +166,7 @@ for (let stage = 0; stage < 6; stage++) assert.equal(riverNodes.filter((node) =>
 const labeledRiver = injectWorldLabels(generateWorldsVisual(scenario, 40, 7, analysis), { [riverNodes[0]!.id]: { short: "Начало проверки", detail: "Все проверяемые варианты начинаются здесь." } });
 assert.ok(labeledRiver.includes('"short":"Начало проверки"'), "context labels are injected into the standalone report");
 assert.ok(labeledRiver.includes("river:selection"), "embedded river reports selected worlds to the agent workspace");
-assert.ok(labeledRiver.includes('id="zoom-in"') && labeledRiver.includes("addEventListener('wheel'"), "river reports expose mouse and button zoom controls");
+assert.ok(labeledRiver.includes('id="zoom-in"') && labeledRiver.includes("if(!event.ctrlKey&&!event.metaKey)return"), "river reports keep normal scrolling and reserve modified wheel input for zoom");
 const firstWorld = analysis.trials[0];
 assert.ok(firstWorld);
 const replayedWorld = replayScenarioWorld(scenario, 7, 0, firstWorld.digest.pivotalPair);
@@ -182,6 +187,11 @@ const uncertain = { id: "B:C", participants: ["B", "C"], probability: [0.5, 0.5]
 const withoutFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [uncertain] }, new Rng(7));
 const withFixed = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [1, 1], weight: [1, 1] }, uncertain] }, new Rng(7));
 assert.deepEqual(withFixed.interactions.find((interaction) => interaction.id === uncertain.id), withoutFixed.interactions[0], "fixed interactions do not shift later random samples");
+const reorderedTopology = sampleTopology({ nodes: ["A", "B", "C"], interactions: [uncertain, { id: "A:B", participants: ["A", "B"], probability: [0.4, 0.4], weight: [0, 1] }] }, new Rng(7));
+const canonicalTopology = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "A:B", participants: ["A", "B"], probability: [0.4, 0.4], weight: [0, 1] }, uncertain] }, new Rng(7));
+assert.deepEqual(reorderedTopology, canonicalTopology, "uncertain interactions have ID-derived streams and canonical order");
+const hyperedge = sampleTopology({ nodes: ["A", "B", "C"], interactions: [{ id: "coalition", participants: ["A", "B", "C"], probability: [1, 1], weight: [2, 2] }] }, new Rng(3));
+assert.deepEqual(hyperedge.interactions[0], { id: "coalition", participants: ["A", "B", "C"], weight: 2 }, "topology executes a genuine three-participant hyperedge");
 const processSpec: StochasticProcessSpec = {
   schemaVersion: 1,
   adapter: "stochastic-process",
@@ -264,6 +274,21 @@ const researched = await taskState();
 assert.equal(researched.researchSources?.[0]?.title, "Public report", "public research provenance is persisted with the task");
 assert.equal(researched.researchRevision, researchRevision, "public research is stamped with its context revision");
 assert.equal(researched.revision, researchRevision, "recording sources alone does not stale a simulation");
+
+// The agent proposes a title every turn; only the prose placeholder from CreateTask may be replaced.
+assert.equal(created.title, "Two suppliers meet every quarter", "a new situation is named from its own prose until the agent reads it");
+await task.runtime.ask(tid, { tag: "SetTitle", title: "Quarterly supplier standoff", now: "2026-01-01T00:00:00Z" }, taskCategory);
+assert.equal((await taskState()).title, "Quarterly supplier standoff", "the first agent title replaces the placeholder");
+await task.runtime.ask(tid, { tag: "SetTitle", title: "Something else entirely", now: "2026-01-01T00:00:01Z" }, taskCategory);
+assert.equal((await taskState()).title, "Quarterly supplier standoff", "later turns cannot rename the situation under the user");
+
+// The assistant restates its open questions on every turn, so dismissing one has to survive the next reply.
+await task.runtime.ask(tid, { tag: "SuggestQuestions", questions: [{ id: "q-1", prompt: "How long is the contract?" }, { id: "q-2", prompt: "Who else supplies them?" }], now: "2026-01-01T00:00:01Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "DismissQuestion", questionId: "q-2", now: "2026-01-01T00:00:02Z" }, taskCategory);
+await task.runtime.ask(tid, { tag: "SuggestQuestions", questions: [{ id: "q-3", prompt: "How long is the contract?" }, { id: "q-4", prompt: "  who ELSE supplies them?  " }, { id: "q-5", prompt: "What is the budget?" }], now: "2026-01-01T00:00:03Z" }, taskCategory);
+const restated = (await taskState()).openQuestions;
+assert.deepEqual(restated.map((question) => question.prompt), ["How long is the contract?", "What is the budget?"], "a dismissed question stays dismissed when the agent restates it");
+assert.equal(restated[0]?.id, "q-1", "an unchanged question keeps its id so the list does not jump");
 
 const sit = createSingleRuntime(taskAggregate, taskEventCodec, taskStateCodec);
 const sitId = EntityId("situation-edit");

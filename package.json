@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && pnpm app:build",
-    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts && tsx src/forecast-selfcheck.ts",
+    "test": "tsx src/selfcheck.ts && tsx src/verify-pack.ts && tsx src/abc.ts && tsx src/forecast-selfcheck.ts && tsx src/joint-effects-spike.ts",
     "test:full": "pnpm test && pnpm forecast:fast",
     "scenario": "tsx src/cli.ts",
     "forecast": "tsx src/forecast-cli.ts",
@@ -19,6 +19,7 @@
     "bench:engine": "tsx src/bench-engine.ts",
     "bench:live": "node scripts/live-bench.mjs",
     "bench:fast-forecast": "node --import tsx scripts/fast-gate.mjs",
+    "bench:joint-effects": "tsx src/joint-effects-spike.ts --visual",
     "bench:all": "pnpm bench:live && pnpm bench:engine && pnpm bench:fast-forecast && pnpm cross:validate",
     "cross:validate": "tsx src/cross_validate.ts && python3 scripts/cross_validate.py"
   },
